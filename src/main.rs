@@ -37,8 +37,8 @@ fn main() {
     let (max_w, max_h) = cells.xy();
     let mut w_info = WinInfo::new(max_w, max_h);
     loop {
-        process_input(&mut w_info, &mut kbd);
         show_csv(&mut cells, &mut w_info);
+        process_input(&mut w_info, &mut kbd);
     }
 }
 
@@ -97,24 +97,26 @@ fn process_input(w_info: &mut WinInfo, kbd: &mut File) {
     if ev.type_ == EV_KEY {
         if ev.value == KEY_DEPRESSED {
             match ev.code {
-                KEY_LEFTCTRL | KEY_RIGHTCTRL => w_info.scroll_speed = w_info.end_cell,
-                KEY_LEFT => w_info.w_offset_left(w_info.scroll_speed),
-                KEY_RIGHT => w_info.w_offset_right(w_info.scroll_speed),
-                KEY_UP => w_info.h_offset_up(w_info.scroll_speed),
-                KEY_DOWN => w_info.h_offset_down(w_info.scroll_speed),
+                KEY_LEFTCTRL | KEY_RIGHTCTRL => w_info.page(),
+                KEY_LEFTSHIFT | KEY_RIGHTSHFIT => w_info.shift(),
+                KEY_LEFT => w_info.w_offset_left(),
+                KEY_RIGHT => w_info.w_offset_right(),
+                KEY_UP => w_info.h_offset_up(),
+                KEY_DOWN => w_info.h_offset_down(),
                 _ => (),
             }
         } else if ev.value == KEY_REPEAT {
             match ev.code {
-                KEY_LEFT => w_info.w_offset_left(w_info.scroll_speed),
-                KEY_RIGHT => w_info.w_offset_right(w_info.scroll_speed),
-                KEY_UP => w_info.h_offset_up(w_info.scroll_speed),
-                KEY_DOWN => w_info.h_offset_down(w_info.scroll_speed),
+                KEY_LEFT => w_info.w_offset_left(),
+                KEY_RIGHT => w_info.w_offset_right(),
+                KEY_UP => w_info.h_offset_up(),
+                KEY_DOWN => w_info.h_offset_down(),
                 _ => (),
             }
         } else if ev.value == KEY_RELEASED {
             match ev.code {
-                KEY_LEFTCTRL | KEY_RIGHTCTRL => w_info.scroll_speed = 1,
+                KEY_LEFTCTRL | KEY_RIGHTCTRL => w_info.unpage(),
+                KEY_LEFTSHIFT | KEY_RIGHTSHFIT => w_info.unshift(),
                 _ => (),
             }
         }
@@ -142,6 +144,10 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // t_row corresponds to the terminal's row
             let mut row = h_offset;
             let mut t_row = 0usize;
+
+            let orig_idx = w_offset;
+            let mut idx = orig_idx;
+
             let widths = cells.widths.clone();
             for _ in 0..rows {
                 /*
@@ -173,10 +179,10 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                         line = "XXXX| EOF".to_string();
                     }
                 }
-                let orig_idx = w_offset;
-                let mut idx = orig_idx;
                 let row_len = v_cols.len();
-                if row_len > 0 && idx < row_len{
+
+                if row_len > 0 && idx < row_len {
+                    idx = orig_idx;
                     loop {
                         if idx < row_len - 1 {
                             let width = widths[idx];
@@ -201,6 +207,13 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                 cell = format!("| {:<width$} ",
                                     contents, width = width);
                             }
+
+                            if w_info.w_pointer == idx &&
+                               w_info.h_pointer == row {
+                                let mut sub = "\x1b[7m".to_string() + &cell + "\x1b[0;4m";
+                                cell = sub;
+                            }
+                           
                             line += &cell;
                             idx += 1;
                         } else {
@@ -208,13 +221,13 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                         }
                     }
 
-                    w_info.set_end_cell(idx - orig_idx);
                     write!(out, "\x1b[4m{line}\x1b[0m").unwrap();
                     row += 1;
                     t_row += 1;
                 }
             }
-
+            w_info.set_x_page(idx - orig_idx);
+            w_info.set_y_page(row - h_offset);
             write!(out, "\x1b[{};1H\x1b[2K", t_row+1).unwrap();
             out.flush().unwrap();
         }
@@ -273,6 +286,12 @@ impl Cells {
     }
 }
 
+enum ScrollMode {
+    Cell,
+    Col,
+    Page,
+}
+
 struct WinInfo {
     width: usize,
     height: usize,
@@ -281,8 +300,11 @@ struct WinInfo {
     max_w: usize,
     max_h: usize,
     was_changed: bool,
-    end_cell: usize,
-    scroll_speed: usize,
+    mode: ScrollMode,
+    w_pointer: usize,
+    h_pointer: usize,
+    x_page: usize,
+    y_page: usize,
 }
 
 impl WinInfo {
@@ -295,8 +317,11 @@ impl WinInfo {
             max_w: max_w,
             max_h: max_h,
             was_changed: false,
-            end_cell: 0usize,
-            scroll_speed: 1usize,
+            mode: ScrollMode::Cell,
+            w_pointer: 0usize,
+            h_pointer: 1usize,
+            x_page: 0usize,
+            y_page: 0usize,
         }
     }
 
@@ -314,8 +339,28 @@ impl WinInfo {
         return false;
     }
 
-    fn set_end_cell(&mut self, end: usize) {
-        self.end_cell = end;
+    fn set_x_page(&mut self, page: usize) {
+        self.x_page = page;
+    }
+
+    fn set_y_page(&mut self, page: usize) {
+        self.y_page = page;
+    }
+
+    fn page(&mut self) {
+        self.mode = ScrollMode::Page;
+    }
+
+    fn unpage(&mut self) {
+        self.mode = ScrollMode::Cell;
+    }
+
+    fn shift(&mut self) {
+        self.mode = ScrollMode::Col;
+    }
+
+    fn unshift(&mut self) {
+        self.mode = ScrollMode::Cell;
     }
 
     fn update_w_h(&mut self, cur_w: usize, cur_h: usize) {
@@ -327,31 +372,163 @@ impl WinInfo {
         self.was_changed = false;
     }
 
-    fn h_offset_up(&mut self, val: usize) {
-        if self.h_offset > 0 {
-            self.h_offset = self.h_offset.saturating_sub(val);
-            self.was_changed = true;
+    fn h_offset_up(&mut self) {
+        match self.mode {
+            ScrollMode::Cell => self.dec_h_pointer(),
+            ScrollMode::Col => self.unshift_page_h(),
+            ScrollMode::Page => self.dec_page_h(),
+        }
+        self.was_changed = true;
+    }
+
+    fn h_offset_down(&mut self) {
+        match self.mode {
+            ScrollMode::Cell => self.inc_h_pointer(),
+            ScrollMode::Col => self.shift_page_h(),
+            ScrollMode::Page => self.inc_page_h(),
+        }
+        self.was_changed = true;
+    }
+
+    fn w_offset_left(&mut self) {
+        match self.mode {
+            ScrollMode::Cell => self.dec_w_pointer(),
+            ScrollMode::Col => self.unshift_page_w(),
+            ScrollMode::Page => self.dec_page_w(),
+        }
+        self.was_changed = true;
+    }
+
+    fn w_offset_right(&mut self) {
+        match self.mode {
+            ScrollMode::Cell => self.inc_w_pointer(),
+            ScrollMode::Col => self.shift_page_w(),
+            ScrollMode::Page => self.inc_page_w(),
+        }
+        self.was_changed = true;
+    }
+
+    fn dec_h_pointer(&mut self) {
+        if self.h_pointer > 1 {
+            if self.h_pointer - 1 % self.y_page == 0 {
+                self.h_offset = self.h_offset.saturating_sub(1);
+            }
+            self.h_pointer = self.h_pointer.saturating_sub(1);
         }
     }
 
-    fn h_offset_down(&mut self, val: usize) {
-        if self.h_offset < self.max_h {
-            self.h_offset += val;
-            self.was_changed = true;
+    fn inc_h_pointer(&mut self) {
+        if self.h_pointer < self.max_h - 1 {
+            self.h_pointer += 1;
+        }
+        if self.h_pointer - 1 % self.y_page == 0 {
+            self.h_offset += 1;
         }
     }
 
-    fn w_offset_left(&mut self, val: usize) {
+    fn dec_page_h(&mut self) {
+        if self.h_offset.saturating_sub(self.y_page) > 1 {
+            self.h_offset = self.h_offset.saturating_sub(self.y_page);
+        } else {
+            self.h_offset = 0;
+        }
+        if self.h_pointer.saturating_sub(self.y_page) > 1 {
+            self.h_pointer = self.h_pointer.saturating_sub(self.y_page);
+        } else {
+            self.h_pointer = 1;
+        }
+    }
+
+    fn inc_page_h(&mut self) {
+        if self.h_offset + self.y_page < self.max_h {
+            self.h_offset += self.y_page;
+        } else {
+            self.h_offset = self.max_h - 1;
+        }
+        if self.h_pointer + self.y_page < self.max_h {
+            self.h_pointer += self.y_page;
+        } else {
+            self.h_pointer = self.max_h - 1;
+        }
+    }
+
+    fn unshift_page_h(&mut self) {
+        if self.h_offset > 1 {
+            self.h_offset = self.h_offset.saturating_sub(1);
+        }
+        if self.h_pointer > 1 {
+            self.h_pointer = self.h_pointer.saturating_sub(1);
+        }
+    }
+
+    fn shift_page_h(&mut self) {
+        if self.h_offset < self.max_h - 1 {
+            self.h_offset += 1;
+        }
+        if self.h_pointer < self.max_h - 1 {
+            self.h_pointer += 1;
+        }
+    } 
+
+    fn dec_w_pointer(&mut self) {
+        if self.w_pointer > 0 {
+            if self.w_pointer % self.x_page == 0 {
+                self.w_offset = self.w_offset.saturating_sub(1);
+            }
+            self.w_pointer = self.w_pointer.saturating_sub(1);
+        }
+    }
+
+    fn inc_w_pointer(&mut self) {
+        if self.w_pointer < self.max_w - 1 {
+            self.w_pointer += 1;
+        }
+        if self.w_pointer % self.x_page == 0 {
+            self.w_offset += 1;
+        }
+    }
+
+    fn dec_page_w(&mut self) {
+        if self.w_offset.saturating_sub(self.x_page) > 0 {
+            self.w_offset = self.w_offset.saturating_sub(self.x_page);
+        } else {
+            self.w_offset = 0;
+        }
+        if self.w_pointer.saturating_sub(self.x_page) > 0 {
+            self.w_pointer = self.w_pointer.saturating_sub(self.x_page);
+        } else {
+            self.w_pointer = 0;
+        }
+    }
+
+    fn inc_page_w(&mut self) {
+        if self.w_offset + self.x_page < self.max_w {
+            self.w_offset += self.x_page;
+        } else {
+            self.w_offset = self.max_w - 1;
+        }
+        if self.w_pointer + self.x_page < self.max_w {
+            self.w_pointer += self.x_page;
+        } else {
+            self.w_pointer = self.max_w - 1;
+        }
+    }
+
+    fn unshift_page_w(&mut self) {
         if self.w_offset > 0 {
-            self.w_offset = self.w_offset.saturating_sub(val);
-            self.was_changed = true;
+            self.w_offset = self.w_offset.saturating_sub(1);
+        }
+        if self.w_pointer > 0 {
+            self.w_pointer = self.w_pointer.saturating_sub(1);
         }
     }
 
-    fn w_offset_right(&mut self, val: usize) {
-        if self.w_offset < self.max_w {
-            self.w_offset += val;
-            self.was_changed = true;
+    fn shift_page_w(&mut self) {
+        if self.w_offset < self.max_w - 1 {
+            self.w_offset += 1;
+        }
+        if self.w_pointer < self.max_h - 1 {
+            self.h_pointer += 1;
         }
     }
 }
