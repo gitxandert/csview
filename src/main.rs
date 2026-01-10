@@ -6,7 +6,11 @@ use std::{
 use libc::{
     self, c_int, ioctl, winsize, STDOUT_FILENO, TIOCGWINSZ,
     termios, tcgetattr, tcsetattr, cfmakeraw, TCSANOW,
+    input_event
 };
+
+mod keycodes;
+use crate::keycodes::*;
 
 fn main() {
     let mut cells: Cells = match load_csv() {
@@ -21,10 +25,19 @@ fn main() {
     raw_mode(true);
     set_w_h();
 
+    let mut kbd = match File::open("/dev/input/event3") {
+        Ok(dev) => dev,
+        Err(e) => {
+            raw_mode(false);
+            eprintln!("{e}");
+            return;
+        }
+    };
+
     let (max_w, max_h) = cells.xy();
     let mut w_info = WinInfo::new(max_w, max_h);
     loop {
-        process_input(&mut w_info);
+        process_input(&mut w_info, &mut kbd);
         show_csv(&mut cells, &mut w_info);
     }
 }
@@ -76,34 +89,37 @@ fn load_csv() -> Result<Cells, io::Error> {
     Ok(cells)
 }
 
-fn process_input(w_info: &mut WinInfo) {
-    let c = read_char().unwrap_or(0);
-    match c {
-        27 => {
-            let c2 = read_char().unwrap_or(0);
-            if c2 == b'[' {
-                let c3 = read_char().unwrap_or(0);
-                match c3 {
-                    b'D' => { // left
-                        w_info.w_offset_left(1);
-                    }
-                    b'C' => { // right
-                        w_info.w_offset_right(1);
-                    }
-                    b'A' => { // up
-                        w_info.h_offset_up(1);
-                    }
-                    b'B' => { // down
-                        w_info.h_offset_down(1);
-                    }
-                    _ => (),
-                }
+fn process_input(w_info: &mut WinInfo, kbd: &mut File) {
+    let ev = match read_char(kbd) {
+        Some(event) => event,
+        None => return,
+    };
+    if ev.type_ == EV_KEY {
+        if ev.value == KEY_DEPRESSED {
+            match ev.code {
+                KEY_LEFTCTRL | KEY_RIGHTCTRL => w_info.scroll_speed = w_info.end_cell,
+                KEY_LEFT => w_info.w_offset_left(w_info.scroll_speed),
+                KEY_RIGHT => w_info.w_offset_right(w_info.scroll_speed),
+                KEY_UP => w_info.h_offset_up(w_info.scroll_speed),
+                KEY_DOWN => w_info.h_offset_down(w_info.scroll_speed),
+                _ => (),
+            }
+        } else if ev.value == KEY_REPEAT {
+            match ev.code {
+                KEY_LEFT => w_info.w_offset_left(w_info.scroll_speed),
+                KEY_RIGHT => w_info.w_offset_right(w_info.scroll_speed),
+                KEY_UP => w_info.h_offset_up(w_info.scroll_speed),
+                KEY_DOWN => w_info.h_offset_down(w_info.scroll_speed),
+                _ => (),
+            }
+        } else if ev.value == KEY_RELEASED {
+            match ev.code {
+                KEY_LEFTCTRL | KEY_RIGHTCTRL => w_info.scroll_speed = 1,
+                _ => (),
             }
         }
-        _ => (), // ignore
     }
 }
-
 
 fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
     unsafe {
@@ -157,7 +173,8 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                         line = "XXXX| EOF".to_string();
                     }
                 }
-                let mut idx = w_offset;
+                let orig_idx = w_offset;
+                let mut idx = orig_idx;
                 let row_len = v_cols.len();
                 if row_len > 0 && idx < row_len{
                     loop {
@@ -189,7 +206,9 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                         } else {
                             break;
                         }
-                    } 
+                    }
+
+                    w_info.set_end_cell(idx - orig_idx);
                     write!(out, "\x1b[4m{line}\x1b[0m").unwrap();
                     row += 1;
                     t_row += 1;
@@ -262,6 +281,8 @@ struct WinInfo {
     max_w: usize,
     max_h: usize,
     was_changed: bool,
+    end_cell: usize,
+    scroll_speed: usize,
 }
 
 impl WinInfo {
@@ -274,6 +295,8 @@ impl WinInfo {
             max_w: max_w,
             max_h: max_h,
             was_changed: false,
+            end_cell: 0usize,
+            scroll_speed: 1usize,
         }
     }
 
@@ -289,6 +312,10 @@ impl WinInfo {
         }
 
         return false;
+    }
+
+    fn set_end_cell(&mut self, end: usize) {
+        self.end_cell = end;
     }
 
     fn update_w_h(&mut self, cur_w: usize, cur_h: usize) {
@@ -404,11 +431,15 @@ fn set_w_h() {
 }
 
 #[inline(always)]
-fn read_char() -> Option<u8> {
-    let mut buf = [0u8; 1];
-    match std::io::stdin().read(&mut buf) {
-        Ok(0) => None,
-        Ok(_) => Some(buf[0]),
+fn read_char(kbd: &mut File) -> Option<input_event> {
+    let mut buf = [0u8; mem::size_of::<input_event>()];
+    match kbd.read_exact(&mut buf) {
         Err(_) => None,
+        Ok(_) => {
+            let ev = unsafe { 
+                std::ptr::read_unaligned(buf.as_ptr() as *const input_event)
+            };
+            Some(ev)
+        }
     }
 }
