@@ -1,0 +1,2 @@
+cargo build --release
+sudo install -m 0755 target/release/csview /usr/local/bin/csview
