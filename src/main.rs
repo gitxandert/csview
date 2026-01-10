@@ -65,29 +65,34 @@ fn load_csv() -> Result<Vec<String>, io::Error> {
 }
 
 fn process_input(c_info: &mut CellsInfo) {
-    match read_char() {
-        27 => {
-            let c = read_char();
-            if c == b'[' {
-                match read_char() {
-                    b'D' => { // left
-                        c_info.w_offset_left(1);
+    if let Some(c) = read_char() {
+        match c {
+            27 => {
+                if let Some(c2) = read_char() {
+                    if c2 == b'[' {
+                        if let Some(c3) = read_char() {
+                            match c3 {
+                                b'D' => { // left
+                                    c_info.w_offset_left(1);
+                                }
+                                b'C' => { // right
+                                    c_info.w_offset_right(1);
+                                }
+                                b'A' => { // up
+                                    c_info.h_offset_up(1);
+                                }
+                                b'B' => { // down
+                                    c_info.h_offset_down(1);
+                                }
+                                _ => (),
+                            }
+                        } else {}
                     }
-                    b'C' => { // right
-                        c_info.w_offset_right(1);
-                    }
-                    b'A' => { // up
-                        c_info.h_offset_up(1);
-                    }
-                    b'B' => { // down
-                        c_info.h_offset_down(1);
-                    }
-                    _ => (),
-                }
+                } else {}
             }
+            _ => (), // ignore
         }
-        _ => (), // ignore
-    }
+    } else {}
 }
 
 
@@ -225,6 +230,9 @@ fn raw_mode(switch: bool) {
                 cfmakeraw(&mut raw);
                 //re-enable SIGINT
                 raw.c_lflag |= libc::ISIG;
+                // make reads non-blocking
+                raw.c_cc[libc::VMIN] = 0;
+                raw.c_cc[libc::VTIME] = 1;
                 tcsetattr(fd, TCSANOW, &raw);
             }
             false => {
@@ -283,9 +291,12 @@ fn set_w_h() {
 }
 
 #[inline(always)]
-fn read_char() -> u8 {
+fn read_char() -> Option<u8> {
     let mut buf = [0u8; 1];
-    std::io::stdin().read_exact(&mut buf).unwrap();
-    buf[0]
+    match std::io::stdin().read(&mut buf) {
+        Ok(0) => None,
+        Ok(_) => Some(buf[0]),
+        Err(_) => None,
+    }
 }
 
