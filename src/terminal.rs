@@ -1,6 +1,7 @@
 use std::mem;
 use std::fs::File;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use libc::{
     self, c_int, ioctl, winsize, STDOUT_FILENO, TIOCGWINSZ,
     termios, tcgetattr, tcsetattr, cfmakeraw, TCSANOW,
@@ -45,14 +46,9 @@ impl WinInfo {
         }
     }
 
-    pub fn changed(&mut self, cur_w: usize, cur_h: usize) -> bool {
+    pub fn changed(&mut self) -> bool {
         if self.was_changed {
             self.restore_unchanged();
-            return true;
-        }
-
-        if self.width != cur_w || self.height != cur_h {
-            self.update_w_h(cur_w, cur_h);
             return true;
         }
 
@@ -65,6 +61,26 @@ impl WinInfo {
 
     pub fn set_y_page(&mut self, end: usize, beg: usize) {
         self.y_page = end - beg;
+    }
+
+    // return index of highlighted row;
+    // since the h_pointer is indexing rows, it returns itself
+    pub fn h_pointer_cell(&self) -> usize {
+        self.h_pointer
+    }
+
+    // return approximate location of the cell on screen;
+    // this means adding up the widths of the cells up to the pointer,
+    // plus the length of the row_number at the start of the row,
+    // plus 3 (two spaces and a |)
+    pub fn w_pointer_cell(&self, row_num_len: usize, widths: &Vec<usize>) -> usize {
+        let mut cursor_col = 0usize;
+        let mut idx = self.w_offset;
+        while idx != self.w_pointer {
+            cursor_col += widths[idx];
+            idx += 1;
+        }
+        row_num_len + cursor_col + 3 
     }
 
     pub fn page(&mut self) {
@@ -83,9 +99,10 @@ impl WinInfo {
         self.mode = ScrollMode::Cell;
     }
 
-    pub fn update_w_h(&mut self, cur_w: usize, cur_h: usize) {
+    pub fn set_w_h(&mut self, cur_w: usize, cur_h: usize) {
         self.width = cur_w;
         self.height = cur_h;
+        self.was_changed = true;
     }
 
     pub fn restore_unchanged(&mut self) {
@@ -305,19 +322,37 @@ pub fn raw_mode(switch: bool) {
     }
 }
 
+static GOT_WINCH: AtomicUsize = AtomicUsize::new(0usize);
+static GOT_INT: AtomicBool = AtomicBool::new(false);
+
 extern "C" fn sig_winch(_sig: c_int) {
-    set_w_h();
+    GOT_WINCH.fetch_add(1, Ordering::SeqCst);
 }
 
 extern "C" fn sig_int(_sig: c_int) {
-    raw_mode(false);
-    print!("\r\n");
-    std::process::exit(130);
+    GOT_INT.store(true, Ordering::SeqCst);
 }
 
-extern "C" fn graceful_shutdown(_sig: c_int) {
-    raw_mode(false);
-    print!("\r\n");
+pub fn check_flags(w_info: &mut WinInfo) {
+    let n = GOT_WINCH.swap(0, Ordering::Relaxed);
+    if n > 0 {
+        eprintln!("got winch");
+        set_w_h();
+
+        unsafe {
+            let w = *w_ptr();
+            let h = *h_ptr();
+            w_info.set_w_h(w, h);
+        }
+    }
+
+    if GOT_INT.swap(false, Ordering::SeqCst) {
+        raw_mode(false);
+        let mut out = std::io::stdout();
+        write!(out, "\x1b[H\x1b[2J").unwrap();
+        write!(out, "\x1b[3J").unwrap();
+        std::process::exit(130);
+    }
 }
 
 pub fn install_sig_handlers() {
@@ -325,21 +360,15 @@ pub fn install_sig_handlers() {
         //SIGWINCH
         let mut sa_winch: libc::sigaction = std::mem::zeroed();
         sa_winch.sa_sigaction = sig_winch as usize;
-        sa_winch.sa_flags = 0;
-
         libc::sigemptyset(&mut sa_winch.sa_mask);
-
-        //register
+        sa_winch.sa_flags = 0;
         libc::sigaction(libc::SIGWINCH, &sa_winch, std::ptr::null_mut());
 
         //SIGINT
         let mut sa_int: libc::sigaction = std::mem::zeroed();
         sa_int.sa_sigaction = sig_int as usize;
-        sa_int.sa_flags = 0;
-
         libc::sigemptyset(&mut sa_int.sa_mask);
-
-        //register
+        sa_int.sa_flags = 0;
         libc::sigaction(libc::SIGINT, &sa_int, std::ptr::null_mut());
     }
 }
