@@ -4,7 +4,7 @@ mod terminal;
 
 use crate::csv::{Cells, load_csv, show_csv};
 use crate::input::{find_kbd, process_input};
-use crate::terminal::{WinInfo};
+use crate::terminal::{check_flags, WinInfo};
 
 fn main() {
     let mut cells: Cells = match load_csv() {
@@ -33,6 +33,7 @@ fn main() {
 
     // main loop
     loop {
+        check_flags(&mut w_info);
         show_csv(&mut cells, &mut w_info);
         process_input(&mut w_info, &mut kbd);
     }
