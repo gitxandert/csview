@@ -1,4 +1,6 @@
 use std::mem;
+use std::fs::File;
+use std::io::Write;
 use libc::{
     self, c_int, ioctl, winsize, STDOUT_FILENO, TIOCGWINSZ,
     termios, tcgetattr, tcsetattr, cfmakeraw, TCSANOW,
@@ -345,7 +347,10 @@ pub fn install_sig_handlers() {
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         raw_mode(false);
-        eprintln!("\nPanic: {info}");
+        let panic_info = format!("Panic: {info}");
+        if let Ok(mut log) = File::create("/tmp/csview.log") {
+            log.write_all(panic_info.as_bytes());
+        } else {}
         std::process::exit(130);
     }));
 }
