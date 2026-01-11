@@ -7,9 +7,12 @@ use libc::{
     termios, tcgetattr, tcsetattr, cfmakeraw, TCSANOW,
 };
 
-enum ScrollMode {
+use crate::csv::Cells;
+
+pub enum ScrollMode {
+    Text,
     Cell,
-    Col,
+    Axis,
     Page,
 }
 
@@ -37,7 +40,7 @@ impl WinInfo {
             h_offset: 0usize,
             max_w: row_len - 1,
             max_h: col_len - 1,
-            was_changed: false,
+            was_changed: true,
             mode: ScrollMode::Cell,
             w_pointer: 0usize,
             h_pointer: 1usize,
@@ -48,7 +51,11 @@ impl WinInfo {
 
     pub fn changed(&mut self) -> bool {
         if self.was_changed {
-            self.restore_unchanged();
+            self.was_changed = false;
+            return true;
+        }
+
+        if self.width == 0usize && self.height == 0usize {
             return true;
         }
 
@@ -83,66 +90,67 @@ impl WinInfo {
         row_num_len + cursor_col + 3 
     }
 
-    pub fn page(&mut self) {
-        self.mode = ScrollMode::Page;
-    }
-
-    pub fn unpage(&mut self) {
-        self.mode = ScrollMode::Cell;
-    }
-
-    pub fn shift(&mut self) {
-        self.mode = ScrollMode::Col;
-    }
-
-    pub fn unshift(&mut self) {
-        self.mode = ScrollMode::Cell;
+    pub fn set_mode(&mut self, mode: ScrollMode) {
+        self.mode = mode;
     }
 
     pub fn set_w_h(&mut self, cur_w: usize, cur_h: usize) {
-        self.width = cur_w;
-        self.height = cur_h;
-        self.was_changed = true;
-    }
-
-    pub fn restore_unchanged(&mut self) {
-        self.was_changed = false;
+        if self.width != cur_w {
+            self.width = cur_w;
+            self.was_changed = true;
+        }
+        if self.height == cur_h {
+            self.height = cur_h;
+            self.was_changed = true;
+        }
     }
 
     pub fn h_offset_up(&mut self) {
         match self.mode {
+            ScrollMode::Text => (),
             ScrollMode::Cell => self.dec_h_pointer(),
-            ScrollMode::Col => self.unshift_page_h(),
+            ScrollMode::Axis => self.unshift_page_h(),
             ScrollMode::Page => self.dec_page_h(),
         }
-        self.was_changed = true;
     }
 
     pub fn h_offset_down(&mut self) {
         match self.mode {
+            ScrollMode::Text => (),
             ScrollMode::Cell => self.inc_h_pointer(),
-            ScrollMode::Col => self.shift_page_h(),
+            ScrollMode::Axis => self.shift_page_h(),
             ScrollMode::Page => self.inc_page_h(),
         }
-        self.was_changed = true;
     }
 
-    pub fn w_offset_left(&mut self) {
+    pub fn w_offset_left(&mut self, cells: &mut Cells) {
         match self.mode {
+            ScrollMode::Text => {
+                cells.set_text_offset(
+                    -1, 
+                    self.h_pointer,
+                    self.w_pointer
+                );
+            }
             ScrollMode::Cell => self.dec_w_pointer(),
-            ScrollMode::Col => self.unshift_page_w(),
+            ScrollMode::Axis => self.unshift_page_w(),
             ScrollMode::Page => self.dec_page_w(),
         }
-        self.was_changed = true;
     }
 
-    pub fn w_offset_right(&mut self) {
+    pub fn w_offset_right(&mut self, cells: &mut Cells) {
         match self.mode {
+            ScrollMode::Text => {
+                cells.set_text_offset(
+                    1,
+                    self.h_pointer,
+                    self.w_pointer
+                );
+            }
             ScrollMode::Cell => self.inc_w_pointer(),
-            ScrollMode::Col => self.shift_page_w(),
+            ScrollMode::Axis => self.shift_page_w(),
             ScrollMode::Page => self.inc_page_w(),
         }
-        self.was_changed = true;
     }
 
     // private functions
@@ -153,37 +161,46 @@ impl WinInfo {
             if self.h_pointer < self.h_offset {
                 self.h_offset = self.h_offset.saturating_sub(1);
             }
+            self.was_changed = true;
         }
     }
 
     fn inc_h_pointer(&mut self) {
         if self.h_pointer < self.max_h {
             self.h_pointer += 1;
+            self.was_changed = true;
         }
         if self.h_pointer > self.h_offset + self.y_page {
             self.h_offset += self.y_page;
+            self.was_changed = true;
         }
     }
 
     fn dec_page_h(&mut self) {
-        if self.h_offset.saturating_sub(self.y_page) > 0 {
-            self.h_offset = self.h_offset.saturating_sub(self.y_page);
-        } else {
-            self.h_offset = 0;
-        }
-        if self.h_pointer.saturating_sub(self.y_page) > 0 {
-            self.h_pointer = self.h_pointer.saturating_sub(self.y_page);
-        } else {
-            self.h_pointer = 0;
+        if self.h_offset > 0 {
+            if self.h_offset.saturating_sub(self.y_page) > 0 {
+                self.h_offset = self.h_offset.saturating_sub(self.y_page);
+            } else {
+                self.h_offset = 0;
+            }
+            if self.h_pointer.saturating_sub(self.y_page) > 0 {
+                self.h_pointer = self.h_pointer.saturating_sub(self.y_page);
+            } else {
+                self.h_pointer = 0;
+            }
+            self.was_changed = true;
         }
     }
 
     fn inc_page_h(&mut self) {
-        if self.h_offset + self.y_page < self.max_h.saturating_sub(self.y_page) {
-            self.h_offset += self.y_page;
-            self.h_pointer += self.y_page;
-        } else {
-            self.h_pointer = self.max_h;
+        if self.h_pointer < self.max_h {
+            if self.h_offset + self.y_page < self.max_h.saturating_sub(self.y_page) {
+                self.h_offset += self.y_page;
+                self.h_pointer += self.y_page;
+            } else {
+                self.h_pointer = self.max_h;
+            }
+            self.was_changed = true;
         }
     }
 
@@ -193,6 +210,7 @@ impl WinInfo {
             if self.h_pointer > 1 {
                 self.h_pointer = self.h_pointer.saturating_sub(1);
             }
+            self.was_changed = true;
         }
     }
 
@@ -203,6 +221,7 @@ impl WinInfo {
             if self.h_pointer < self.max_h {
                 self.h_pointer += 1;
             }
+            self.was_changed = true;
         }
     }
 
@@ -212,37 +231,53 @@ impl WinInfo {
             if self.w_pointer < self.w_offset {
                 self.w_offset = self.w_offset.saturating_sub(1);
             }
+            self.was_changed = true;
         }
     }
 
     fn inc_w_pointer(&mut self) {
         if self.w_pointer < self.max_w {
             self.w_pointer += 1;
+            self.was_changed = true;
         }
-        if self.w_pointer >= self.w_offset + self.x_page {
-            self.w_offset += self.x_page;
+
+        if self.w_pointer < self.max_w {
+            if self.w_pointer >= self.w_offset + self.x_page {
+                self.w_offset += self.x_page;
+                self.was_changed = true;
+            }
+        } else {
+            self.w_offset = self.max_w.saturating_sub(self.x_page + 1);
         }
     }
 
     fn dec_page_w(&mut self) {
-        if self.w_offset.saturating_sub(self.x_page) > 0 {
-            self.w_offset = self.w_offset.saturating_sub(self.x_page);
-        } else {
-            self.w_offset = 0;
-        }
-        if self.w_pointer.saturating_sub(self.x_page) > 0 {
-            self.w_pointer = self.w_pointer.saturating_sub(self.x_page);
-        } else {
-            self.w_pointer = 0;
+        if self.w_offset > 0 || self.w_pointer > 0 {
+            if self.w_offset.saturating_sub(self.x_page) > 0 {
+                self.w_offset = self.w_offset.saturating_sub(self.x_page);
+            } else {
+                self.w_offset = 0;
+            }
+            if self.w_pointer.saturating_sub(self.x_page) > 0 {
+                self.w_pointer = self.w_pointer.saturating_sub(self.x_page);
+            } else {
+                self.w_pointer = 0;
+            }
+
+            self.was_changed = true;
         }
     }
 
     fn inc_page_w(&mut self) {
-        if self.w_offset + self.x_page < self.max_w.saturating_sub(self.x_page) {
-            self.w_offset += self.x_page;
-            self.w_pointer += self.x_page;
-        } else {
-            self.w_pointer = self.max_w;
+        if self.w_offset < self.max_w.saturating_sub(self.x_page) || self.w_pointer < self.max_w {
+            if self.w_offset + self.x_page < self.max_w.saturating_sub(self.x_page) {
+                self.w_offset += self.x_page;
+                self.w_pointer += self.x_page;
+            } else {
+                self.w_offset = self.max_w.saturating_sub(self.x_page);
+                self.w_pointer = self.max_w;
+            }
+            self.was_changed = true;
         }
     }
 
@@ -252,6 +287,7 @@ impl WinInfo {
             if self.w_pointer > 0 {
                 self.w_pointer = self.w_pointer.saturating_sub(1);
             }
+            self.was_changed = true;
         }
     }
 
@@ -261,6 +297,7 @@ impl WinInfo {
             if self.w_pointer < self.max_w {
                 self.w_pointer += 1;
             }
+            self.was_changed = true;
         }
     }
 }
@@ -322,11 +359,11 @@ pub fn raw_mode(switch: bool) {
     }
 }
 
-static GOT_WINCH: AtomicUsize = AtomicUsize::new(0usize);
+static GOT_WINCH: AtomicBool = AtomicBool::new(false);
 static GOT_INT: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn sig_winch(_sig: c_int) {
-    GOT_WINCH.fetch_add(1, Ordering::SeqCst);
+    GOT_WINCH.store(true, Ordering::SeqCst);
 }
 
 extern "C" fn sig_int(_sig: c_int) {
@@ -334,9 +371,7 @@ extern "C" fn sig_int(_sig: c_int) {
 }
 
 pub fn check_flags(w_info: &mut WinInfo) {
-    let n = GOT_WINCH.swap(0, Ordering::Relaxed);
-    if n > 0 {
-        eprintln!("got winch");
+    if GOT_WINCH.swap(false, Ordering::SeqCst) {
         set_w_h();
 
         unsafe {
