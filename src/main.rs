@@ -33,9 +33,9 @@ fn main() {
 
     // main loop
     loop {
-        check_flags(&mut w_info);
         show_csv(&mut cells, &mut w_info);
-        process_input(&mut w_info, &mut kbd);
+        check_flags(&mut w_info);
+        process_input(&mut w_info, &mut kbd, &mut cells);
     }
 
     // restore terminal
