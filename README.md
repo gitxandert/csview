@@ -16,7 +16,11 @@ To run csview:
     csview some_csv_file.csv
 
 csview currently admits the following functionality:
-- ctrl + C = closes the program
-- arrow keys = highlight individual cells
-- shift + arrow key = shift columns or rows by one
-- ctrl + arrow key = shift columns or rows by a "page"
+- **ctrl + c**
+    - closes the program
+- **arrow keys**
+    - highlight individual cells
+- **shift + arrow key**
+    - shift columns or rows by one
+- **ctrl + arrow key**
+    - shift columns or rows by a "page"
