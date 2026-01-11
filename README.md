@@ -9,6 +9,8 @@ Note: event devices typically can't be read by a normal user, so you'll need to 
     
     sudo usermod -aG input "$USER"
 
+Reboot after running the above.
+
 To run csview:  
 
     csview some_csv_file.csv
