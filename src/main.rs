@@ -40,6 +40,7 @@ fn main() {
         show_csv(&mut cells, &mut w_info);
         process_input(&mut w_info, &mut kbd);
     }
+    raw_mode(false);
 }
 
 fn load_csv() -> Result<Cells, io::Error> {
@@ -70,19 +71,20 @@ fn load_csv() -> Result<Cells, io::Error> {
     let mut contents = String::new();
     f.read_to_string(&mut contents)?;
 
-    let lines: Vec<String> = contents
-        .split('\n')
-        .map(|s| s.to_string())
-        .collect();
+    contents = contents.replace("\r\n", "\n");
+
+    let lines: Vec<&str> = contents.lines().collect();
 
     let x = lines[0].split(',').count();
     let y = lines.len();
     let mut cells = Cells::new(x, y);
     for line in lines {
         let row: Vec<String> = line
+            .trim_end_matches('\r')
             .split(',')
             .map(|s| s.to_string())
             .collect();
+        eprintln!("len = {}", row.len());
         cells.push_row(row);
     }
 
@@ -149,7 +151,7 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let mut idx = orig_idx;
 
             let widths = cells.widths.clone();
-            for _ in 0..rows {
+            for _ in 0..rows.min(cells.len() - h_offset) {
                 /*
                 * Each line needs to be formatted like so:
                 * | content(...) | content(...) | content(...) |
@@ -161,13 +163,12 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                 write!(out, "\x1b[{};1H\x1b[2K", t_row+1).unwrap();
 
                 let mut line: String = "".to_string();
-                // vec of cols
+                // reference to vec of cols
                 let mut v_cols = &Vec::new();
                 // always print col names
                 if t_row == 0 {
                     line = "    ".to_string();
                     v_cols = cells.get_row(0);
-                    
                 } else {
                     // if reached cells.len(),
                     // print XXXX instead of row number
@@ -181,33 +182,39 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                 }
                 let row_len = v_cols.len();
 
+                idx = orig_idx;
                 if row_len > 0 && idx < row_len {
-                    idx = orig_idx;
+                    // reset index for each row
                     loop {
-                        if idx < row_len - 1 {
+                        if idx < row_len {
                             let width = widths[idx];
                             if line.len() + width > cur_w {
                                 break;
                             }
-                            let col = &v_cols[idx];
-                            let mut contents: String = "".to_string();
                             let mut cell: String = "".to_string();
-                            if col.len() > width {
-                                contents = col
-                                    .chars()
-                                    .take(width - 3)
-                                    .collect();
-                                cell = format!("| {:<width$}... ", 
-                                    contents, width = width - 3);
-                            } else {
-                                contents = col
-                                    .chars()
-                                    .take(width)
-                                    .collect();
-                                cell = format!("| {:<width$} ",
-                                    contents, width = width);
+                            match v_cols.get(idx) {
+                                Some(col) => {
+                                    let mut contents: String = "".to_string();
+                                    if col.chars().count() > width {
+                                        contents = col
+                                            .chars()
+                                            .take(width - 3)
+                                            .collect();
+                                        cell = format!("| {:<width$}... ", 
+                                            contents, width = width - 3);
+                                    } else {
+                                        contents = col
+                                            .chars()
+                                            .take(width)
+                                            .collect();
+                                        cell = format!("| {:<width$} ",
+                                            contents, width = width);
+                                    }
+                                }
+                                None => eprintln!("No cell"),
                             }
 
+                            // highlight the current cell
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
                                 let mut sub = "\x1b[7m".to_string() + &cell + "\x1b[0;4m";
@@ -226,8 +233,8 @@ fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                     t_row += 1;
                 }
             }
-            w_info.set_x_page(idx - orig_idx);
-            w_info.set_y_page(row - h_offset);
+            w_info.set_x_page(idx, orig_idx);
+            w_info.set_y_page(row, h_offset);
             write!(out, "\x1b[{};1H\x1b[2K", t_row+1).unwrap();
             out.flush().unwrap();
         }
@@ -314,8 +321,8 @@ impl WinInfo {
             height: 0usize,
             w_offset: 0usize,
             h_offset: 0usize,
-            max_w: max_w,
-            max_h: max_h,
+            max_w: max_w - 1,
+            max_h: max_h - 1,
             was_changed: false,
             mode: ScrollMode::Cell,
             w_pointer: 0usize,
@@ -339,12 +346,12 @@ impl WinInfo {
         return false;
     }
 
-    fn set_x_page(&mut self, page: usize) {
-        self.x_page = page;
+    fn set_x_page(&mut self, end: usize, beg: usize) {
+        self.x_page = end - beg;
     }
 
-    fn set_y_page(&mut self, page: usize) {
-        self.y_page = page;
+    fn set_y_page(&mut self, end: usize, beg: usize) {
+        self.y_page = end - beg;
     }
 
     fn page(&mut self) {
@@ -409,82 +416,79 @@ impl WinInfo {
     }
 
     fn dec_h_pointer(&mut self) {
-        if self.h_pointer > 1 {
-            if self.h_pointer - 1 % self.y_page == 0 {
+        if self.h_pointer > 0 {
+            self.h_pointer = self.h_pointer.saturating_sub(1);
+            if self.h_pointer < self.h_offset {
                 self.h_offset = self.h_offset.saturating_sub(1);
             }
-            self.h_pointer = self.h_pointer.saturating_sub(1);
         }
     }
 
     fn inc_h_pointer(&mut self) {
-        if self.h_pointer < self.max_h - 1 {
+        if self.h_pointer < self.max_h {
             self.h_pointer += 1;
         }
-        if self.h_pointer - 1 % self.y_page == 0 {
-            self.h_offset += 1;
+        if self.h_pointer > self.h_offset + self.y_page {
+            self.h_offset += self.y_page;
         }
     }
 
     fn dec_page_h(&mut self) {
-        if self.h_offset.saturating_sub(self.y_page) > 1 {
+        if self.h_offset.saturating_sub(self.y_page) > 0 {
             self.h_offset = self.h_offset.saturating_sub(self.y_page);
         } else {
             self.h_offset = 0;
         }
-        if self.h_pointer.saturating_sub(self.y_page) > 1 {
+        if self.h_pointer.saturating_sub(self.y_page) > 0 {
             self.h_pointer = self.h_pointer.saturating_sub(self.y_page);
         } else {
-            self.h_pointer = 1;
+            self.h_pointer = 0;
         }
     }
 
     fn inc_page_h(&mut self) {
-        if self.h_offset + self.y_page < self.max_h {
+        if self.h_offset + self.y_page < self.max_h.saturating_sub(self.y_page) {
             self.h_offset += self.y_page;
-        } else {
-            self.h_offset = self.max_h - 1;
-        }
-        if self.h_pointer + self.y_page < self.max_h {
             self.h_pointer += self.y_page;
         } else {
-            self.h_pointer = self.max_h - 1;
+            self.h_pointer = self.max_h;
         }
     }
 
     fn unshift_page_h(&mut self) {
         if self.h_offset > 1 {
             self.h_offset = self.h_offset.saturating_sub(1);
-        }
-        if self.h_pointer > 1 {
-            self.h_pointer = self.h_pointer.saturating_sub(1);
+            if self.h_pointer > 1 {
+                self.h_pointer = self.h_pointer.saturating_sub(1);
+            }
         }
     }
 
     fn shift_page_h(&mut self) {
-        if self.h_offset < self.max_h - 1 {
+        // always stay within page
+        if self.h_offset < self.max_h.saturating_sub(self.y_page) {
             self.h_offset += 1;
+            if self.h_pointer < self.max_h {
+                self.h_pointer += 1;
+            }
         }
-        if self.h_pointer < self.max_h - 1 {
-            self.h_pointer += 1;
-        }
-    } 
+    }
 
     fn dec_w_pointer(&mut self) {
         if self.w_pointer > 0 {
-            if self.w_pointer % self.x_page == 0 {
+            self.w_pointer = self.w_pointer.saturating_sub(1);
+            if self.w_pointer < self.w_offset {
                 self.w_offset = self.w_offset.saturating_sub(1);
             }
-            self.w_pointer = self.w_pointer.saturating_sub(1);
         }
     }
 
     fn inc_w_pointer(&mut self) {
-        if self.w_pointer < self.max_w - 1 {
+        if self.w_pointer < self.max_w {
             self.w_pointer += 1;
         }
-        if self.w_pointer % self.x_page == 0 {
-            self.w_offset += 1;
+        if self.w_pointer > self.w_offset + self.x_page {
+            self.w_offset += self.x_page;
         }
     }
 
@@ -502,35 +506,31 @@ impl WinInfo {
     }
 
     fn inc_page_w(&mut self) {
-        if self.w_offset + self.x_page < self.max_w {
+        if self.w_offset + self.x_page < self.max_w.saturating_sub(self.x_page) {
             self.w_offset += self.x_page;
-        } else {
-            self.w_offset = self.max_w - 1;
-        }
-        if self.w_pointer + self.x_page < self.max_w {
             self.w_pointer += self.x_page;
         } else {
-            self.w_pointer = self.max_w - 1;
+            self.w_pointer = self.max_w;
         }
     }
 
     fn unshift_page_w(&mut self) {
         if self.w_offset > 0 {
             self.w_offset = self.w_offset.saturating_sub(1);
-        }
-        if self.w_pointer > 0 {
-            self.w_pointer = self.w_pointer.saturating_sub(1);
+            if self.w_pointer > 0 {
+                self.w_pointer = self.w_pointer.saturating_sub(1);
+            }
         }
     }
 
     fn shift_page_w(&mut self) {
-        if self.w_offset < self.max_w - 1 {
+        if self.w_offset < self.max_w.saturating_sub(self.x_page) {
             self.w_offset += 1;
+            if self.w_pointer < self.max_w {
+                self.w_pointer += 1;
+            }
         }
-        if self.w_pointer < self.max_h - 1 {
-            self.h_pointer += 1;
-        }
-    }
+    } 
 }
 
 fn raw_mode(switch: bool) {
@@ -571,8 +571,14 @@ extern "C" fn sig_int(_sig: c_int) {
     std::process::exit(130);
 }
 
+extern "C" fn graceful_shutdown(_sig: c_int) {
+    raw_mode(false);
+    print!("\r\n");
+}
+
 fn install_sig_handlers() {
     unsafe {
+        //SIGWINCH
         let mut sa_winch: libc::sigaction = std::mem::zeroed();
         sa_winch.sa_sigaction = sig_winch as usize;
         sa_winch.sa_flags = 0;
@@ -582,6 +588,7 @@ fn install_sig_handlers() {
         //register
         libc::sigaction(libc::SIGWINCH, &sa_winch, std::ptr::null_mut());
         
+        //SIGINT
         let mut sa_int: libc::sigaction = std::mem::zeroed();
         sa_int.sa_sigaction = sig_int as usize;
         sa_int.sa_flags = 0;
@@ -590,7 +597,27 @@ fn install_sig_handlers() {
 
         //register
         libc::sigaction(libc::SIGINT, &sa_int, std::ptr::null_mut());
- 
+
+        //SIGKILL
+        let mut sa_kill: libc::sigaction = std::mem::zeroed();
+        sa_kill.sa_sigaction = graceful_shutdown as usize;
+        sa_kill.sa_flags = 0;
+
+        libc::sigemptyset(&mut sa_kill.sa_mask);
+
+        //register
+        libc::sigaction(libc::SIGKILL, &sa_kill, std::ptr::null_mut());
+
+        //SIGTERM
+        let mut sa_term: libc::sigaction = std::mem::zeroed();
+        sa_term.sa_sigaction = graceful_shutdown as usize;
+        sa_term.sa_flags = 0;
+
+        libc::sigemptyset(&mut sa_term.sa_mask);
+
+        //register
+        libc::sigaction(libc::SIGTERM, &sa_term, std::ptr::null_mut());
+
     }
 }
 
