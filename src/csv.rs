@@ -6,32 +6,106 @@ use std::{
 
 use crate::terminal::{h_ptr, w_ptr, WinInfo};
 
+struct Cell {
+    pub content: String,
+    pub width: usize,
+    pub height: usize,
+    pub text_offset: usize,
+}
+
+impl Cell {
+    fn new(content: String) -> Self {
+        Self {
+            content,
+            width: 12usize,
+            height: 1usize,
+            text_offset: 0usize,
+        }
+    }
+
+    fn set_width(&mut self, w: usize) {
+        self.width = w;
+    }
+
+    fn set_height(&mut self, h: usize) {
+        self.height = h;
+    }
+
+    fn dec_text_offset(&mut self, val: usize) {
+        self.text_offset = self.text_offset.saturating_sub(val);
+    }
+
+    fn inc_text_offset(&mut self, val: usize) {
+        if self.len().saturating_sub(self.text_offset) > self.width {
+            self.text_offset += val;
+        } else {
+            self.text_offset = self.len().saturating_sub(self.width);
+        }
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.content.len()
+    }
+
+    fn format_cell(&self) -> String {
+        let mut cell = String::new();
+        if self.len() - self.text_offset > self.width {
+            let content: String = self.content
+                .chars()
+                .skip(self.text_offset)
+                .take(self.width - 3)
+                .collect();
+            cell = format!("| {:<width$}... ", 
+                content, width = self.width - 3);
+        } else {
+            let content: String = self.content
+                .chars()
+                .skip(self.text_offset)
+                .take(self.width)
+                .collect();
+            cell = format!("| {:<width$} ",
+                content, width = self.width);
+        }
+        
+        cell
+    }
+}
+
 pub struct Cells {
-    rows: Vec<Vec<String>>,
+    rows: Vec<Vec<Cell>>,
     num_cols: usize,
     num_rows: usize,
-    widths: Vec<usize>,
-    heights: Vec<usize>,
 }
 
 impl Cells {
     fn new(num_cols: usize, num_rows: usize) -> Self {
-        let rows = Vec::<Vec<String>>::new();
-        let widths = vec![12usize; num_cols];
-        let heights = vec![1usize; num_rows];
+        let rows = Vec::<Vec<Cell>>::new();
+        let text_offsets = vec![0usize; num_cols];
 
-        Self { rows, num_cols, num_rows, widths, heights }
+        Self { rows, num_cols, num_rows }
     }
 
     pub fn xy(&self) -> (usize, usize) {
         (self.num_cols, self.num_rows)
     }
 
-    fn push_row(&mut self, row: Vec<String>) {
+    pub fn set_text_offset(&mut self, val: i32, row: usize, col: usize) {
+        let mut cell_row = &mut self.rows[row];
+        let mut cell = &mut cell_row[col];
+        if val > 0 {
+            cell.inc_text_offset(val as usize);
+        } else {
+            let val = val.abs();
+            cell.dec_text_offset(val as usize);
+        }
+    }
+
+    fn push_row(&mut self, row: Vec<Cell>) {
         self.rows.push(row);
     }
 
-    fn get_row(&mut self, idx: usize) -> &Vec<String> {
+    fn get_row(&mut self, idx: usize) -> &Vec<Cell> {
         if idx > self.num_rows - 1 {
             return &self.rows[self.num_rows - 1];
         } else {
@@ -46,6 +120,7 @@ impl Cells {
     fn num_rows(&self) -> usize {
         self.num_rows
     }
+
 }
 
 fn parse_by_newline(block: &str) -> Vec<String> {
@@ -81,10 +156,10 @@ fn parse_by_newline(block: &str) -> Vec<String> {
     parsed
 }
 
-fn parse_by_comma(line: &str) -> Vec<String> {
-    let mut parsed = Vec::<String>::new();
+fn parse_by_comma(line: &str) -> Vec<Cell> {
+    let mut parsed = Vec::<Cell>::new();
     
-    let mut cell = String::new();
+    let mut cell_str = String::new();
     let mut is_quoted = false;
     let mut quote: Option<char> = None;
 
@@ -99,18 +174,20 @@ fn parse_by_comma(line: &str) -> Vec<String> {
                         quote = None;
                     }
                     Some(_) => {
-                        cell.push(c);
+                        cell_str.push(c);
                     }
                 }
             }
             ',' if quote.is_none() => {
-                parsed.push(cell.clone());
-                cell = String::new();
+                let cell = Cell::new(cell_str.clone());
+                parsed.push(cell);
+                cell_str = String::new();
             }
-            _ => cell.push(c),
+            _ => cell_str.push(c),
         }
     }
 
+    let cell = Cell::new(cell_str.clone());
     parsed.push(cell);
     parsed
 }
@@ -118,14 +195,14 @@ fn parse_by_comma(line: &str) -> Vec<String> {
 fn parse_csv_into_cells(csv: String) -> Result<Cells, io::Error> {
     let lines: Vec<String> = parse_by_newline(&csv);
 
-    let col_names: Vec<String> = parse_by_comma(&lines[0]);
+    let col_names: Vec<Cell> = parse_by_comma(&lines[0]);
     let num_cols = col_names.len();
     let num_rows = lines.len();
     let mut cells = Cells::new(num_cols, num_rows);
     cells.push_row(col_names);
 
     for i in 1..num_rows {
-        let row: Vec<String> = parse_by_comma(&lines[i]);
+        let row: Vec<Cell> = parse_by_comma(&lines[i]);
         cells.push_row(row);
     }
 
@@ -191,7 +268,6 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let row_len = cells.num_cols();
             let num_rows = cells.num_rows();
 
-            let widths = cells.widths.clone();
             for _ in 0..rows.min(cells.num_rows() - h_offset) {
                 /*
                 * Each line needs to be formatted like so:
@@ -208,56 +284,46 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                 let mut v_cols = &Vec::new();
                 // always print col names
                 if t_row == 0 {
-                    line = "    |".to_string();
+                    line = "    ".to_string();
                     v_cols = cells.get_row(0);
                 } else {
                     // if reached cells.num_rows(),
                     // print XXXX instead of row number
                     if row < cells.num_rows() {
                         // print in hexadecimal (space-saving)
-                        line = format!("{:04X}|", row);
+                        line = format!("{:04X}", row);
                         v_cols = cells.get_row(row);
                     } else {
                         line = "XXXX| EOF".to_string();
                     }
                 }
 
+
                 // reset index for each row
                 idx = orig_idx;
+                let mut sub = 0;
                 if row_len > 0 && idx < row_len {
                     loop {
                         if idx < row_len {
-                            let width = widths[idx];
-                            if line.len() + width > cur_w {
+                            let row_cell = match v_cols.get(idx) {
+                                Some(cell) => cell,
+                                // always have a cell; fill with dummy value for now
+                                None => &Cell::new("!!!CSVERR!!!".to_string()),
+                            };
+
+                            let width = row_cell.width;
+                            if line.len().saturating_sub(sub) + width > cur_w {
                                 break;
                             }
-                            let mut cell: String = "".to_string();
-                            match v_cols.get(idx) {
-                                Some(col) => {
-                                    let mut contents: String = "".to_string();
-                                    if col.chars().count() > width {
-                                        contents = col
-                                            .chars()
-                                            .take(width - 3)
-                                            .collect();
-                                        cell = format!(" {:<width$}... |", 
-                                            contents, width = width - 3);
-                                    } else {
-                                        contents = col
-                                            .chars()
-                                            .take(width)
-                                            .collect();
-                                        cell = format!(" {:<width$} |",
-                                            contents, width = width);
-                                    }
-                                }
-                                None => cell = " !!!CSVERR!!! |".to_string(),
-                            }
+                            
+                            let mut cell: String = row_cell.format_cell();
 
                             // highlight the current cell
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
-                                cell = "\x1b[7m".to_string() + &cell + "\x1b[27m";
+                                cell = format!("\x1b[7m{}\x1b[27;4m", cell);
+                                // take escape sequence into account for width calculation above
+                                sub = 11;
                             }
                            
                             line += &cell;
@@ -267,7 +333,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                         }
                     }
 
-                    write!(out, "\x1b[4m{line}\x1b[0m").unwrap();
+                    write!(out, "\x1b[4m{line}|\x1b[24m").unwrap();
                     row += 1;
                     t_row += 1;
                 }
