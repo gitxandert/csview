@@ -24,3 +24,5 @@ csview currently admits the following functionality:
     - shift columns or rows by one
 - **ctrl + arrow key**
     - shift columns or rows by a "page"
+- **alt + arrow key (left or right)**
+    - scrolls through text within a cell
