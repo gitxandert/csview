@@ -6,6 +6,8 @@ use std::{
 
 use crate::terminal::{h_ptr, w_ptr, WinInfo};
 
+
+#[derive(Debug)]
 struct Cell {
     pub content: String,
     pub width: usize,
@@ -174,24 +176,13 @@ fn parse_by_comma(line: &str) -> Vec<Cell> {
     
     let mut cell_str = String::new();
     let mut is_quoted = false;
-    let mut quote: Option<char> = None;
 
     for c in line.chars() {
         match c {
             '"' => {
-                match quote {
-                    None => {
-                        quote = Some(c);
-                    }
-                    Some(q) if q == c => {
-                        quote = None;
-                    }
-                    Some(_) => {
-                        cell_str.push(c);
-                    }
-                }
+                is_quoted = !is_quoted;
             }
-            ',' if quote.is_none() => {
+            ',' if !is_quoted => {
                 let cell = Cell::new(cell_str.clone());
                 parsed.push(cell);
                 cell_str = String::new();
@@ -200,7 +191,7 @@ fn parse_by_comma(line: &str) -> Vec<Cell> {
         }
     }
 
-    let cell = Cell::new(cell_str.clone());
+    let cell = Cell::new(cell_str);
     parsed.push(cell);
     parsed
 }
@@ -209,6 +200,9 @@ fn parse_csv_into_cells(csv: String) -> Result<Cells, io::Error> {
     let lines: Vec<String> = parse_by_newline(&csv);
 
     let col_names: Vec<Cell> = parse_by_comma(&lines[0]);
+    for c in &col_names {
+        eprintln!("{}", c.content); 
+    }
     let num_cols = col_names.len();
     let num_rows = lines.len();
     let mut cells = Cells::new(num_cols, num_rows);
@@ -247,6 +241,7 @@ pub fn load_csv() -> Result<Cells, io::Error> {
     }
 
     let mut file = fs::read_to_string(filename)?;
+    file = file.replace("\r", " ");
 
     let cells = parse_csv_into_cells(file)?;
 
@@ -325,7 +320,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                 // always have a cell; fill with dummy value for now
                                 None => &Cell::new("!!!CSVERR!!!".to_string()),
                             };
-
+                            
                             let width = row_cell.width;
                             if line.len().saturating_sub(sub) + width > cur_w {
                                 break;
