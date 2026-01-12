@@ -50,6 +50,11 @@ impl Cell {
         self.content.len()
     }
 
+    #[inline]
+    fn content(&self) -> String {
+        self.content.clone()
+    }
+
     fn format_cell(&self) -> String {
         let mut cell = String::new();
         if self.len() - self.text_offset > self.width {
@@ -276,6 +281,8 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let row_len = cells.num_cols();
             let num_rows = cells.num_rows();
 
+            let mut focus = String::new();
+
             for _ in 0..rows.min(cells.num_rows() - h_offset) {
                 /*
                 * Each line needs to be formatted like so:
@@ -333,6 +340,10 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                 cell = format!("\x1b[7m{}\x1b[27m", cell);
                                 // take escape sequence into account for width calculation above
                                 sub = 11;
+                                focus = row_cell.content();
+                                if focus.len() > cur_w {
+                                    focus = (&focus[0..cur_w]).to_string();
+                                }
                             }
                            
                             line += &cell;
@@ -353,8 +364,8 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
             let row_num_len = 5;
             
-            // move cursor to bottom
-            frame.push_str(&format!("\x1b[{};{}H\x1b[2K", cur_h, 1));
+            // show focus at bottom
+            frame.push_str(&format!("\x1b[{};{}H\x1b[2K{}", cur_h, 1, focus));
 
             // end update
             let mut out = stdout().lock();
