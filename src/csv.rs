@@ -200,11 +200,10 @@ fn parse_csv_into_cells(csv: String) -> Result<Cells, io::Error> {
     let lines: Vec<String> = parse_by_newline(&csv);
 
     let col_names: Vec<Cell> = parse_by_comma(&lines[0]);
-    for c in &col_names {
-        eprintln!("{}", c.content); 
-    }
+    
     let num_cols = col_names.len();
     let num_rows = lines.len();
+    
     let mut cells = Cells::new(num_cols, num_rows);
     cells.push_row(col_names);
 
