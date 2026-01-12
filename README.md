@@ -1,4 +1,4 @@
-# csview - command-line TUI for friendly (or at least friendlier) CSV rendering
+# csview - command-line TUI for friendly/ier CSV rendering
 This program takes a single CSV file argument and renders it as a series of cells across the entire width and height of the terminal. Horizontal and vertical offsets are controlled via the arrow keys. Every time the window is resized, correspondingly more or less cells are shown.
 
 ## Installation
