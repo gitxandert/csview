@@ -1,5 +1,4 @@
-use std::{
-    mem, ptr,
+use std::{ mem, ptr,
     fs::{self, File},
     io::{self, Error, Read},
 };
@@ -55,7 +54,6 @@ pub fn process_input(w_info: &mut WinInfo, kbd: &mut File, cells: &mut Cells) {
                     w_info.set_mode(ScrollMode::Axis);
                 }
                 KEY_LEFTCTRL | KEY_RIGHTCTRL => {
-                    eprintln!("ctrl");
                     w_info.set_mode(ScrollMode::Page);
                 }
                 KEY_LEFT => w_info.w_offset_left(cells),
