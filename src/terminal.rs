@@ -56,7 +56,12 @@ impl WinInfo {
         }
 
         if self.width == 0usize && self.height == 0usize {
-            return true;
+            unsafe {
+                let w = *w_ptr();
+                let h = *h_ptr();
+                self.set_w_h(w, h);
+                return true;
+            }
         }
 
         return false;
@@ -168,10 +173,10 @@ impl WinInfo {
     fn inc_h_pointer(&mut self) {
         if self.h_pointer < self.max_h {
             self.h_pointer += 1;
-            self.was_changed = true;
-        }
-        if self.h_pointer > self.h_offset + self.y_page {
-            self.h_offset += self.y_page;
+            
+            if self.h_pointer >= self.h_offset + self.y_page {
+                self.h_offset += 1;
+            }
             self.was_changed = true;
         }
     }
@@ -238,17 +243,12 @@ impl WinInfo {
     fn inc_w_pointer(&mut self) {
         if self.w_pointer < self.max_w {
             self.w_pointer += 1;
-            self.was_changed = true;
-        }
 
-        if self.w_pointer < self.max_w {
             if self.w_pointer >= self.w_offset + self.x_page {
-                self.w_offset += self.x_page;
-                self.was_changed = true;
+                self.w_offset += 1;
             }
-        } else {
-            self.w_offset = self.max_w.saturating_sub(self.x_page + 1);
-        }
+            self.was_changed = true;
+        }    
     }
 
     fn dec_page_w(&mut self) {
@@ -338,6 +338,8 @@ pub fn raw_mode(switch: bool) {
         let mut term: termios = std::mem::zeroed();
         tcgetattr(fd, &mut term);
 
+        let mut out = std::io::stdout();
+
         match switch {
             true => {
                 ORIG_TERM = Some(term);
@@ -349,13 +351,19 @@ pub fn raw_mode(switch: bool) {
                 raw.c_cc[libc::VMIN] = 0;
                 raw.c_cc[libc::VTIME] = 1;
                 tcsetattr(fd, TCSANOW, &raw);
+    
+                // switch to Alternate Screen Buffer
+                write!(out, "\x1b[?1049h").unwrap();
             }
             false => {
                 if let Some(orig) = ORIG_TERM {
                     tcsetattr(fd, TCSANOW, &orig);
+                    // switch back to main buffer
+                    write!(out, "\x1b[?1049l").unwrap();
                 }
             }
         };
+        out.flush().unwrap();
     }
 }
 
@@ -383,9 +391,6 @@ pub fn check_flags(w_info: &mut WinInfo) {
 
     if GOT_INT.swap(false, Ordering::SeqCst) {
         raw_mode(false);
-        let mut out = std::io::stdout();
-        write!(out, "\x1b[H\x1b[2J").unwrap();
-        write!(out, "\x1b[3J").unwrap();
         std::process::exit(130);
     }
 }
