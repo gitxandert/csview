@@ -1,6 +1,6 @@
 use std::{ mem, ptr,
     fs::{self, File},
-    io::{self, Error, Read},
+    io::{self, Error, ErrorKind, Read},
 };
 use libc::input_event;
 
@@ -35,8 +35,50 @@ pub const KEY_RIGHTALT:    u16 = 100;
 // input funcitons
 //
 pub fn find_kbd() -> Result<File, io::Error> {
-    // flesh out better later
-    File::open("/dev/input/event3")
+    // open device list
+    let devices = fs::read_to_string("/proc/bus/input/devices")?;
+
+    for dev in devices.split("\n\n") {
+        let lines: Vec<&str> = dev.lines().collect();
+    
+        // store handlers and EV bitmask
+        let mut handlers = "";
+        let mut evbm = "";
+
+        for line in lines {
+            if line.contains("Handlers=") {
+                handlers = &line;
+            }
+
+            if line.contains("EV=") {
+                evbm = match line.split('=').last() {
+                    Some(bm) => bm,
+                    None => "",
+                };
+            }
+
+            // match against keyboard fingerprint
+            if evbm == "120013" {
+                let parts: Vec<&str> = handlers.split_whitespace().collect();
+                for p in parts {
+                    // look for eventX
+                    if p.starts_with("event") {
+                        let path = format!("/dev/input/{}", p);
+                        let kbd = File::open(path)?;
+                        return Ok(kbd);
+                    }
+                }
+            }
+        }
+    }
+
+    // no keyboard found :'(
+    Err(
+        io::Error::new(
+            io::ErrorKind::NotFound, 
+            "Could not find a keyboard called /dev/input/eventX"
+        )
+    )
 } 
 
 pub fn process_input(w_info: &mut WinInfo, kbd: &mut File, cells: &mut Cells) {
