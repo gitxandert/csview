@@ -75,28 +75,18 @@ impl WinInfo {
         self.y_page = end - beg;
     }
 
-    // return index of highlighted row;
-    // since the h_pointer is indexing rows, it returns itself
-    pub fn h_pointer_cell(&self) -> usize {
-        self.h_pointer
-    }
-
-    // return approximate location of the cell on screen;
-    // this means adding up the widths of the cells up to the pointer,
-    // plus the length of the row_number at the start of the row,
-    // plus 3 (two spaces and a |)
-    pub fn w_pointer_cell(&self, row_num_len: usize, widths: &Vec<usize>) -> usize {
-        let mut cursor_col = 0usize;
-        let mut idx = self.w_offset;
-        while idx != self.w_pointer {
-            cursor_col += widths[idx];
-            idx += 1;
-        }
-        row_num_len + cursor_col + 3 
-    }
-
     pub fn set_mode(&mut self, mode: ScrollMode) {
         self.mode = mode;
+    }
+
+    pub fn show_cursor(&mut self, show: bool) {
+        let mut out = std::io::stdout();
+        if show {
+            write!(out, "\x1b[?25h").unwrap();
+        } else {
+            write!(out, "\x1b[?25l").unwrap();
+        }
+        out.flush().unwrap();
     }
 
     pub fn set_w_h(&mut self, cur_w: usize, cur_h: usize) {
@@ -357,12 +347,16 @@ pub fn raw_mode(switch: bool) {
     
                 // switch to Alternate Screen Buffer
                 write!(out, "\x1b[?1049h").unwrap();
+                // hide cursor
+                write!(out, "\x1b[?25l").unwrap();
             }
             false => {
                 if let Some(orig) = ORIG_TERM {
                     tcsetattr(fd, TCSANOW, &orig);
                     // switch back to main buffer
                     write!(out, "\x1b[?1049l").unwrap();
+                    // show cursor
+                    write!(out, "\x1b[?25h").unwrap();
                 }
             }
         };
