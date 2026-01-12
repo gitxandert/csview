@@ -76,14 +76,25 @@ pub struct Cells {
     rows: Vec<Vec<Cell>>,
     num_cols: usize,
     num_rows: usize,
+    were_changed: bool,
 }
 
 impl Cells {
     fn new(num_cols: usize, num_rows: usize) -> Self {
         let rows = Vec::<Vec<Cell>>::new();
         let text_offsets = vec![0usize; num_cols];
+        let were_changed = false;
 
-        Self { rows, num_cols, num_rows }
+        Self { rows, num_cols, num_rows, were_changed }
+    }
+
+    fn changed(&mut self) -> bool {
+        if self.were_changed {
+            self.were_changed = false;
+            return true;
+        }
+
+        return false;
     }
 
     pub fn xy(&self) -> (usize, usize) {
@@ -99,6 +110,8 @@ impl Cells {
             let val = val.abs();
             cell.dec_text_offset(val as usize);
         }
+
+        self.were_changed = true;
     }
 
     fn push_row(&mut self, row: Vec<Cell>) {
@@ -242,7 +255,7 @@ pub fn load_csv() -> Result<Cells, io::Error> {
 
 pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
     unsafe {
-        if w_info.changed() {
+        if w_info.changed() || cells.changed() {
             let cur_w = *w_ptr();
             let cur_h = *h_ptr();
 
@@ -323,7 +336,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                             // highlight the current cell
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
-                                cell = format!("\x1b[7m{}\x1b[27;4m", cell);
+                                cell = format!("\x1b[7m{}\x1b[27m", cell);
                                 // take escape sequence into account for width calculation above
                                 sub = 11;
                             }
