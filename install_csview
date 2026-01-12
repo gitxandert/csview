@@ -1,2 +1,4 @@
+# listen, I'm a bad person, I ignore warnings because who cares about camelcase
+export RUSTFLAGS="-Awarnings"
 cargo build --release
 sudo install -m 0755 target/release/csview /usr/local/bin/csview
