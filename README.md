@@ -1,7 +1,11 @@
-## csview - command-line TUI for friendly (or at least friendlier) CSV rendering
+# csview - command-line TUI for friendly (or at least friendlier) CSV rendering
 This program takes a single CSV file argument and renders it as a series of cells across the entire width and height of the terminal. Horizontal and vertical offsets are controlled via the arrow keys. Every time the window is resized, correspondingly more or less cells are shown.
 
-To install, run the provided install script:  
+## Installation
+
+This package is installed with Rust's cargo toolchain; if you're not already a Rustacean, install cargo first.
+
+Run the provided install script:  
 
     ./install_csview
 
@@ -9,7 +13,9 @@ Note: event devices typically can't be read by a normal user, so you'll need to 
     
     sudo usermod -aG input "$USER"
 
-Reboot after running the above.
+(Reboot after running the above.)
+
+## Use
 
 To run csview:  
 
