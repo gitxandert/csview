@@ -198,12 +198,14 @@ impl WinInfo {
     }
 
     fn inc_page_h(&mut self) {
-        if self.h_pointer < self.max_h {
+        if self.h_offset + self.y_page < self.max_h {
             if self.h_offset + self.y_page < self.max_h.saturating_sub(self.y_page) {
                 self.h_offset += self.y_page;
                 self.h_pointer += self.y_page;
             } else {
-                self.h_pointer = self.max_h;
+                let inc = self.max_h - self.h_offset - self.y_page + 1;
+                self.h_offset += inc;
+                self.h_pointer += inc;
             }
             self.was_changed = true;
         }
@@ -221,7 +223,7 @@ impl WinInfo {
 
     fn shift_page_h(&mut self) {
         // always stay within page
-        if self.h_offset < self.max_h.saturating_sub(self.y_page) {
+        if self.h_offset <= self.max_h.saturating_sub(self.y_page) {
             self.h_offset += 1;
             if self.h_pointer < self.max_h {
                 self.h_pointer += 1;
@@ -252,7 +254,7 @@ impl WinInfo {
     }
 
     fn dec_page_w(&mut self) {
-        if self.w_offset > 0 || self.w_pointer > 0 {
+        if self.w_offset > 0 {
             if self.w_offset.saturating_sub(self.x_page) > 0 {
                 self.w_offset = self.w_offset.saturating_sub(self.x_page);
             } else {
@@ -263,19 +265,20 @@ impl WinInfo {
             } else {
                 self.w_pointer = 0;
             }
-
             self.was_changed = true;
         }
     }
 
+
     fn inc_page_w(&mut self) {
-        if self.w_offset < self.max_w.saturating_sub(self.x_page) || self.w_pointer < self.max_w {
+        if self.w_offset + self.x_page < self.max_w {
             if self.w_offset + self.x_page < self.max_w.saturating_sub(self.x_page) {
                 self.w_offset += self.x_page;
                 self.w_pointer += self.x_page;
             } else {
-                self.w_offset = self.max_w.saturating_sub(self.x_page);
-                self.w_pointer = self.max_w;
+                let inc = self.max_w - self.w_offset - self.x_page + 1;
+                self.w_offset += inc;
+                self.w_pointer += inc;
             }
             self.was_changed = true;
         }
