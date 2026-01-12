@@ -245,11 +245,12 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
         if w_info.changed() {
             let cur_w = *w_ptr();
             let cur_h = *h_ptr();
-            let mut out = stdout();
 
-            write!(out, "\x1b[H\x1b[2J").unwrap();
-            // clear scrollback
-            write!(out, "\x1b[3J").unwrap();
+            // use double-buffering for one smooth write
+            let mut frame = String::with_capacity(8192);
+
+            // move cursor to top_left
+            frame.push_str("\x1b[H");
             
             let h_offset = w_info.h_offset;
             let w_offset = w_info.w_offset;
@@ -276,8 +277,9 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                 * 5 + n x (1 + 1 + cell_width + 1)
                 * if the cell at the end goes over, it is dropped
                 */
+
                 // move cursor to (row+1, col=1)
-                write!(out, "\x1b[{};1H\x1b[2K", t_row+1).unwrap();
+                frame.push_str(&format!("\x1b[{};1H\x1b[2K", t_row+1));
 
                 let mut line: String = "".to_string();
                 // reference to vec of cols
@@ -333,7 +335,8 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                         }
                     }
 
-                    write!(out, "\x1b[4m{line}|\x1b[24m").unwrap();
+                    // write line
+                    frame.push_str(&format!("\x1b[4m{line}|\x1b[24m"));
                     row += 1;
                     t_row += 1;
                 }
@@ -344,8 +347,11 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let row_num_len = 5;
             
             // move cursor to bottom
-            write!(out, "\x1b[{};{}H\x1b[2K", cur_h, 1)
-                .unwrap();
+            frame.push_str(&format!("\x1b[{};{}H\x1b[2K", cur_h, 1));
+
+            // end update
+            let mut out = stdout().lock();
+            write!(out, "{}", frame).unwrap();
 
             out.flush().unwrap();
         }
