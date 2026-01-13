@@ -337,7 +337,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
                                 // save coordinates for cursor
-                                w_info.set_cursor(t_row + 1, line_w + 1, &mut row_cell);
+                                // w_info.set_cursor(t_row + 1, line_w + 1, &mut row_cell);
                                 // highlight cell
                                 cell = format!("\x1b[7m{}\x1b[27m", cell);
                                 // take escape sequence into account for width calculation above
