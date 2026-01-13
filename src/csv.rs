@@ -314,7 +314,6 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                     }
                 }
 
-
                 // reset index for each row
                 idx = orig_idx;
                 let mut sub = 0;
@@ -327,16 +326,19 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                 None => &Cell::new("!!!CSVERR!!!".to_string()),
                             };
                             
+                            let line_w = line.len().saturating_sub(sub);
                             let width = row_cell.width;
-                            if line.len().saturating_sub(sub) + width > cur_w {
+                            if line_w + width > cur_w {
                                 break;
                             }
                             
                             let mut cell: String = row_cell.format_cell();
 
-                            // highlight the current cell
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
+                                // save coordinates for cursor
+                                w_info.set_cursor(t_row + 1, line_w + 1);
+                                // highlight cell
                                 cell = format!("\x1b[7m{}\x1b[27m", cell);
                                 // take escape sequence into account for width calculation above
                                 sub = 11;
@@ -355,6 +357,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
                     // write line
                     frame.push_str(&format!("\x1b[4m{line}|\x1b[24m"));
+
                     row += 1;
                     t_row += 1;
                 }
@@ -370,6 +373,11 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // end update
             let mut out = stdout().lock();
             write!(out, "{}", frame).unwrap();
+
+            if w_info.show_cursor() {
+                let (l, c) = w_info.get_cursor();
+                write!(out, "\x1b[{};{}H", l, c);
+            }
 
             out.flush().unwrap();
         }
