@@ -8,7 +8,7 @@ use crate::terminal::{h_ptr, w_ptr, WinInfo};
 
 
 #[derive(Debug)]
-struct Cell {
+pub struct Cell {
     pub content: String,
     pub width: usize,
     pub height: usize,
@@ -33,11 +33,11 @@ impl Cell {
         self.height = h;
     }
 
-    fn dec_text_offset(&mut self, val: usize) {
+    pub fn dec_text_offset(&mut self, val: usize) {
         self.text_offset = self.text_offset.saturating_sub(val);
     }
 
-    fn inc_text_offset(&mut self, val: usize) {
+    pub fn inc_text_offset(&mut self, val: usize) {
         if self.len().saturating_sub(self.text_offset) > self.width {
             self.text_offset += val;
         } else {
@@ -46,18 +46,18 @@ impl Cell {
     }
 
     #[inline]
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.content.len()
     }
 
     #[inline]
-    fn content(&self) -> String {
+    pub fn content(&self) -> String {
         self.content.clone()
     }
 
     fn format_cell(&self) -> String {
         let mut cell = String::new();
-        if self.len() - self.text_offset > self.width {
+        if self.len().saturating_sub(self.text_offset) > self.width {
             let content: String = self.content
                 .chars()
                 .skip(self.text_offset)
@@ -125,11 +125,11 @@ impl Cells {
         self.rows.push(row);
     }
 
-    fn get_row(&mut self, idx: usize) -> &Vec<Cell> {
+    fn get_row(&mut self, idx: usize) -> &mut Vec<Cell> {
         if idx > self.num_rows - 1 {
-            return &self.rows[self.num_rows - 1];
+            return self.rows.get_mut(self.num_rows - 1).unwrap();
         } else {
-            return &self.rows[idx];
+            return self.rows.get_mut(idx).unwrap();
         }
     }
 
@@ -297,7 +297,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
                 let mut line: String = "".to_string();
                 // reference to vec of cols
-                let mut v_cols = &Vec::new();
+                let mut v_cols = &mut Vec::<Cell>::new();
                 // always print col names
                 if t_row == 0 {
                     line = "    ".to_string();
@@ -320,10 +320,10 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                 if row_len > 0 && idx < row_len {
                     loop {
                         if idx < row_len {
-                            let row_cell = match v_cols.get(idx) {
+                            let mut row_cell = match v_cols.get_mut(idx) {
                                 Some(cell) => cell,
                                 // always have a cell; fill with dummy value for now
-                                None => &Cell::new("!!!CSVERR!!!".to_string()),
+                                None => &mut Cell::new("!!!CSVERR!!!".to_string()),
                             };
                             
                             let line_w = line.len().saturating_sub(sub);
@@ -337,7 +337,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
                                 // save coordinates for cursor
-                                w_info.set_cursor(t_row + 1, line_w + 1);
+                                w_info.set_cursor(t_row + 1, line_w + 1, &mut row_cell);
                                 // highlight cell
                                 cell = format!("\x1b[7m{}\x1b[27m", cell);
                                 // take escape sequence into account for width calculation above
@@ -374,7 +374,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let mut out = stdout().lock();
             write!(out, "{}", frame).unwrap();
 
-            if w_info.show_cursor() {
+            if w_info.cursor_shown() {
                 let (l, c) = w_info.get_cursor();
                 write!(out, "\x1b[{};{}H", l, c);
             }
