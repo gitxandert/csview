@@ -332,6 +332,7 @@ pub fn raw_mode(switch: bool) {
         tcgetattr(fd, &mut term);
 
         let mut out = std::io::stdout();
+        let mut outstring = String::new();
 
         match switch {
             true => {
@@ -342,24 +343,25 @@ pub fn raw_mode(switch: bool) {
                 raw.c_lflag |= libc::ISIG;
                 // make reads non-blocking
                 raw.c_cc[libc::VMIN] = 0;
-                raw.c_cc[libc::VTIME] = 1;
+                raw.c_cc[libc::VTIME] = 0;
                 tcsetattr(fd, TCSANOW, &raw);
     
                 // switch to Alternate Screen Buffer
-                write!(out, "\x1b[?1049h").unwrap();
+                outstring.push_str("\x1b[?1049h");
                 // hide cursor
-                write!(out, "\x1b[?25l").unwrap();
+                outstring.push_str("\x1b[?25l");
             }
             false => {
                 if let Some(orig) = ORIG_TERM {
                     tcsetattr(fd, TCSANOW, &orig);
                     // switch back to main buffer
-                    write!(out, "\x1b[?1049l").unwrap();
+                    outstring.push_str("\x1b[?1049l");
                     // show cursor
-                    write!(out, "\x1b[?25h").unwrap();
+                    outstring.push_str("\x1b[?25h");
                 }
             }
         };
+        write!(out, "{}", outstring).unwrap();
         out.flush().unwrap();
     }
 }
