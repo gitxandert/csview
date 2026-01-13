@@ -29,6 +29,9 @@ pub struct WinInfo {
     pub h_pointer: usize,
     x_page: usize,
     y_page: usize,
+    show_cursor: bool,
+    cursor_line: usize,
+    cursor_col: usize,
 }
 
 impl WinInfo {
@@ -46,6 +49,9 @@ impl WinInfo {
             h_pointer: 1usize,
             x_page: 0usize,
             y_page: 0usize,
+            show_cursor: false,
+            cursor_line: 0usize,
+            cursor_col: 0usize,
         }
     }
 
@@ -79,14 +85,29 @@ impl WinInfo {
         self.mode = mode;
     }
 
-    pub fn show_cursor(&mut self, show: bool) {
+    pub fn show_cursor(&self) -> bool {
+        self.show_cursor
+    }
+
+    pub fn toggle_cursor(&mut self) {
+        self.show_cursor = !self.show_cursor;
         let mut out = std::io::stdout();
-        if show {
+        if self.show_cursor {
             write!(out, "\x1b[?25h").unwrap();
         } else {
             write!(out, "\x1b[?25l").unwrap();
         }
         out.flush().unwrap();
+        self.was_changed = true;
+    }
+
+    pub fn set_cursor(&mut self, line: usize, col: usize) {
+        self.cursor_line = line;
+        self.cursor_col = col;
+    }
+
+    pub fn get_cursor(&self) -> (usize, usize) {
+        (self.cursor_line, self.cursor_col)
     }
 
     pub fn set_w_h(&mut self, cur_w: usize, cur_h: usize) {
