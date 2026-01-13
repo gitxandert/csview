@@ -5,15 +5,9 @@ This program takes a single CSV file argument and renders it as a series of cell
 
 This package is installed with Rust's cargo toolchain; if you're not already a Rustacean, install cargo first.
 
-Run the provided install script:  
+If you don't want to tinker with the build, you can just run the provided install script:  
 
     ./install_csview
-
-Note: event devices typically can't be read by a normal user, so you'll need to either run csview as sudo, or get user permission to read the keyboard, with something like:
-    
-    sudo usermod -aG input "$USER"
-
-(Reboot after running the above.)
 
 ## Use
 
