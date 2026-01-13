@@ -5,27 +5,19 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
     match input {
         // normal arrows
         [27, 91, 65] => { // up
-            if w_info.mode() != ScrollMode::Cursor {
-                w_info.set_mode(ScrollMode::Cell);
-            }
+            w_info.set_mode(ScrollMode::Cell);
             w_info.h_offset_up();
         }
         [27, 91, 66] => { // down
-            if w_info.mode() != ScrollMode::Cursor {
-                w_info.set_mode(ScrollMode::Cell);
-            }
+            w_info.set_mode(ScrollMode::Cell);
             w_info.h_offset_down();
         }
         [27, 91, 67] => { // right
-            if w_info.mode() != ScrollMode::Cursor {
-                w_info.set_mode(ScrollMode::Cell);
-            }
+            w_info.set_mode(ScrollMode::Cell);
             w_info.w_offset_right(cells);
         }
         [27, 91, 68] => { // left
-            if w_info.mode() != ScrollMode::Cursor {
-                w_info.set_mode(ScrollMode::Cell);
-            }
+            w_info.set_mode(ScrollMode::Cell);
             w_info.w_offset_left(cells);
         }
         // modified arrows
@@ -34,7 +26,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 50 => w_info.set_mode(ScrollMode::Axis),
                 51 => w_info.set_mode(ScrollMode::Text),
                 53 => w_info.set_mode(ScrollMode::Page),
-                _ => w_info.set_mode(ScrollMode::Cell),
+                _ => (),
             }
             match d {
                 65 => w_info.h_offset_up(),
@@ -47,9 +39,8 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
         // ctrl + w (write)
         [23] => {
             // also toggles ScrollMode::Cursor and ScrollMode::Cell
-            w_info.toggle_cursor();
+            // w_info.toggle_cursor();
         }
         _ => (),
-
     }
 }
