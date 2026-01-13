@@ -9,7 +9,7 @@ use libc::{
 
 use crate::csv::{Cell, Cells};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScrollMode {
     Cursor,
     Text,
