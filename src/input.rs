@@ -36,6 +36,8 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 _ => (),
             }
         }
+        // ctrl + w (write)
+        [23] => w_info.toggle_cursor(),
         _ => (),
 
     }
