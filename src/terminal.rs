@@ -7,13 +7,22 @@ use libc::{
     termios, tcgetattr, tcsetattr, cfmakeraw, TCSANOW,
 };
 
-use crate::csv::Cells;
+use crate::csv::{Cell, Cells};
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum ScrollMode {
+    Cursor,
     Text,
     Cell,
     Axis,
     Page,
+}
+
+struct Cursor {
+    line: usize,
+    col: usize,
+    offset: usize,
+    shown: bool,
 }
 
 pub struct WinInfo {
@@ -29,9 +38,7 @@ pub struct WinInfo {
     pub h_pointer: usize,
     x_page: usize,
     y_page: usize,
-    show_cursor: bool,
-    cursor_line: usize,
-    cursor_col: usize,
+    cursor: Cursor,
 }
 
 impl WinInfo {
@@ -49,9 +56,7 @@ impl WinInfo {
             h_pointer: 1usize,
             x_page: 0usize,
             y_page: 0usize,
-            show_cursor: false,
-            cursor_line: 0usize,
-            cursor_col: 0usize,
+            cursor: Cursor { line: 0usize, col: 0usize, offset: 0usize, shown: false },
         }
     }
 
@@ -85,29 +90,61 @@ impl WinInfo {
         self.mode = mode;
     }
 
-    pub fn show_cursor(&self) -> bool {
-        self.show_cursor
+    pub fn mode(&self) -> ScrollMode {
+        self.mode
+    }
+
+    pub fn cursor_shown(&self) -> bool {
+        self.cursor.shown
     }
 
     pub fn toggle_cursor(&mut self) {
-        self.show_cursor = !self.show_cursor;
+        self.cursor.shown = !self.cursor.shown;
         let mut out = std::io::stdout();
-        if self.show_cursor {
+        if self.cursor.shown {
+            self.set_mode(ScrollMode::Cursor);
             write!(out, "\x1b[?25h").unwrap();
         } else {
+            self.set_mode(ScrollMode::Cell);
+            self.cursor.offset = 0;
             write!(out, "\x1b[?25l").unwrap();
         }
         out.flush().unwrap();
         self.was_changed = true;
     }
 
-    pub fn set_cursor(&mut self, line: usize, col: usize) {
-        self.cursor_line = line;
-        self.cursor_col = col;
+    pub fn set_cursor(&mut self, line: usize, col: usize, cell: &mut Cell) {
+        self.cursor.line = line;
+        self.cursor.col = col;
+
+        // if offset is greater than cell width, shift cell text instead
+        if self.cursor.offset <= cell.width {
+            if cell.len() < cell.width {
+                if self.cursor.offset > cell.len() {
+                    self.cursor.offset = cell.len();
+                }
+            }
+
+            // hacky
+            if self.cursor.offset == 0 {
+                cell.dec_text_offset(1);
+            }
+            // + 2 because cell begins with whitespace
+            // and col is + 1 cell index
+            self.cursor.col += (self.cursor.offset + 2);
+        } else {
+            let diff = self.cursor.offset.saturating_sub(cell.width);
+            if self.cursor.offset < cell.len() {
+                cell.inc_text_offset(diff);
+            } else {
+                self.cursor.offset = cell.len();
+            }
+            self.cursor.col += (self.cursor.offset.saturating_sub(diff) + 3);
+        }
     }
 
     pub fn get_cursor(&self) -> (usize, usize) {
-        (self.cursor_line, self.cursor_col)
+        (self.cursor.line, self.cursor.col)
     }
 
     pub fn set_w_h(&mut self, cur_w: usize, cur_h: usize) {
@@ -123,6 +160,7 @@ impl WinInfo {
 
     pub fn h_offset_up(&mut self) {
         match self.mode {
+            ScrollMode::Cursor => (),
             ScrollMode::Text => (),
             ScrollMode::Cell => self.dec_h_pointer(),
             ScrollMode::Axis => self.unshift_page_h(),
@@ -132,6 +170,7 @@ impl WinInfo {
 
     pub fn h_offset_down(&mut self) {
         match self.mode {
+            ScrollMode::Cursor => (),
             ScrollMode::Text => (),
             ScrollMode::Cell => self.inc_h_pointer(),
             ScrollMode::Axis => self.shift_page_h(),
@@ -141,6 +180,7 @@ impl WinInfo {
 
     pub fn w_offset_left(&mut self, cells: &mut Cells) {
         match self.mode {
+            ScrollMode::Cursor => self.dec_cursor(),
             ScrollMode::Text => {
                 cells.set_text_offset(
                     -1, 
@@ -156,6 +196,7 @@ impl WinInfo {
 
     pub fn w_offset_right(&mut self, cells: &mut Cells) {
         match self.mode {
+            ScrollMode::Cursor => self.inc_cursor(),
             ScrollMode::Text => {
                 cells.set_text_offset(
                     1,
@@ -171,6 +212,16 @@ impl WinInfo {
 
     // private functions
     //
+    fn dec_cursor(&mut self) {
+        self.cursor.offset = self.cursor.offset.saturating_sub(1);
+        self.was_changed = true;
+    }
+
+    fn inc_cursor(&mut self) {
+        self.cursor.offset += 1;
+        self.was_changed = true;
+    }
+
     fn dec_h_pointer(&mut self) {
         if self.h_pointer > 0 {
             self.h_pointer = self.h_pointer.saturating_sub(1);
