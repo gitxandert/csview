@@ -83,6 +83,7 @@ pub struct Cells {
     rows: Vec<Vec<Cell>>,
     num_cols: usize,
     num_rows: usize,
+    w_cell: (usize, usize),
     were_changed: bool,
 }
 
@@ -90,9 +91,10 @@ impl Cells {
     fn new(num_cols: usize, num_rows: usize) -> Self {
         let rows = Vec::<Vec<Cell>>::new();
         let text_offsets = vec![0usize; num_cols];
+        let w_cell = (0usize, 0usize);
         let were_changed = false;
 
-        Self { rows, num_cols, num_rows, were_changed }
+        Self { rows, num_cols, num_rows, w_cell, were_changed }
     }
 
     fn changed(&mut self) -> bool {
@@ -121,15 +123,19 @@ impl Cells {
         self.were_changed = true;
     }
 
+    fn set_w_cell(&mut self, row: usize, idx: usize) {
+        self.w_cell = (row, idx);
+    }
+
     fn push_row(&mut self, row: Vec<Cell>) {
         self.rows.push(row);
     }
 
-    fn get_row(&mut self, idx: usize) -> &mut Vec<Cell> {
+    fn get_row(&mut self, idx: usize) -> &Vec<Cell> {
         if idx > self.num_rows - 1 {
-            return self.rows.get_mut(self.num_rows - 1).unwrap();
+            return self.rows.get(self.num_rows - 1).unwrap();
         } else {
-            return self.rows.get_mut(idx).unwrap();
+            return self.rows.get(idx).unwrap();
         }
     }
 
@@ -274,8 +280,13 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let mut row = h_offset;
             let mut t_row = 0usize;
 
+            // indices for cells in rows
             let orig_idx = w_offset;
             let mut idx = orig_idx;
+
+            // save which cell can be written to
+            let mut w_row = 0usize;
+            let mut w_idx = 0usize;
 
             // consistent row_len
             let row_len = cells.num_cols();
@@ -297,7 +308,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
                 let mut line: String = "".to_string();
                 // reference to vec of cols
-                let mut v_cols = &mut Vec::<Cell>::new();
+                let mut v_cols = &Vec::<Cell>::new();
                 // always print col names
                 if t_row == 0 {
                     line = "    ".to_string();
@@ -320,10 +331,10 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                 if row_len > 0 && idx < row_len {
                     loop {
                         if idx < row_len {
-                            let mut row_cell = match v_cols.get_mut(idx) {
+                            let row_cell = match v_cols.get(idx) {
                                 Some(cell) => cell,
                                 // always have a cell; fill with dummy value for now
-                                None => &mut Cell::new("!!!CSVERR!!!".to_string()),
+                                None => &Cell::new("!!!CSVERR!!!".to_string()),
                             };
                             
                             let line_w = line.len().saturating_sub(sub);
@@ -336,12 +347,15 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
-                                // save coordinates for cursor
-                                // w_info.set_cursor(t_row + 1, line_w + 1, &mut row_cell);
+                                // save coordinates for writing
+                                w_info.set_cursor_co(t_row + 1, line_w + 1);
                                 // highlight cell
-                                cell = format!("\x1b[7m{}\x1b[27m", cell);
+                                cell = format!(
+                                    "\x1b[7;36;47m{}\x1b[39;49;27m", 
+                                    cell
+                                );
                                 // take escape sequence into account for width calculation above
-                                sub = 11;
+                                sub = 21;
                                 focus = row_cell.content();
                                 if focus.len() > cur_w {
                                     focus = (&focus[0..cur_w]).to_string();
@@ -362,13 +376,15 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                     t_row += 1;
                 }
             }
+            // set cell for writing
+            cells.set_w_cell(w_row, w_idx);
             w_info.set_x_page(idx, orig_idx);
             w_info.set_y_page(row, h_offset);
 
             let row_num_len = 5;
             
             // show focus at bottom
-            frame.push_str(&format!("\x1b[{};{}H\x1b[2K{}", cur_h, 1, focus));
+            frame.push_str(&format!("\x1b[{};{}H\x1b[1m\x1b[2K{}\x1b[0m", cur_h, 1, focus));
 
             // end update
             let mut out = stdout().lock();
