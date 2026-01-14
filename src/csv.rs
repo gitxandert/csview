@@ -6,23 +6,220 @@ use std::{
 
 use crate::terminal::{h_ptr, w_ptr, WinInfo};
 
+/*
+ * To preserve cell formatting:
+ * - iterate through entire cell
+ * - collect indices of escape characters
+ *      - for \x1b, collect a second index,
+ *        based on whether it is followed by [:
+ *          - if so, 
+ *            match against @..~
+ *          - if not,
+ *            second index immediately follows first
+ *      - collect \n index and update cell's height (depth?)
+ *      - ignore/remove all others
+ *  - while collecting these indices,
+ *    record "real" length of string
+ *  - when formatting cell, check if offset
+ *    includes any part of an escape sequence
+ *      - if so, the truncated text needs to be reformatted
+*/
+
+#[derive(Debug)]
+struct EscSeq {
+    seq: String,
+    start: usize,
+    end: usize,
+    len: usize,
+}
+
+impl EscSeq {
+    fn new() -> Self {
+        Self {
+            seq: String::new(),
+            start: 0usize,
+            end: 0usize,
+            len: 0usize,
+        }
+    }
+
+    fn clone(&self) -> Self {
+        Self {
+            seq: self.seq.clone(),
+            start: self.start,
+            end: self.end,
+            len: self.len,
+        }
+    }
+
+    fn push_seq(&mut self, c: char) {
+        self.seq.push(c);
+    }
+
+    fn set_start(&mut self, c: char, i: usize) {
+        self.push_seq(c);
+        self.start = i;
+    }
+
+    fn set_end(&mut self, c: char, i: usize) {
+        self.push_seq(c);
+        self.end = i;
+        self.len = self.end - self.start + 1;
+    }
+}
 
 #[derive(Debug)]
 pub struct Cell {
-    pub content: String,
-    pub width: usize,
-    pub height: usize,
+    content: Vec<String>,
+    escape_sequences: Vec<EscSeq>,
+    lens: Vec<usize>,
+    width: usize, // of the cell, not its content
+    height: usize, // of the cell, not its content
     pub text_offset: usize,
+    pub height_offset: usize,
 }
 
 impl Cell {
     fn new(content: String) -> Self {
-        Self {
-            content,
+        // store content as lines separated by newlines;
+        // store escapes and their indices
+        let mut lines = Vec::<String>::new();
+        let mut esq = Vec::<EscSeq>::new();
+
+        // len keeps track of "real" len
+        // (i.e. the characters, not the formatting)
+        let mut lens = Vec::<usize>::new();
+        let mut len = 0usize;
+
+        let mut line = String::new();
+        let mut e = EscSeq::new();
+        
+        let mut i = 0usize;
+
+        let mut x = false;
+        let mut is_csi = false;
+        // check for escape sequences;
+        for c in content.chars() {
+            match c {
+                '\x1b' => {
+                    x = true;
+                    e.set_start(c, i);
+                }
+                '[' if x => {
+                    is_csi = true;
+                    e.push_seq(c);
+                }
+                '@'..='~' if x => {
+                    e.set_end(c, i);
+                    esq.push(e.clone());
+                    e = EscSeq::new();
+
+                    x = false;
+                    is_csi = false;
+                }
+                '\n' if !x => {
+                    // push line and len
+                    lines.push(line);
+                    lens.push(len);
+                    line = String::new();
+                    len = 0usize;
+                    continue;
+                }
+                _ => {
+                    match x {
+                        false => len += 1,
+                        true => {
+                            match is_csi {
+                                true => e.push_seq(c),
+                                false => {
+                                    e.set_end(c, i);
+                                    esq.push(e.clone());
+                                    e = EscSeq::new();
+
+                                    x = false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+           
+            line.push(c);
+            i += 1;
+        }
+
+        // push final line and len
+        lines.push(line);
+        lens.push(len);
+
+        Self { 
+            content: lines,
+            escape_sequences: esq,
+            lens,
             width: 12usize,
             height: 1usize,
             text_offset: 0usize,
+            height_offset: 0usize,
         }
+    }
+
+    fn format_cell(&self) -> String {
+        let mut cell = String::new();
+        let mut content = self.content();
+      
+        // iterate through escape_sequences
+        // while escape_sequence[i] < self.text_offset;
+        // any escape sequence before the
+        // (real) text offset will be added to the start
+        // of the formatted string; and escape sequence
+        // after will be added to the end of the string
+        let mut fmt_start = String::new();
+        let mut fmt_end = String::new();
+        let mut skip = self.text_offset;
+        for esc in &self.escape_sequences {
+            if esc.start > skip {
+                fmt_end.push_str(&esc.seq);
+            } else {
+                fmt_start.push_str(&esc.seq);
+                skip += (esc.end.saturating_sub(skip) + 1);
+            }
+        }
+        
+        let mut take = self.width;
+        for esc in &self.escape_sequences {
+        // should have skipped past all previous EscSeq,
+        // so only need to take remaining into account
+            if esc.end < skip || esc.start > skip + take {
+                continue;
+            }
+            take += esc.len;
+        }
+
+        let post_skip: String = content
+            .chars()
+            .skip(skip)
+            .collect();
+
+        let mut ell = String::new();
+        if post_skip.len() > take {
+            take = take.saturating_sub(3);
+            ell = "...".to_string();
+        }
+
+        let mut taken: String = post_skip
+            .chars()
+            .take(take)
+            .collect();
+
+        taken.push_str(&ell);
+
+        cell = format!(
+            "| {}{:<width$} {}", 
+            fmt_start, taken, fmt_end, 
+            width = take
+        ); 
+        
+        cell
     }
 
     fn set_width(&mut self, w: usize) {
@@ -47,35 +244,12 @@ impl Cell {
 
     #[inline]
     pub fn len(&self) -> usize {
-        self.content.len()
+        *self.lens.get(self.height_offset).unwrap()
     }
 
     #[inline]
     pub fn content(&self) -> String {
-        self.content.clone()
-    }
-
-    fn format_cell(&self) -> String {
-        let mut cell = String::new();
-        if self.len().saturating_sub(self.text_offset) > self.width {
-            let content: String = self.content
-                .chars()
-                .skip(self.text_offset)
-                .take(self.width - 3)
-                .collect();
-            cell = format!("| {:<width$}... ", 
-                content, width = self.width - 3);
-        } else {
-            let content: String = self.content
-                .chars()
-                .skip(self.text_offset)
-                .take(self.width)
-                .collect();
-            cell = format!("| {:<width$} ",
-                content, width = self.width);
-        }
-        
-        cell
+        self.content.get(self.height_offset).unwrap().clone()
     }
 }
 
@@ -207,18 +381,80 @@ fn parse_by_comma(line: &str) -> Vec<Cell> {
     parsed
 }
 
+fn make_col_idx(num_cols: usize) -> Vec<Cell> {
+    let mut row = Vec::<Cell>::new();
+    let mut idx = "A".to_string();
+    for _ in 0..num_cols {
+        let con_width = idx.len();
+        let content = {
+            if con_width % 2 == 0{
+                let ws = 6_usize.saturating_sub(con_width / 2);
+                format!("{:<lw$}{}{:<rw$}",
+                     " ", idx.clone(), " ", lw = ws, rw = ws)
+            } else {
+                let lw = 6_usize.saturating_sub(con_width / 2);
+                let rw = 6_usize.saturating_sub(lw + 1);
+                format!("{:<lw$}{}{:<rw$}",
+                     " ", idx.clone(), " ", lw = lw, rw = rw)
+
+            }
+        };
+                    
+        let cell = Cell::new(content);
+        row.push(cell);
+       
+        let mut i = 1;
+        let chars: String = idx.chars().rev().collect();
+        let mut add_a = false;
+        let mut inc_next = false;
+        let new_idx: String = chars
+            .chars()
+            .map(|c|
+                if c == 'Z' {
+                    if i == idx.len() {
+                        add_a = true;
+                    } else {
+                        inc_next = true;
+                    }
+                    i += 1;
+                     'A'
+                } else {
+                    let mut cc = c;
+                    if i == 1 || inc_next {
+                        let num = c as u32 + 1;
+                        cc = char::from_u32(num).unwrap();
+                        inc_next = false;
+                    }
+                    i += 1;
+                    cc
+                }
+            ).collect();
+
+        let new_idx: String = new_idx.chars().rev().collect();
+        if add_a {
+            idx = format!("{}A", new_idx);
+        } else {
+            idx = new_idx;
+        }
+    }
+
+    row
+}
+
 fn parse_csv_into_cells(csv: String) -> Result<Cells, io::Error> {
     let lines: Vec<String> = parse_by_newline(&csv);
 
     let col_names: Vec<Cell> = parse_by_comma(&lines[0]);
     
     let num_cols = col_names.len();
-    let num_rows = lines.len();
+    let num_rows = lines.len() + 1;
     
-    let mut cells = Cells::new(num_cols, num_rows);
+    let mut cells = Cells::new(num_cols.clone(), num_rows);
+    let col_idx: Vec<Cell> = make_col_idx(num_cols);
+    cells.push_row(col_idx);
     cells.push_row(col_names);
 
-    for i in 1..num_rows {
+    for i in 1..num_rows - 1 {
         let row: Vec<Cell> = parse_by_comma(&lines[i]);
         cells.push_row(row);
     }
@@ -337,9 +573,9 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                 None => &Cell::new("!!!CSVERR!!!".to_string()),
                             };
                             
-                            let line_w = line.len().saturating_sub(sub);
+                            let line_w = line.len().saturating_sub(sub) + 4;
                             let width = row_cell.width;
-                            if line_w + width > cur_w {
+                            if line_w + width> cur_w {
                                 break;
                             }
                             
@@ -361,7 +597,8 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                     focus = (&focus[0..cur_w]).to_string();
                                 }
                             }
-                           
+                            
+                            cell = format!("\x1b[4m{}", cell);
                             line += &cell;
                             idx += 1;
                         } else {
@@ -370,7 +607,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                     }
 
                     // write line
-                    frame.push_str(&format!("\x1b[4m{line}|\x1b[24m"));
+                    frame.push_str(&format!("{line}|\x1b[24m"));
 
                     row += 1;
                     t_row += 1;
@@ -384,7 +621,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let row_num_len = 5;
             
             // show focus at bottom
-            frame.push_str(&format!("\x1b[{};{}H\x1b[1m\x1b[2K{}\x1b[0m", cur_h, 1, focus));
+            frame.push_str(&format!("\x1b[{};{}H\x1b[2K{}", cur_h, 1, focus));
 
             // end update
             let mut out = stdout().lock();
