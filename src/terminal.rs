@@ -135,6 +135,15 @@ impl WinInfo {
         (self.cursor.line, self.cursor.col)
     }
 
+    pub fn get_cursor_offset(&self) -> usize {
+        self.cursor.offset
+    }
+
+    pub fn set_cursor_offset(&mut self, new: usize) {
+        self.cursor.offset = new;
+        self.was_changed = true;
+    }
+
     pub fn set_w_h(&mut self, cur_w: usize, cur_h: usize) {
         if self.width != cur_w {
             self.width = cur_w;
@@ -389,8 +398,7 @@ pub fn raw_mode(switch: bool) {
                 cfmakeraw(&mut raw);
                 //re-enable SIGINT
                 raw.c_lflag |= libc::ISIG;
-                // make reads non-blocking
-                raw.c_cc[libc::VMIN] = 0;
+                raw.c_cc[libc::VMIN] = 1;
                 raw.c_cc[libc::VTIME] = 0;
                 tcsetattr(fd, TCSANOW, &raw);
     
