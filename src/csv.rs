@@ -163,7 +163,7 @@ impl Cell {
         }
     }
 
-    fn format_cell(&self) -> String {
+    fn format_cell(&self) -> (String, usize) {
         let mut cell = String::new();
         let mut content = self.content();
       
@@ -184,7 +184,7 @@ impl Cell {
                 skip += (esc.end.saturating_sub(skip) + 1);
             }
         }
-        
+
         let mut take = self.width;
         for esc in &self.escape_sequences {
         // should have skipped past all previous EscSeq,
@@ -200,10 +200,13 @@ impl Cell {
             .skip(skip)
             .collect();
 
-        let mut ell = String::new();
+        let mut add = String::new();
         if post_skip.len() > take {
             take = take.saturating_sub(3);
-            ell = "...".to_string();
+            add = "...".to_string();
+        } else if post_skip.len() < take {
+            let ws = take.saturating_sub(post_skip.len());
+            add = format!("\x1b[4m{:<width$}", " ", width = ws);
         }
 
         let mut taken: String = post_skip
@@ -211,15 +214,18 @@ impl Cell {
             .take(take)
             .collect();
 
-        taken.push_str(&ell);
+        taken.push_str(&add);
+        fmt_end.push_str("\x1b[4m");
 
         cell = format!(
-            "| {}{:<width$} {}", 
+            "| {}{}{} ", 
             fmt_start, taken, fmt_end, 
-            width = take
-        ); 
+        );
+        eprintln!("{}", cell);
+
+        let esc_len = fmt_start.len() + fmt_end.len() + take.saturating_sub(self.width);
         
-        cell
+        (cell, esc_len)
     }
 
     fn set_width(&mut self, w: usize) {
@@ -579,7 +585,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                 break;
                             }
                             
-                            let mut cell: String = row_cell.format_cell();
+                            let (mut cell, esc_len) = row_cell.format_cell();
 
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
@@ -591,7 +597,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                     cell
                                 );
                                 // take escape sequence into account for width calculation above
-                                sub = 21;
+                                sub = 24 + esc_len;
                                 focus = row_cell.content();
                                 if focus.len() > cur_w {
                                     focus = (&focus[0..cur_w]).to_string();
