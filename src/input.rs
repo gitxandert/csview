@@ -48,10 +48,12 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
         match input {
             // normal arrows
             [27, 91, 65] => { // up
-                // can maybe use to shift back by the cell's width
+                // if cell has lines separated by \n,
+                // this scrolls through them; otherwise, it can
+                // maybe be used to shift back by the cell's width
             }
             [27, 91, 66] => { // down
-                // opposite of above
+                // sim.
             }
             [27, 91, 67] => { // right
                 // scrolls cursor right within a cell
@@ -62,17 +64,14 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             // modified arrows
             [27, 91, 49, 59, m, d] => {
                 match m {
-                    // affects scroll speed (ctrl)
-                    // and formatting (shift)
-                    // (maybe think of something with alt)
-                    // (tab would be nice too)
+                    // affects scroll speed
                     _ => (),
                 }
                 match d {
-                    65 => (), // beginning of cell
-                    66 => (), // end of cell
-                    67 => (), // forward by a word
-                    68 => (), // back by a word
+                    65 => (),
+                    66 => (),
+                    67 => (),
+                    68 => (),
                     _ => (),
                 }
             }
@@ -80,7 +79,23 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             [23] => {
                 w_info.set_writing(false);
             }
-            _ => (),
+            [8] | [127] => {
+                let cur_pos = w_info.get_cursor_offset();
+                cells.delete_from_cell(cur_pos);
+                w_info.set_cursor_offset(cur_pos.saturating_sub(1));
+            }
+            _ => {
+                let c = match str::from_utf8(input) {
+                    Ok(valid) => valid,
+                    Err(_) => {
+                        eprintln!("Invalid input {:?}", input);
+                        return;
+                    }
+                };
+                let cur_pos = w_info.get_cursor_offset();
+                cells.write_to_cell(c.to_string(), cur_pos);
+                w_info.set_cursor_offset(cur_pos + 1);
+            }
         }
     }
 }
