@@ -44,6 +44,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             _ => (),
         }
     } else {
+        // writing to cell
         match input {
             // normal arrows
             [27, 91, 65] => { // up
@@ -61,7 +62,10 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             // modified arrows
             [27, 91, 49, 59, m, d] => {
                 match m {
-                    // affects scroll speed
+                    // affects scroll speed (ctrl)
+                    // and formatting (shift)
+                    // (maybe think of something with alt)
+                    // (tab would be nice too)
                     _ => (),
                 }
                 match d {
