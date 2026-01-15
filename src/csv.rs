@@ -441,18 +441,23 @@ fn parse_by_newline(block: &str) -> Vec<String> {
     parsed
 }
 
-fn parse_by_comma(line: &str) -> Vec<Cell> {
+fn parse_by_delim(line: &str, delim: char) -> Vec<Cell> {
     let mut parsed = Vec::<Cell>::new();
     
     let mut cell_str = String::new();
     let mut is_quoted = false;
+   
+    let delim = match delim {
+        't' => '\t',
+        _ => delim
+    };
 
     for c in line.chars() {
         match c {
             '"' => {
                 is_quoted = !is_quoted;
             }
-            ',' if !is_quoted => {
+            ch if ch == delim && !is_quoted => {
                 let cell = Cell::new(cell_str.clone());
                 parsed.push(cell);
                 cell_str = String::new();
@@ -526,10 +531,10 @@ fn make_col_idx(num_cols: usize) -> Vec<Cell> {
     row
 }
 
-fn parse_csv_into_cells(csv: String) -> Result<Cells, io::Error> {
+fn parse_csv_into_cells(csv: String, delim: char) -> Result<Cells, io::Error> {
     let lines: Vec<String> = parse_by_newline(&csv);
 
-    let col_names: Vec<Cell> = parse_by_comma(&lines[0]);
+    let col_names: Vec<Cell> = parse_by_delim(&lines[0], delim);
     
     let num_cols = col_names.len();
     let num_rows = lines.len() + 1;
@@ -540,33 +545,19 @@ fn parse_csv_into_cells(csv: String) -> Result<Cells, io::Error> {
     cells.push_row(col_names);
 
     for i in 1..num_rows - 1 {
-        let row: Vec<Cell> = parse_by_comma(&lines[i]);
+        let row: Vec<Cell> = parse_by_delim(&lines[i], delim);
         cells.push_row(row);
     }
 
     Ok(cells)
 }
 
-pub fn load_csv(filename: String) -> Result<Cells, io::Error> {
-    let ext: &str = match filename.rsplit_once(|b: char| b == '.') {
-        Some((before, after)) if !before.is_empty() && !after.is_empty() => after,
-        _ => {
-            return Err(io::Error::new(ErrorKind::InvalidFilename,
-                    "Filename must have a .csv extension"
-                    ));
-        }
-    };
-
-    if ext != "csv" {
-        return Err(io::Error::new(ErrorKind::InvalidFilename,
-                "Filename must have a .csv extension"
-                ));
-    }
-
+pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
     let mut file = fs::read_to_string(filename)?;
+    // don't parse carriage returns
     file = file.replace("\r", " ");
 
-    let cells = parse_csv_into_cells(file)?;
+    let cells = parse_csv_into_cells(file, delim)?;
 
     Ok(cells)
 }
@@ -729,7 +720,6 @@ pub fn write_to_file(mut cells: Cells, filename: String) {
             for line in &cell.content {
                 content.push_str(&line);
             }
-            eprintln!("{content}");
             row.push_str(&content);
             if j != cur.len() - 1 {
                 row.push(',');
@@ -740,7 +730,6 @@ pub fn write_to_file(mut cells: Cells, filename: String) {
             row.push('\n');
         }
 
-        eprintln!("{row}");
         sheet.push_str(&row);
     }
     
