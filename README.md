@@ -1,4 +1,4 @@
-# csview - command-line TUI for friendly/ier CSV rendering
+# csview - command-line spreadsheet TUI
 This program takes a single CSV file argument and renders it as a series of cells across the entire width and height of the terminal. Horizontal and vertical offsets are controlled via the arrow keys. Every time the window is resized, correspondingly more or less cells are shown.
 
 ## Installation
@@ -19,10 +19,12 @@ csview currently admits the following functionality:
 - **ctrl + c**
     - closes the program
 - **arrow keys**
-    - highlight individual cells
+    - highlight individual cells; if in write mode, these scroll through text
 - **shift + arrow key**
     - shift columns or rows by one
 - **ctrl + arrow key**
     - shift columns or rows by a "page"
 - **alt + arrow key (left or right)**
     - scrolls through text within a cell
+- **ctrl + w**
+    - toggles write mode, allowing writes to a cell (writes are saved to file on program exit)
