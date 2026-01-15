@@ -10,15 +10,39 @@ use crate::input::process_input;
 use crate::terminal::{check_flags, WinInfo};
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("csview expects one filename argument (e.g. file.csv)");
+    let mut args = env::args();
+    if args.len() < 2 {
+        eprintln!("csview expects at least a file name");
         return;
     }
 
-    let filename = &args[1];
+    let mut filename = String::new();
+    let mut delimiter: char = ',';
 
-    let mut cells: Cells = match load_csv(filename.clone()) {
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-d" | "--delimiter" => {
+                match args.next() {
+                    Some(d) => {
+                        if d.len() > 1 {
+                            eprintln!("Argument to -d/--delimiter must be a single character t for tab)");
+                            return;
+                        }
+                        delimiter = d.chars().nth(0).unwrap();
+                    }
+                    None => {
+                        eprintln!("No argument provided for -d/--delimiter");
+                        return;
+                    }
+                }
+            }
+            _ => {
+                filename = arg;
+            }
+        }
+    }
+
+    let mut cells: Cells = match load_csv(filename.clone(), delimiter) {
         Ok(file) => file,
         Err(e) => {
             eprintln!("{e}");
