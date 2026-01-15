@@ -40,6 +40,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             // ctrl + w (write)
             [23] => {
                 w_info.set_writing(true);
+                w_info.set_mode(ScrollMode::Axis);
             }
             _ => (),
         }
@@ -57,9 +58,21 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             }
             [27, 91, 67] => { // right
                 // scrolls cursor right within a cell
+                let cursor_pos = w_info.get_cursor_offset();
+                let mut w_cell = cells.w_cell();
+                let limit = w_cell.len();
+                if cursor_pos < limit {
+                    if w_info.set_cursor_offset(cursor_pos + 1) == 0 {
+                        w_cell.inc_text_offset(1);
+                    }
+                }
             }
             [27, 91, 68] => { // left
-                // scrolls cursor left within a cell
+                let cursor_pos = w_info.get_cursor_offset();
+                let mut w_cell = cells.w_cell();
+                if w_info.set_cursor_offset(cursor_pos.saturating_sub(1)) == 0 {
+                    w_cell.dec_text_offset(1);
+                }
             }
             // modified arrows
             [27, 91, 49, 59, m, d] => {
@@ -78,11 +91,18 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             // ctrl + w (write)
             [23] => {
                 w_info.set_writing(false);
+                w_info.set_mode(ScrollMode::Cell);
             }
+            [1..=22] | [24..=26] => {
+            }
+            // backspace
             [8] | [127] => {
                 let cur_pos = w_info.get_cursor_offset();
-                cells.delete_from_cell(cur_pos);
-                w_info.set_cursor_offset(cur_pos.saturating_sub(1));
+                let mut w_cell = cells.w_cell();
+                w_cell.delete(cur_pos);
+                if w_info.set_cursor_offset(cur_pos.saturating_sub(1)) == 0 {
+                    w_cell.dec_text_offset(1);
+                }
             }
             _ => {
                 let c = match str::from_utf8(input) {
@@ -93,8 +113,11 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                     }
                 };
                 let cur_pos = w_info.get_cursor_offset();
-                cells.write_to_cell(c.to_string(), cur_pos);
-                w_info.set_cursor_offset(cur_pos + 1);
+                let mut w_cell = cells.w_cell();
+                w_cell.write(c.to_string(), cur_pos);
+                if w_info.set_cursor_offset(cur_pos + 1) == 0 {
+                    w_cell.inc_text_offset(1);
+                }
             }
         }
     }
