@@ -21,6 +21,7 @@ struct Cursor {
     line: usize,
     col: usize,
     offset: usize,
+    max: usize,
     show: bool,
 }
 
@@ -36,9 +37,10 @@ impl Cursor {
         out.flush().unwrap();
     }
 
-    fn set(&mut self, line: usize, col: usize) {
+    fn set(&mut self, line: usize, col: usize, max: usize) {
         self.line = line;
         self.col = col;
+        self.max = max;
     }
 }
 
@@ -75,7 +77,7 @@ impl WinInfo {
             x_page: 0usize,
             y_page: 0usize,
             writing: false,
-            cursor: Cursor { line: 0usize, col: 0usize, offset: 0usize, show: false },
+            cursor: Cursor { line: 0usize, col: 0usize, offset: 0usize, max: 0usize, show: false },
         }
     }
 
@@ -127,21 +129,39 @@ impl WinInfo {
         self.cursor.show
     }
 
-    pub fn set_cursor_co(&mut self, line: usize, col: usize) {
-        self.cursor.set(line, col);
+    pub fn set_cursor(&mut self, line: usize, col: usize, max: usize) {
+        self.cursor.set(line, col, max);
     }
 
     pub fn get_cursor(&self) -> (usize, usize) {
-        (self.cursor.line, self.cursor.col)
+        let offset = match self.cursor.offset > self.cursor.max {
+            true => self.cursor.max,
+            false => self.cursor.offset,
+        };
+           
+        let pos = self.cursor.col + offset;
+        (self.cursor.line, pos)
     }
 
     pub fn get_cursor_offset(&self) -> usize {
         self.cursor.offset
     }
 
-    pub fn set_cursor_offset(&mut self, new: usize) {
-        self.cursor.offset = new;
+    pub fn set_cursor_offset(&mut self, new: usize) -> usize {
         self.was_changed = true;
+        let old = self.cursor.offset;
+        if new > old {
+            if new < self.cursor.max {
+                self.cursor.offset = new;
+                return new;
+            } else {
+                self.cursor.offset = self.cursor.max;
+                return 0usize;
+            }
+        } else {
+            self.cursor.offset = new;
+            return new;
+        }
     }
 
     pub fn set_w_h(&mut self, cur_w: usize, cur_h: usize) {
@@ -398,7 +418,8 @@ pub fn raw_mode(switch: bool) {
                 cfmakeraw(&mut raw);
                 //re-enable SIGINT
                 raw.c_lflag |= libc::ISIG;
-                raw.c_cc[libc::VMIN] = 1;
+                // turn on non-blocking to catch sigs
+                raw.c_cc[libc::VMIN] = 0;
                 raw.c_cc[libc::VTIME] = 0;
                 tcsetattr(fd, TCSANOW, &raw);
     
@@ -433,7 +454,11 @@ extern "C" fn sig_int(_sig: c_int) {
     GOT_INT.store(true, Ordering::SeqCst);
 }
 
-pub fn check_flags(w_info: &mut WinInfo) {
+pub fn check_flags(w_info: &mut WinInfo) -> usize {
+    if GOT_INT.swap(false, Ordering::SeqCst) {
+        return 1usize;
+    }
+    
     if GOT_WINCH.swap(false, Ordering::SeqCst) {
         set_w_h();
 
@@ -442,12 +467,10 @@ pub fn check_flags(w_info: &mut WinInfo) {
             let h = *h_ptr();
             w_info.set_w_h(w, h);
         }
+
     }
 
-    if GOT_INT.swap(false, Ordering::SeqCst) {
-        raw_mode(false);
-        std::process::exit(130);
-    }
+    return 0usize;
 }
 
 pub fn install_sig_handlers() {
