@@ -231,30 +231,52 @@ impl Cell {
         (cell, extra_len)
     }
 
-    fn write(&mut self, input: String, cur_pos: usize) {
+    pub fn write(&mut self, input: String, cur_pos: usize) {
+        let old_len = self.len();
         let content = self.content();
+        let take = self.text_offset + cur_pos;
         let start: String = content
             .chars()
-            .take(cur_pos)
+            .take(take)
             .collect();
         let end: String = content
             .chars()
-            .skip(cur_pos)
+            .skip(take)
             .collect();
 
         self.set_content(format!("{start}{input}{end}"));
-        self.set_len(self.len() + 1);
+        
+        let cur_len = self.len() + 1;
+        self.set_len(cur_len);
+    /*    
+        if cur_len >= self.width {
+            if cur_len > old_len {
+                self.inc_text_offset(cur_len.saturating_sub(old_len));
+            } else {
+                self.dec_text_offset(old_len.saturating_sub(cur_len));
+            }
+        }
+    */
+       
     }
 
-    fn delete(&mut self, cur_pos: usize) {
+    pub fn delete(&mut self, cur_pos: usize) {
+        // check if at beginning of string;
+        // if so, don't delete anything
+        let check = cur_pos;
+        let subbed = cur_pos.saturating_sub(1);
+        if check.saturating_sub(subbed) == 0 && self.text_offset == 0 { return; }
+
+        let take = self.text_offset + subbed;
         let content = self.content();
+
         let start: String = content
             .chars()
-            .take(cur_pos.saturating_sub(1))
+            .take(take)
             .collect();
         let end: String = content
             .chars()
-            .skip(cur_pos)
+            .skip(take + 1)
             .collect();
 
         self.set_content(format!("{start}{end}"));
@@ -264,7 +286,6 @@ impl Cell {
     fn set_content(&mut self, new: String) {
         let mut content = self.content.get_mut(self.height_offset).unwrap();
         *content = new;
-        eprintln!("{}", self.content());
     }
 
     fn set_len(&mut self, new: usize) {
@@ -381,7 +402,7 @@ impl Cells {
         cell.delete(cur_pos);
     }
 
-    fn w_cell(&mut self) -> &mut Cell {
+    pub fn w_cell(&mut self) -> &mut Cell {
         let mut row = self.rows.get_mut(self.w_cell.0).unwrap();
         row.get_mut(self.w_cell.1).unwrap()
     }
@@ -456,8 +477,8 @@ fn make_col_idx(num_cols: usize) -> Vec<Cell> {
                 format!("{:<lw$}{}{:<rw$}",
                      " ", idx.clone(), " ", lw = ws, rw = ws)
             } else {
-                let lw = 6_usize.saturating_sub(con_width / 2);
-                let rw = 6_usize.saturating_sub(lw + 1);
+                let lw = 5_usize.saturating_sub(con_width / 2);
+                let rw = 6_usize.saturating_sub(con_width / 2);
                 format!("{:<lw$}{}{:<rw$}",
                      " ", idx.clone(), " ", lw = lw, rw = rw)
 
@@ -526,15 +547,7 @@ fn parse_csv_into_cells(csv: String) -> Result<Cells, io::Error> {
     Ok(cells)
 }
 
-pub fn load_csv() -> Result<Cells, io::Error> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        return Err(io::Error::new(ErrorKind::InvalidInput,
-                "csview expects one filename argument (e.g. file.csv)"
-                ));
-    }
-
-    let filename = &args[1];
+pub fn load_csv(filename: String) -> Result<Cells, io::Error> {
     let ext: &str = match filename.rsplit_once(|b: char| b == '.') {
         Some((before, after)) if !before.is_empty() && !after.is_empty() => after,
         _ => {
@@ -592,6 +605,10 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let row_len = cells.num_cols();
             let num_rows = cells.num_rows();
 
+            // length of rendered line
+            // (starts with row index)
+            let mut line_w = 5usize;
+
             let mut focus = String::new();
 
             for _ in 0..rows.min(cells.num_rows() - h_offset) {
@@ -625,9 +642,9 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                     }
                 }
 
-                // reset index for each row
+                // reset index and len for each row
                 idx = orig_idx;
-                let mut sub = 0;
+                line_w = 5usize;
                 if row_len > 0 && idx < row_len {
                     loop {
                         if idx < row_len {
@@ -637,9 +654,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                 None => &Cell::new("!!!CSVERR!!!".to_string()),
                             };
                             
-                            let line_w = line.len().saturating_sub(sub);
-                            let width = row_cell.width;
-                            if line_w + width> cur_w {
+                            if line_w > cur_w {
                                 break;
                             }
                             
@@ -647,15 +662,14 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
-                                // save coordinates for writing
-                                w_info.set_cursor_co(t_row + 1, line_w + 1);
+                                // save info for showing cursor
+                                w_info.set_cursor(t_row + 1, line_w + 1, row_cell.width);
                                 // highlight cell
                                 cell = format!(
                                     "\x1b[7;36;47m{}\x1b[39;49;27m", 
                                     cell
                                 );
                                 // take escape sequence into account for width calculation above
-                                sub += (21 + extra_len);
                                 focus = row_cell.content();
                                 if focus.len() > cur_w {
                                     focus = (&focus[0..cur_w]).to_string();
@@ -665,7 +679,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                             }
                             
                             cell = format!("\x1b[4m{}", cell);
-                            sub += (4 + extra_len);
+                            line_w += (row_cell.width + 3);
                             line += &cell;
                             idx += 1;
                         } else {
@@ -681,7 +695,6 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                 }
             }
             // set cell for writing
-            eprintln!("row = {} idx = {}", w_row, w_idx);
             cells.set_w_cell(w_row, w_idx);
             w_info.set_x_page(idx, orig_idx);
             w_info.set_y_page(row, h_offset);
@@ -697,10 +710,42 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
             if w_info.cursor_shown() {
                 let (l, c) = w_info.get_cursor();
-                write!(out, "\x1b[{};{}H", l, c);
+                write!(out, "\x1b[{};{}H", l, c + 1);
             }
 
             out.flush().unwrap();
         }
+    }
+}
+
+pub fn write_to_file(mut cells: Cells, filename: String) {
+    let mut sheet = String::new();
+    for i in 1..cells.num_rows {
+        let mut row = String::new();
+        let cur = cells.get_row(i);
+        for j in 0..cur.len() {
+            let mut content = String::new();
+            let cell = cur.get(j).unwrap();
+            for line in &cell.content {
+                content.push_str(&line);
+            }
+            eprintln!("{content}");
+            row.push_str(&content);
+            if j != cur.len() - 1 {
+                row.push(',');
+            }
+        }
+
+        if i != cells.num_rows - 1 {
+            row.push('\n');
+        }
+
+        eprintln!("{row}");
+        sheet.push_str(&row);
+    }
+    
+    match fs::write(filename, sheet) {
+        Ok(()) => (),
+        Err(e) => eprintln!("{e}"),
     }
 }
