@@ -1,8 +1,8 @@
 use std::{
     env,
-    path::Path,
     fs::{self, File},
     time::{SystemTime, UNIX_EPOCH},
+    path::{Component, Path, PathBuf},
     io::{self, Error, ErrorKind, Read, Write, stdout}
 };
 
@@ -746,17 +746,44 @@ pub fn save_backup(file: String) -> Result<(), io::Error> {
         }
     };
 
-    // either open or create backup directory
-    let dir_path = Path::new(&home_dir)
-        .join(".csview")
-        .join("backups")
-        .join(&file);
+    let file = Path::new(&file);
+    let abs = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        env::current_dir()?.join(file)
+    };
 
-    let dir_path = dir_path.parent().ok_or_else(|| {
+    let abs = fs::canonicalize(&abs)?;
+
+    let parent = abs.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound, "Could not find parent dir"
         )
     })?;
+
+    let stem = abs.file_stem().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound, "Could not find file stem"
+        )
+    })?;
+
+    let rel_parent: PathBuf = parent
+                .components()
+                .filter_map(|c| match c {
+                    Component::Normal(p) => Some(p),
+                    _ => None,
+                })
+                .collect();
+
+    eprintln!("{:?}", rel_parent);
+
+    // either open or create backup directory
+    let dir_path = Path::new(&home_dir)
+        .join(".csview")
+        .join("backups")
+        .join(rel_parent)
+        .join(stem);
+
     fs::create_dir_all(&dir_path)?;
 
     let backup_dir = fs::read_dir(&dir_path)?;
@@ -776,8 +803,6 @@ pub fn save_backup(file: String) -> Result<(), io::Error> {
             break;
         }
     }
-
-    let file = Path::new(&file);
 
     // set default to the name of the youngest file,
     // with timestamp incremented by 1
@@ -849,6 +874,7 @@ pub fn save_backup(file: String) -> Result<(), io::Error> {
         Ok(()) => {
             println!("Wrote backup to {:?}", backup);
             for path in stage_for_removal {
+                eprintln!("removing");
                 match fs::remove_file(path) {
                     Ok(()) => (),
                     Err(e) => eprintln!("{e}"),
