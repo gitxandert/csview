@@ -22,7 +22,7 @@ There is an argument -d/--delimiter that is default set to ',', but can take any
     csview -d : some_colon_separated_file
 
 csview currently admits the following functionality:
-- **ctrl + c | ctrl + '\'**
+- **ctrl + c | ctrl + forward-slash**
     - closes the program
 - **ctrl + w**
     - toggle write mode, allowing writes to a cell (writes are saved to file on program exit)
