@@ -92,17 +92,21 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             [23] => {
                 w_info.set_writing(false);
                 w_info.set_mode(ScrollMode::Cell);
+                cells.set_text_offset(0);
             }
             [1..=22] | [24..=26] => {
             }
             // backspace
             [8] | [127] => {
-                let cur_pos = w_info.get_cursor_offset();
-                let mut w_cell = cells.w_cell();
-                w_cell.delete(cur_pos);
-                if w_info.set_cursor_offset(cur_pos.saturating_sub(1)) == 0 {
-                    w_cell.dec_text_offset(1);
+                {
+                    let cur_pos = w_info.get_cursor_offset();
+                    let mut w_cell = cells.w_cell();
+                    w_cell.delete(cur_pos);
+                    if w_info.set_cursor_offset(cur_pos.saturating_sub(1)) == 0 {
+                        w_cell.dec_text_offset(1);
+                    }
                 }
+                if !cells.written { cells.written = true; }
             }
             _ => {
                 let c = match str::from_utf8(input) {
@@ -112,12 +116,15 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                         return;
                     }
                 };
-                let cur_pos = w_info.get_cursor_offset();
-                let mut w_cell = cells.w_cell();
-                w_cell.write(c.to_string(), cur_pos);
-                if w_info.set_cursor_offset(cur_pos + 1) == 0 {
-                    w_cell.inc_text_offset(1);
+                {
+                    let cur_pos = w_info.get_cursor_offset();
+                    let mut w_cell = cells.w_cell();
+                    w_cell.write(c.to_string(), cur_pos);
+                    if w_info.set_cursor_offset(cur_pos + 1) == 0 {
+                        w_cell.inc_text_offset(1);
+                    }
                 }
+                if !cells.written { cells.written = true; }
             }
         }
     }
