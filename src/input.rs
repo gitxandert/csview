@@ -23,17 +23,33 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             }
             // modified arrows
             [27, 91, 49, 59, m, d] => {
+                let mut winch = false;
                 match m {
                     50 => w_info.set_mode(ScrollMode::Axis),
                     51 => w_info.set_mode(ScrollMode::Text),
                     53 => w_info.set_mode(ScrollMode::Page),
+                    54 => winch = true,
                     _ => (),
                 }
                 match d {
                     65 => w_info.h_offset_up(),
                     66 => w_info.h_offset_down(),
-                    67 => w_info.w_offset_right(cells),
-                    68 => w_info.w_offset_left(cells),
+                    67 => {
+                        if winch {
+                            let width = cells.w_cell().width();
+                            cells.set_cell_width(width + 1);
+                        } else {
+                            w_info.w_offset_right(cells);
+                        }
+                    }
+                    68 => {
+                        if winch {
+                            let width = cells.w_cell().width();
+                            cells.set_cell_width(width.saturating_sub(1));
+                        } else {
+                            w_info.w_offset_left(cells);
+                        }
+                    }
                     _ => (),
                 }
             }
@@ -74,10 +90,16 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                     w_cell.dec_text_offset(1);
                 }
             }
+            [27] => { // escape by itself
+                // ignore for now
+            }
+            [27, 91, 90] => { // shift-tab
+                // ignore for now
+            }
             // modified arrows
             [27, 91, 49, 59, m, d] => {
                 match m {
-                    // affects scroll speed
+                    // affect scroll speed
                     _ => (),
                 }
                 match d {
@@ -95,6 +117,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 cells.set_text_offset(0);
             }
             [1..=22] | [24..=26] => {
+                // ignore other control characters
             }
             // backspace
             [8] | [127] => {
@@ -107,6 +130,22 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                     }
                 }
                 if !cells.written { cells.written = true; }
+            }
+            [27, 91, 50, 126] => { //insert
+            }
+            [27, 91, 51, 126] => { // delete
+            }
+            [27, 91, 70] => { // end
+            }
+            [27, 91, 72] => { // home
+            }
+            [27, 91, 50, 59, 53, 126] => { // ctrl + insert
+            }
+            [27, 91, 51, 59, 53, 126] => { // ctrl + delete
+            }
+            [27, 91, 49, 59, 53, 70] => { // ctrl + end
+            }
+            [27, 91, 49, 59, 53, 72] => { // ctrl + home
             }
             _ => {
                 let c = match str::from_utf8(input) {
