@@ -66,7 +66,7 @@ fn main() {
 
     // main loop
     loop {
-        if check_flags(&mut w_info) > 0 {
+        if check_flags(&mut w_info) {
             break;
         }
         show_csv(&mut cells, &mut w_info);
