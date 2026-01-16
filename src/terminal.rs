@@ -28,13 +28,6 @@ struct Cursor {
 impl Cursor {
     fn show(&mut self, show: bool) {
         self.show = show;
-        let mut out = std::io::stdout();
-        if self.show {
-            write!(out, "\x1b[?25h").unwrap();
-        } else {
-            write!(out, "\x1b[?25l").unwrap();
-        }
-        out.flush().unwrap();
     }
 
     fn set(&mut self, line: usize, col: usize, max: usize) {
@@ -100,11 +93,11 @@ impl WinInfo {
     }
 
     pub fn set_x_page(&mut self, end: usize, beg: usize) {
-        self.x_page = end - beg;
+        self.x_page = end.saturating_sub(beg);
     }
 
     pub fn set_y_page(&mut self, end: usize, beg: usize) {
-        self.y_page = end - beg;
+        self.y_page = end.saturating_sub(beg);
     }
 
     pub fn set_mode(&mut self, mode: ScrollMode) {
@@ -222,43 +215,33 @@ impl WinInfo {
 
     // private functions
     //
-
-
     fn dec_h_pointer(&mut self) {
-        if self.h_pointer > 0 {
-            self.h_pointer = self.h_pointer.saturating_sub(1);
-            if self.h_pointer < self.h_offset {
-                self.h_offset = self.h_offset.saturating_sub(1);
-            }
-            self.was_changed = true;
-        }
+        let dec = (self.h_pointer > 0) as usize;
+        self.h_pointer = self.h_pointer.saturating_sub(dec);
+        let sub = (self.h_pointer < self.h_offset) as usize * dec;
+        self.h_offset = self.h_offset.saturating_sub(sub);
+        self.was_changed = dec == 1;
     }
 
     fn inc_h_pointer(&mut self) {
-        if self.h_pointer < self.max_h {
-            self.h_pointer += 1;
-            
-            if self.h_pointer >= self.h_offset + self.y_page {
-                self.h_offset += 1;
-            }
-            self.was_changed = true;
-        }
+        let inc = (self.h_pointer < self.max_h) as usize;
+        self.h_pointer += inc;
+        let offset = (self.h_pointer >= self.h_offset + self.y_page + 2) as usize;
+        self.h_offset += offset;
+        self.was_changed = inc == 1 || offset == 1;
     }
 
     fn dec_page_h(&mut self) {
-        if self.h_offset > 0 {
-            if self.h_offset.saturating_sub(self.y_page) > 0 {
-                self.h_offset = self.h_offset.saturating_sub(self.y_page);
-            } else {
-                self.h_offset = 0;
-            }
-            if self.h_pointer.saturating_sub(self.y_page) > 0 {
-                self.h_pointer = self.h_pointer.saturating_sub(self.y_page);
-            } else {
-                self.h_pointer = 0;
-            }
-            self.was_changed = true;
-        }
+        let gtz = (self.h_offset > 0) as usize;
+        let is_in = (self.h_offset
+            .saturating_sub(self.y_page) > 0) 
+            as usize * gtz;
+        self.h_offset = self.h_offset.saturating_sub(self.y_page * is_in);
+        let is_hin = (self.h_pointer
+            .saturating_sub(self.y_page) > 0) 
+            as usize * gtz;
+        self.h_pointer = self.h_pointer.saturating_sub(self.y_page * is_hin);
+        self.was_changed = is_in == 1 || is_hin == 1;
     }
 
     fn inc_page_h(&mut self) {
@@ -267,11 +250,14 @@ impl WinInfo {
                 self.h_offset += self.y_page;
                 self.h_pointer += self.y_page;
             } else {
-                let inc = self.max_h.saturating_sub(self.h_offset.saturating_sub(self.y_page)) + 1;
+                let inc = self.max_h.saturating_sub(self.h_offset);
                 self.h_offset += inc;
                 self.h_pointer += inc;
             }
             self.was_changed = true;
+        } else {
+            self.h_offset = self.max_h;
+            self.h_pointer = self.max_h;
         }
     }
 
@@ -456,12 +442,7 @@ extern "C" fn sig_quit(_sig: c_int) {
     GOT_QUIT.store(true, Ordering::SeqCst);
 }
 
-pub fn check_flags(w_info: &mut WinInfo) -> usize {
-    if GOT_INT.swap(false, Ordering::SeqCst) ||
-       GOT_QUIT.swap(false, Ordering::SeqCst) {
-        return 1usize;
-    }
-    
+pub fn check_flags(w_info: &mut WinInfo) -> bool {
     if GOT_WINCH.swap(false, Ordering::SeqCst) {
         set_w_h();
 
@@ -470,10 +451,10 @@ pub fn check_flags(w_info: &mut WinInfo) -> usize {
             let h = *h_ptr();
             w_info.set_w_h(w, h);
         }
-
     }
 
-    return 0usize;
+    return GOT_INT.swap(false, Ordering::SeqCst) || 
+           GOT_QUIT.swap(false, Ordering::SeqCst);
 }
 
 pub fn install_sig_handlers() {
