@@ -1,7 +1,7 @@
 # csview - command-line spreadsheet TUI
 This program takes a single file argument and renders it as a series of cells across the entire width and height of the terminal. Horizontal and vertical offsets are controlled via the arrow, ctrl, and shift keys. Every time the window is resized, correspondingly more or less cells are shown.
 
-It is also possible to write to cells (see **Use** below); to preserve data on write, a mini versioning system has been instigating, preserving the last ten iterations to a .csview/backups directory in the user's home directory.
+It is also possible to write to cells (see **Use** below). To preserve data on write, a mini versioning system has been instigated, preserving the last ten iterations of a file to a .csview/backups directory in the user's home directory.
 
 ## Installation
 
