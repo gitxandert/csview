@@ -199,6 +199,7 @@ impl WinInfo {
             ScrollMode::Text => {
                 let mut w_cell = cells.w_cell();
                 w_cell.dec_text_offset(1);
+                self.was_changed = true;
             }
             ScrollMode::Cell => self.dec_w_pointer(),
             ScrollMode::Axis => self.unshift_page_w(),
@@ -211,6 +212,7 @@ impl WinInfo {
             ScrollMode::Text => {
                 let mut w_cell = cells.w_cell();
                 w_cell.inc_text_offset(1);
+                self.was_changed = true;
             }
             ScrollMode::Cell => self.inc_w_pointer(),
             ScrollMode::Axis => self.shift_page_w(),
@@ -265,7 +267,7 @@ impl WinInfo {
                 self.h_offset += self.y_page;
                 self.h_pointer += self.y_page;
             } else {
-                let inc = self.max_h - self.h_offset - self.y_page + 1;
+                let inc = self.max_h.saturating_sub(self.h_offset.saturating_sub(self.y_page)) + 1;
                 self.h_offset += inc;
                 self.h_pointer += inc;
             }
@@ -440,6 +442,7 @@ pub fn raw_mode(switch: bool) {
 
 static GOT_WINCH: AtomicBool = AtomicBool::new(false);
 static GOT_INT: AtomicBool = AtomicBool::new(false);
+static GOT_QUIT: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn sig_winch(_sig: c_int) {
     GOT_WINCH.store(true, Ordering::SeqCst);
@@ -449,8 +452,13 @@ extern "C" fn sig_int(_sig: c_int) {
     GOT_INT.store(true, Ordering::SeqCst);
 }
 
+extern "C" fn sig_quit(_sig: c_int) {
+    GOT_QUIT.store(true, Ordering::SeqCst);
+}
+
 pub fn check_flags(w_info: &mut WinInfo) -> usize {
-    if GOT_INT.swap(false, Ordering::SeqCst) {
+    if GOT_INT.swap(false, Ordering::SeqCst) ||
+       GOT_QUIT.swap(false, Ordering::SeqCst) {
         return 1usize;
     }
     
@@ -483,6 +491,13 @@ pub fn install_sig_handlers() {
         libc::sigemptyset(&mut sa_int.sa_mask);
         sa_int.sa_flags = 0;
         libc::sigaction(libc::SIGINT, &sa_int, std::ptr::null_mut());
+        
+        //SIGQUIT
+        let mut sa_quit: libc::sigaction = std::mem::zeroed();
+        sa_quit.sa_sigaction = sig_quit as usize;
+        libc::sigemptyset(&mut sa_quit.sa_mask);
+        sa_quit.sa_flags = 0;
+        libc::sigaction(libc::SIGQUIT, &sa_quit, std::ptr::null_mut());
     }
 }
 
