@@ -200,13 +200,14 @@ impl Cell {
             take += esc.len;
         }
 
-        let post_skip: String = content
+        let mut post_skip: String = content
             .chars()
             .skip(skip)
             .collect();
 
         let pslen = post_skip.len();
         let mut add = String::new();
+
         if pslen > take {
             take = take.saturating_sub(3);
             add = "...".to_string();
@@ -248,18 +249,8 @@ impl Cell {
 
         self.set_content(format!("{start}{input}{end}"));
         
-        let cur_len = self.len() + 1;
+        let cur_len = self.len() + input.len();
         self.set_len(cur_len);
-    /*    
-        if cur_len >= self.width {
-            if cur_len > old_len {
-                self.inc_text_offset(cur_len.saturating_sub(old_len));
-            } else {
-                self.dec_text_offset(old_len.saturating_sub(cur_len));
-            }
-        }
-    */
-       
     }
 
     pub fn delete(&mut self, cur_pos: usize) {
@@ -329,6 +320,10 @@ impl Cell {
     pub fn content(&self) -> String {
         self.content.get(self.height_offset).unwrap().clone()
     }
+
+    pub fn width(&self) -> usize {
+        return self.width
+    }
 }
 
 pub struct Cells {
@@ -367,6 +362,18 @@ impl Cells {
     pub fn set_text_offset(&mut self, offset: usize) {
         let mut w_cell = self.w_cell();
         w_cell.text_offset = 0usize;
+    }
+
+    pub fn set_cell_width(&mut self, width: usize) {
+        if width > 2 {
+            let row = self.w_cell.0;
+            let col = self.w_cell.1;
+            for row in &mut self.rows {
+                let mut cell = row.get_mut(col).unwrap();
+                cell.width = width;
+            }
+            self.were_changed = true;
+        }
     }
 
     fn set_w_cell(&mut self, row: usize, idx: usize) {
@@ -569,7 +576,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let mut frame = String::with_capacity(8192);
 
             // move cursor to top_left
-            frame.push_str("\x1b[H");
+            frame.push_str("\x1b[?25l\x1b[H");
             
             let h_offset = w_info.h_offset;
             let w_offset = w_info.w_offset;
@@ -594,8 +601,9 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let num_rows = cells.num_rows();
 
             // length of rendered line
-            // (starts with row index)
-            let mut line_w = 5usize;
+            // (starts with row index and ANSI)
+            let mut index_len = 7usize;
+            let mut line_w = index_len;
 
             let mut focus = String::new();
 
@@ -609,30 +617,37 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                 */
 
                 // move cursor to (row+1, col=1)
-                frame.push_str(&format!("\x1b[{};1H\x1b[2K", t_row+1));
+                frame.push_str(&format!("\x1b[{};1H\x1b[2K", t_row + 1));
 
                 let mut line: String = "".to_string();
                 // reference to vec of cols
                 let mut v_cols = &Vec::<Cell>::new();
                 // always print col names
-                if t_row == 0 {
-                    line = "    ".to_string();
-                    v_cols = cells.get_row(0);
-                } else {
-                    // if reached cells.num_rows(),
-                    // print XXXX instead of row number
-                    if row < cells.num_rows() {
-                        // print in hexadecimal (space-saving)
-                        line = format!("{:04X}", row.saturating_sub(1));
-                        v_cols = cells.get_row(row);
-                    } else {
-                        line = "XXXX| EOF".to_string();
+                match t_row {
+                    0 => {
+                        line = "\x1b[4m    ".to_string();
+                        v_cols = cells.get_row(0);
+                    }
+                    1 => {
+                        line = "\x1b[1;4;30;47mHEAD\x1b[0m".to_string();
+                        v_cols = cells.get_row(1);
+                    }
+                    _ => {
+                        // if reached cells.num_rows(),
+                        // print XXXX instead of row number
+                        if row < cells.num_rows() {
+                            // print in hexadecimal (space-saving)
+                            line = format!("\x1b[4;30;47m{:04X}\x1b[39;49m", row.saturating_sub(1));
+                            v_cols = cells.get_row(row);
+                        } else {
+                            line = "XXXX| EOF".to_string();
+                        }
                     }
                 }
 
                 // reset index and len for each row
                 idx = orig_idx;
-                line_w = 5usize;
+                line_w = index_len;
                 if row_len > 0 && idx < row_len {
                     loop {
                         if idx < row_len {
@@ -642,7 +657,10 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                 None => &Cell::new("!!!CSVERR!!!".to_string()),
                             };
                             
-                            if line_w > cur_w {
+                            if line_w + row_cell.width > cur_w {
+                                if w_info.w_pointer == idx {
+                                    w_info.w_offset_left(cells);
+                                }
                                 break;
                             }
                             
@@ -650,8 +668,13 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
                             if w_info.w_pointer == idx &&
                                w_info.h_pointer == row {
-                                // save info for showing cursor
-                                w_info.set_cursor(t_row + 1, line_w + 1, row_cell.width);
+                                // save info for showing cursor:
+                                // t_row + 1 because terminal rows start at 1;
+                                // line_w - 1 because terminal rows start at 1 (+ 1),
+                                // and ANSI escapes should be removed from the length (- 2);
+                                // row_cell.width sets the max 
+                                // for the cursor's position within the cell
+                                w_info.set_cursor(t_row + 1, line_w - 1, row_cell.width);
                                 // highlight cell
                                 cell = format!(
                                     "\x1b[7;36;47m{}\x1b[39;49;27m", 
@@ -666,7 +689,13 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                                 w_idx = idx;
                             }
                             
-                            cell = format!("\x1b[4m{}", cell);
+                            if t_row == 1 {
+                                // highlight header
+                                cell = format!("\x1b[4;30;47m{}\x1b[39;49m", cell);
+                            } else {
+                                cell = format!("\x1b[4m{}", cell);
+                            }
+                            // + 3 to account for escape sequences
                             line_w += (row_cell.width + 3);
                             line += &cell;
                             idx += 1;
@@ -687,9 +716,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             w_info.set_x_page(idx, orig_idx);
             w_info.set_y_page(row, h_offset);
 
-            let row_num_len = 5;
-            
-            // show focus at bottom
+            // show content of focused cell at bottom
             frame.push_str(&format!("\x1b[{};{}H\x1b[2K{}", cur_h, 1, focus));
 
             // end update
@@ -698,7 +725,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
             if w_info.cursor_shown() {
                 let (l, c) = w_info.get_cursor();
-                write!(out, "\x1b[{};{}H", l, c + 1);
+                write!(out, "\x1b[{};{}H\x1b[?25h", l, c + 1);
             }
 
             out.flush().unwrap();
