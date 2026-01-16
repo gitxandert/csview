@@ -347,12 +347,10 @@ impl Cells {
     }
 
     fn changed(&mut self) -> bool {
-        if self.were_changed {
-            self.were_changed = false;
-            return true;
-        }
+        let ret = self.were_changed;
+        self.were_changed ^= ret;
 
-        return false;
+        ret
     }
 
     pub fn xy(&self) -> (usize, usize) {
@@ -568,6 +566,9 @@ pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
 
 pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
     unsafe {
+        // if w_info was changed, this is a window resize
+        // or a change in cursor/cell focus;
+        // if cells were changed, this is a write
         if w_info.changed() || cells.changed() {
             let cur_w = *w_ptr();
             let cur_h = *h_ptr();
@@ -714,6 +715,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // set cell for writing
             cells.set_w_cell(w_row, w_idx);
             w_info.set_x_page(idx, orig_idx);
+            // subtract two to account for fixed rows
             w_info.set_y_page(row.saturating_sub(2), h_offset);
 
             // show content of focused cell at bottom
