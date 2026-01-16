@@ -5,7 +5,9 @@ mod csv;
 mod input;
 mod terminal;
 
-use crate::csv::{Cells, load_csv, show_csv, write_to_file};
+use crate::csv::{
+    Cells, load_csv, show_csv, save_backup, write_to_file
+};
 use crate::input::process_input;
 use crate::terminal::{check_flags, WinInfo};
 
@@ -28,7 +30,11 @@ fn main() {
                             eprintln!("Argument to -d/--delimiter must be a single character t for tab)");
                             return;
                         }
-                        delimiter = d.chars().nth(0).unwrap();
+                        if d == "t" {
+                            delimiter = '\t';
+                        } else {
+                            delimiter = d.chars().nth(0).unwrap();
+                        }
                     }
                     None => {
                         eprintln!("No argument provided for -d/--delimiter");
@@ -36,13 +42,11 @@ fn main() {
                     }
                 }
             }
-            _ => {
-                filename = arg;
-            }
+            _ => filename = arg,
         }
     }
 
-    let mut cells: Cells = match load_csv(filename.clone(), delimiter) {
+    let mut cells: Cells = match load_csv(filename.clone(), delimiter.clone()) {
         Ok(file) => file,
         Err(e) => {
             eprintln!("{e}");
@@ -83,5 +87,27 @@ fn main() {
 
     // restore terminal
     terminal::raw_mode(false);
-    write_to_file(cells, filename.to_string());
+    if cells.written {
+        println!("Write to file? [y/N]: ");
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
+        match input.trim_end() {
+            "y" | "yes" | "Y" | "Yes" | "YES" => {
+                    // save backup to 
+                    // /home/user/.csview/backups/;
+                    // if fails, don't write
+                    match save_backup(filename.clone()) {
+                        Ok(()) => write_to_file(cells, filename, delimiter),
+                        Err(e) => {
+                            eprintln!("WARNING -- could not create back up due to the following:");
+                            eprintln!("\n\t{e}");
+                            eprintln!("Exiting without writing");
+                    }
+                }
+            }
+            _ => println!("Exiting without writing"),
+        }
+    }
 }
