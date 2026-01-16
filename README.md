@@ -22,15 +22,17 @@ There is an argument -d/--delimiter that is default set to ',', but can take any
     csview -d : some_colon_separated_file
 
 csview currently admits the following functionality:
-- **ctrl + c**
+- **ctrl + c | ctrl + \**
     - closes the program
-- **arrow keys**
-    - highlight individual cells; if in write mode, these scroll through text
-- **shift + arrow key**
-    - offset column/row view by one
-- **ctrl + arrow key**
-    - offest column/row view by the window width/height
-- **alt + arrow key (left or right)**
-    - scroll through text within a cell
 - **ctrl + w**
     - toggle write mode, allowing writes to a cell (writes are saved to file on program exit)
+- **arrow keys**
+    - highlight individual cells; if in write mode, these scroll through text
+- **ctrl + arrow key**
+    - offest column/row view by the window width/height
+- **shift + arrow key**
+    - offset column/row view by one
+- **alt + arrow key (left or right)**
+    - scroll through text within a cell when not in write mode
+- **ctrl + shift + arrow key (left or right)**  
+    - adjust column width
