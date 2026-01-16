@@ -113,6 +113,7 @@ impl WinInfo {
 
     pub fn set_writing(&mut self, w: bool) {
         self.writing = w;
+        self.set_cursor_offset(0);
         self.cursor.show(w);
         self.was_changed = true;
     }
@@ -196,11 +197,8 @@ impl WinInfo {
     pub fn w_offset_left(&mut self, cells: &mut Cells) {
         match self.mode {
             ScrollMode::Text => {
-                cells.set_text_offset(
-                    -1, 
-                    self.h_pointer,
-                    self.w_pointer
-                );
+                let mut w_cell = cells.w_cell();
+                w_cell.dec_text_offset(1);
             }
             ScrollMode::Cell => self.dec_w_pointer(),
             ScrollMode::Axis => self.unshift_page_w(),
@@ -211,11 +209,8 @@ impl WinInfo {
     pub fn w_offset_right(&mut self, cells: &mut Cells) {
         match self.mode {
             ScrollMode::Text => {
-                cells.set_text_offset(
-                    1,
-                    self.h_pointer,
-                    self.w_pointer
-                );
+                let mut w_cell = cells.w_cell();
+                w_cell.inc_text_offset(1);
             }
             ScrollMode::Cell => self.inc_w_pointer(),
             ScrollMode::Axis => self.shift_page_w(),
