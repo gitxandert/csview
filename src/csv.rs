@@ -1,6 +1,8 @@
 use std::{
-    env, 
+    env,
+    path::Path,
     fs::{self, File},
+    time::{SystemTime, UNIX_EPOCH},
     io::{self, Error, ErrorKind, Read, Write, stdout}
 };
 
@@ -301,6 +303,11 @@ impl Cell {
         self.height = h;
     }
 
+    // directly set it
+    pub fn set_text_offset(&mut self, val: usize) {
+        self.text_offset = val;
+    }
+
     pub fn dec_text_offset(&mut self, val: usize) {
         self.text_offset = self.text_offset.saturating_sub(val);
     }
@@ -330,6 +337,7 @@ pub struct Cells {
     num_rows: usize,
     w_cell: (usize, usize),
     were_changed: bool,
+    pub written: bool,
 }
 
 impl Cells {
@@ -338,8 +346,9 @@ impl Cells {
         let text_offsets = vec![0usize; num_cols];
         let w_cell = (0usize, 0usize);
         let were_changed = false;
+        let written = false;
 
-        Self { rows, num_cols, num_rows, w_cell, were_changed }
+        Self { rows, num_cols, num_rows, w_cell, were_changed, written }
     }
 
     fn changed(&mut self) -> bool {
@@ -355,17 +364,9 @@ impl Cells {
         (self.num_cols, self.num_rows)
     }
 
-    pub fn set_text_offset(&mut self, val: i32, row: usize, col: usize) {
-        let mut cell_row = &mut self.rows[row];
-        let mut cell = &mut cell_row[col];
-        if val > 0 {
-            cell.inc_text_offset(val as usize);
-        } else {
-            let val = val.abs();
-            cell.dec_text_offset(val as usize);
-        }
-
-        self.were_changed = true;
+    pub fn set_text_offset(&mut self, offset: usize) {
+        let mut w_cell = self.w_cell();
+        w_cell.text_offset = 0usize;
     }
 
     fn set_w_cell(&mut self, row: usize, idx: usize) {
@@ -390,16 +391,6 @@ impl Cells {
 
     fn num_rows(&self) -> usize {
         self.num_rows
-    }
-
-    pub fn write_to_cell(&mut self, input: String, cur_pos: usize) {
-        let mut cell = self.w_cell();
-        cell.write(input, cur_pos);
-    }
-
-    pub fn delete_from_cell(&mut self, cur_pos: usize) {
-        let mut cell = self.w_cell();
-        cell.delete(cur_pos);
     }
 
     pub fn w_cell(&mut self) -> &mut Cell {
@@ -438,6 +429,10 @@ fn parse_by_newline(block: &str) -> Vec<String> {
         }
     }
 
+    if !saw_newline {
+        parsed.push(line);
+    }
+
     parsed
 }
 
@@ -457,7 +452,7 @@ fn parse_by_delim(line: &str, delim: char) -> Vec<Cell> {
             '"' => {
                 is_quoted = !is_quoted;
             }
-            ch if ch == delim && !is_quoted => {
+            ch if ch == delim && ch != '"' && !is_quoted => {
                 let cell = Cell::new(cell_str.clone());
                 parsed.push(cell);
                 cell_str = String::new();
@@ -544,16 +539,18 @@ fn parse_csv_into_cells(csv: String, delim: char) -> Result<Cells, io::Error> {
     cells.push_row(col_idx);
     cells.push_row(col_names);
 
-    for i in 1..num_rows - 1 {
-        let row: Vec<Cell> = parse_by_delim(&lines[i], delim);
-        cells.push_row(row);
+    if num_rows > 1 {
+        for i in 1..num_rows.saturating_sub(1) {
+            let row: Vec<Cell> = parse_by_delim(&lines[i], delim);
+            cells.push_row(row);
+        }
     }
 
     Ok(cells)
 }
 
 pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
-    let mut file = fs::read_to_string(filename)?;
+    let mut file = fs::read_to_string(filename.clone())?;
     // don't parse carriage returns
     file = file.replace("\r", " ");
 
@@ -626,7 +623,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
                     // print XXXX instead of row number
                     if row < cells.num_rows() {
                         // print in hexadecimal (space-saving)
-                        line = format!("{:04X}", row);
+                        line = format!("{:04X}", row.saturating_sub(1));
                         v_cols = cells.get_row(row);
                     } else {
                         line = "XXXX| EOF".to_string();
@@ -709,7 +706,139 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
     }
 }
 
-pub fn write_to_file(mut cells: Cells, filename: String) {
+pub fn save_backup(file: String) -> Result<(), io::Error> {
+    let content = fs::read_to_string(&file)?;
+    // find home dir or current dir; propagate error if neither
+    let home_dir = match env::home_dir() {
+        Some(path) => path,
+        None => match env::current_dir() {
+            Ok(path) => path,
+            Err(e) => return Err(e),
+        }
+    };
+
+    // either open or create backup directory
+    let dir_path = Path::new(&home_dir)
+        .join(".csview")
+        .join("backups")
+        .join(&file);
+
+    let dir_path = dir_path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound, "Could not find parent dir"
+        )
+    })?;
+    fs::create_dir_all(&dir_path)?;
+
+    let backup_dir = fs::read_dir(&dir_path)?;
+    let mut backup_files: Vec<_> = backup_dir
+        .filter_map(|res| res.ok())
+        .map(|e| e.path())
+        .collect();
+
+    // limit files in backup dir to 10
+    let mut dir_len = backup_files.len();
+    let mut stage_for_removal = Vec::<_>::new();
+    for bf in &backup_files {
+        if dir_len >= 10 {
+            stage_for_removal.push(bf.clone());
+            dir_len = dir_len.saturating_sub(1);
+        } else {
+            break;
+        }
+    }
+
+    let file = Path::new(&file);
+
+    // set default to the name of the youngest file,
+    // with timestamp incremented by 1
+    let default = match backup_files.pop() {
+        Some(backup) => {
+            let stem = backup.file_stem().unwrap_or_default();
+            let ext = backup.extension().unwrap_or_default();
+
+            let stem_str = stem.to_string_lossy();
+            let ext_str = ext.to_string_lossy();
+
+            let mut parts: Vec<&str> = stem_str.split('_').collect();
+            let prefix = parts[0];
+            let timestamp_str = match parts.pop() {
+                Some(ts) => ts,
+                None => "0",
+            };
+            let timestamp: u64 = match timestamp_str.parse() {
+                Ok(val) => val,
+                Err(_) => 0u64,
+            };
+            let faux_new = timestamp + 1;
+
+            let path = format!("{}_{}.{}", prefix, faux_new, ext_str);
+
+            dir_path.join(path)
+        }
+        // if no previous file, just make it
+        // {filename}_0(.ext)
+        None => {
+            let stem = file.file_stem().unwrap_or_default();
+            let ext = file.extension().unwrap_or_default();
+
+            let stem_str = stem.to_string_lossy();
+            let ext_str = ext.to_string_lossy();
+
+            let mut parts: Vec<&str> = stem_str.split('.').collect();
+            let prefix = parts[0];
+            let path = match parts.get(0) {
+                Some(ext) => format!("{}_0.{}", prefix, ext),
+                None => format!("{}_0", prefix),
+            };
+
+            dir_path.join(path)
+        }
+    };
+
+    // try to get timestamp to affix to file stem
+    let time = SystemTime::now().duration_since(UNIX_EPOCH);
+    let backup = match time {
+        Ok(t) => {
+            let stem = file.file_stem().unwrap_or_default();
+            let ext = file.extension().unwrap_or_default();
+
+            let prefix = stem.to_string_lossy();
+            let ext = ext.to_string_lossy();
+
+            let timestamp = t.as_secs();
+
+            let path = format!("{}_{}.{}", prefix, timestamp, ext);
+
+            dir_path.join(path)
+        }
+        Err(_) => default,
+    };
+
+    // remove old backups only if write succeeds
+    match fs::write(&backup, content) {
+        Ok(()) => {
+            println!("Wrote backup to {:?}", backup);
+            for path in stage_for_removal {
+                match fs::remove_file(path) {
+                    Ok(()) => (),
+                    Err(e) => eprintln!("{e}"),
+                }
+            }
+        }
+        Err(e) => return Err(e),
+    }
+
+    Ok(())
+}
+
+
+// should set up a versioning system, 
+// writing to /home/user/.csview/{filename}/{filename}{timestamp}
+// upon load of the file, and pruning this directory 
+// when its size exceeds 10 (say)
+// (should also consider a .csview/config file)
+pub fn write_to_file(mut cells: Cells, filename: String, delim: char) {
     let mut sheet = String::new();
     for i in 1..cells.num_rows {
         let mut row = String::new();
@@ -718,11 +847,15 @@ pub fn write_to_file(mut cells: Cells, filename: String) {
             let mut content = String::new();
             let cell = cur.get(j).unwrap();
             for line in &cell.content {
-                content.push_str(&line);
+                if line.contains(delim) {
+                    content.push_str(&format!("\"{}\"", line));
+                } else {
+                    content.push_str(&line);
+                }
             }
             row.push_str(&content);
             if j != cur.len() - 1 {
-                row.push(',');
+                row.push(delim);
             }
         }
 
@@ -733,8 +866,8 @@ pub fn write_to_file(mut cells: Cells, filename: String) {
         sheet.push_str(&row);
     }
     
-    match fs::write(filename, sheet) {
-        Ok(()) => (),
+    match fs::write(&filename, sheet) {
+        Ok(()) => println!("Wrote {} to file", filename),
         Err(e) => eprintln!("{e}"),
     }
 }
