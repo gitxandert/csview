@@ -576,7 +576,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             let mut frame = String::with_capacity(8192);
 
             // move cursor to top_left
-            frame.push_str("\x1b[?25l\x1b[H");
+            frame.push_str("\x1b[H\x1b[?25l");
             
             let h_offset = w_info.h_offset;
             let w_offset = w_info.w_offset;
@@ -607,7 +607,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
 
             let mut focus = String::new();
 
-            for _ in 0..rows.min(cells.num_rows() - h_offset) {
+            for _ in 0..rows.min(cells.num_rows().saturating_sub(h_offset)) {
                 /*
                 * Each line needs to be formatted like so:
                 * | content(...) | content(...) | content(...) |
@@ -714,7 +714,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // set cell for writing
             cells.set_w_cell(w_row, w_idx);
             w_info.set_x_page(idx, orig_idx);
-            w_info.set_y_page(row, h_offset);
+            w_info.set_y_page(row.saturating_sub(2), h_offset);
 
             // show content of focused cell at bottom
             frame.push_str(&format!("\x1b[{};{}H\x1b[2K{}", cur_h, 1, focus));
