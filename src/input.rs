@@ -6,20 +6,16 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
         match input {
             // normal arrows
             [27, 91, 65] => { // up
-                w_info.set_mode(ScrollMode::Cell);
-                w_info.h_offset_up();
+                w_info.set_h_pointer(w_info.h_pointer.saturating_sub(1));
             }
             [27, 91, 66] => { // down
-                w_info.set_mode(ScrollMode::Cell);
-                w_info.h_offset_down();
+                w_info.set_h_pointer(w_info.h_pointer + 1);
             }
             [27, 91, 67] => { // right
-                w_info.set_mode(ScrollMode::Cell);
-                w_info.w_offset_right(cells);
+                w_info.set_w_pointer(w_info.w_pointer + 1);
             }
             [27, 91, 68] => { // left
-                w_info.set_mode(ScrollMode::Cell);
-                w_info.w_offset_left(cells);
+                w_info.set_w_pointer(w_info.w_pointer.saturating_sub(1));
             }
             // modified arrows
             [27, 91, 49, 59, m, d] => {
@@ -32,31 +28,92 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                     _ => (),
                 }
                 match d {
-                    65 => w_info.h_offset_up(),
-                    66 => w_info.h_offset_down(),
-                    67 => {
-                        if winch {
-                            let width = cells.w_cell().width();
-                            cells.set_cell_width(width + 1);
-                        } else {
-                            w_info.w_offset_right(cells);
+                    65 => { // up
+                        match w_info.mode {
+                            ScrollMode::Axis {
+                                w_info.set_h_offset(
+                                    w_info.h_offset.saturating_sub(1)
+                                );
+                            }
+                            ScrollMode::Page {
+                                w_info.set_h_offset(
+                                    w_info.h_offset.saturating_sub(w_info.h_page)
+                                );
+                            _ => (),
                         }
                     }
-                    68 => {
-                        if winch {
-                            let width = cells.w_cell().width();
-                            cells.set_cell_width(width.saturating_sub(1));
-                        } else {
-                            w_info.w_offset_left(cells);
+                    66 => { // down
+                        match w_info.mode {
+                            ScrollMode::Axis {
+                                w_info.set_h_offset(
+                                    w_info.h_offset + 1
+                                );
+                            }
+                            ScrollMode::Page {
+                                w_info.set_h_offset(
+                                    w_info.h_offset + w_info.h_page
+                                );
+                            _ => (),
                         }
                     }
-                    _ => (),
+                    67 => { // right
+                        let mut w_cell = cells.w_cell();
+                        if winch {
+                            let col = w_cell.col;
+                            let width = w_cell.width;
+                            cells.set_column_width(col, width + 1);
+                        } else {
+                            match w_info.mode {
+                                ScrollMode::Text {
+                                    w_cell.set_text_offset(
+                                        w_cell.text_offset + 1
+                                    );
+                                }
+                                ScrollMode::Axis {
+                                    w_info.set_w_offset(
+                                        w_info.w_offset + 1
+                                    }
+                                }
+                                ScrollMode::Page {
+                                    w_info.set_w_offset(
+                                        w_info.w_offset + w_info.w_page
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    68 => { // left
+                        let mut w_cell = cells.w_cell();
+                        if winch {
+                            let col = w_cell.col;
+                            let width = w_cell.width;
+                            cells.set_column_width(col, width.saturating_sub(1));
+                        } else {
+                            match w_info.mode {
+                                ScrollMode::Text {
+                                    w_cell.set_text_offset(
+                                        w_cell.text_offset.saturating_sub(1)
+                                    );
+                                }
+                                ScrollMode::Axis {
+                                    w_info.set_w_offset(
+                                        w_info.w_offset.saturating_sub(1)
+                                    );
+                                }
+                                ScrollMode::Page {
+                                    w_info.set_w_offset(
+                                        w_info.w_offset.saturating_sub(w_info.w_page)
+                                    );
+                                }
+                                _ => (),
+                            }
+                        }
+                    }
                 }
             }
             // ctrl + w (write)
             [23] => {
                 w_info.set_writing(true);
-                w_info.set_mode(ScrollMode::Axis);
             }
             _ => (),
         }
@@ -65,30 +122,16 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
         match input {
             // normal arrows
             [27, 91, 65] => { // up
-                // if cell has lines separated by \n,
-                // this scrolls through them; otherwise, it can
                 // maybe be used to shift back by the cell's width
             }
             [27, 91, 66] => { // down
-                // sim.
+                // sim. but forward
             }
             [27, 91, 67] => { // right
                 // scrolls cursor right within a cell
-                let cursor_pos = w_info.get_cursor_offset();
-                let mut w_cell = cells.w_cell();
-                let limit = w_cell.len();
-                if cursor_pos < limit {
-                    if w_info.set_cursor_offset(cursor_pos + 1) == 0 {
-                        w_cell.inc_text_offset(1);
-                    }
-                }
             }
             [27, 91, 68] => { // left
-                let cursor_pos = w_info.get_cursor_offset();
-                let mut w_cell = cells.w_cell();
-                if w_info.set_cursor_offset(cursor_pos.saturating_sub(1)) == 0 {
-                    w_cell.dec_text_offset(1);
-                }
+                // sim. but left
             }
             [27] => { // escape by itself
                 // ignore for now
@@ -113,23 +156,14 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             // ctrl + w (write)
             [23] => {
                 w_info.set_writing(false);
-                w_info.set_mode(ScrollMode::Cell);
-                cells.set_text_offset(0);
+                let mut w_cell = cells.w_cell();
+                w_cell.set_text_offset(0usize);
             }
             [1..=22] | [24..=26] => {
                 // ignore other control characters
             }
             // backspace
             [8] | [127] => {
-                {
-                    let cur_pos = w_info.get_cursor_offset();
-                    let mut w_cell = cells.w_cell();
-                    w_cell.delete(cur_pos);
-                    if w_info.set_cursor_offset(cur_pos.saturating_sub(1)) == 0 {
-                        w_cell.dec_text_offset(1);
-                    }
-                }
-                if !cells.written { cells.written = true; }
             }
             [27, 91, 50, 126] => { //insert
             }
@@ -155,15 +189,6 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                         return;
                     }
                 };
-                {
-                    let cur_pos = w_info.get_cursor_offset();
-                    let mut w_cell = cells.w_cell();
-                    w_cell.write(c.to_string(), cur_pos);
-                    if w_info.set_cursor_offset(cur_pos + 1) == 0 {
-                        w_cell.inc_text_offset(1);
-                    }
-                }
-                if !cells.written { cells.written = true; }
             }
         }
     }
