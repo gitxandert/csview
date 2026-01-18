@@ -460,6 +460,8 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // plus the rest of the line
             //
             // 1 line
+            let mut w_cell = cells.w_cell();
+
         }
         WinChange::Focus => {
             // redraw the last focused cell,
@@ -537,6 +539,8 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             if flush {
                 w_info.flush();
             }
+            
+            w_info.changed = WinChange::Non;
         }
         WinChange::Non => {
             // do nothing
