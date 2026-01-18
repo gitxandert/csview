@@ -11,378 +11,223 @@ use crate::csv::{Cell, Cells};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScrollMode {
-    Text,
-    Cell,
-    Axis,
-    Page,
+    Text, // scroll through text within a cell
+    Cell, //// change focus from cell to cell
+    Axis, ////// shift all rows/columns
+    Page, //////// replace all rows/columns with
+          //////// the next screenful of rows/columns
 }
 
-struct Cursor {
-    line: usize,
-    col: usize,
-    offset: usize,
-    max: usize,
-    show: bool,
-}
-
-impl Cursor {
-    fn show(&mut self, show: bool) {
-        self.show = show;
-    }
-
-    fn set(&mut self, line: usize, col: usize, max: usize) {
-        self.line = line;
-        self.col = col;
-        self.max = max;
-    }
+#[derive(Debug, PartialEq)]
+pub enum WinChange {
+    Cell,       // one cell's content has changed
+    Focus,      //// the focus has changed
+    ColWidth,   ////// a single column's width has changed
+    Rows,       //// the view of rows has shifted
+    Columns,    // the view of columns has shifted
+    Screen,     //// the screen's dimensions have changed
+    Non,        ////// no change has occurred
 }
 
 pub struct WinInfo {
     width: usize,
     height: usize,
+    old_width: usize,
+    old_height: usize,
     pub w_offset: usize,
     pub h_offset: usize,
-    max_w: usize,
-    max_h: usize,
-    was_changed: bool,
+    num_cols: usize,
+    num_rows: usize,
+    w_page: usize,
+    h_page: usize,
+    changed: WinChange,
     mode: ScrollMode,
     pub w_pointer: usize,
     pub h_pointer: usize,
-    x_page: usize,
-    y_page: usize,
+    frame: String,
+    focused_content: String,
     writing: bool,
-    cursor: Cursor,
+    cursor: (usize, usize),
 }
 
 impl WinInfo {
-    pub fn new(row_len: usize, col_len: usize) -> Self {
+    pub fn new(num_cols: usize, num_rows: usize) -> Self {
         Self {
             width: 0usize,
             height: 0usize,
+            old_width: 0usize,
+            old_height: 0usize,
             w_offset: 0usize,
             h_offset: 0usize,
-            max_w: row_len - 1,
-            max_h: col_len - 1,
-            was_changed: true,
+            num_cols: num_cols,
+            num_rows: num_rows,
+            changed: WinChange::Screen,
             mode: ScrollMode::Cell,
             w_pointer: 0usize,
-            h_pointer: 1usize,
-            x_page: 0usize,
-            y_page: 0usize,
+            h_pointer: 0usize,
+            w_page: 0usize,
+            h_page: 0usize,
             writing: false,
-            cursor: Cursor { line: 0usize, col: 0usize, offset: 0usize, max: 0usize, show: false },
+            cursor: (0usize, 0usize),
         }
     }
 
-    pub fn changed(&mut self) -> bool {
-        if self.was_changed {
-            self.was_changed = false;
-            return true;
-        }
-
-        if self.width == 0usize && self.height == 0usize {
-            unsafe {
-                let w = *w_ptr();
-                let h = *h_ptr();
-                self.set_w_h(w, h);
-                return true;
-            }
-        }
-
-        return false;
+    pub fn changed(&mut self) -> WinChange {
+        self.changed
     }
 
-    pub fn set_x_page(&mut self, end: usize, beg: usize) {
-        self.x_page = end.saturating_sub(beg);
+    // set w_page and h_page whenever screen is redrawn
+    pub fn set_w_page(&mut self, end: usize, beg: usize) {
+        self.w_page = end.saturating_sub(beg);
     }
-
-    pub fn set_y_page(&mut self, end: usize, beg: usize) {
-        self.y_page = end.saturating_sub(beg);
+    pub fn set_h_page(&mut self, end: usize, beg: usize) {
+        self.h_page = end.saturating_sub(beg);
     }
 
     pub fn set_mode(&mut self, mode: ScrollMode) {
         self.mode = mode;
     }
 
-    pub fn set_writing(&mut self, w: bool) {
-        self.writing = w;
-        self.set_cursor_offset(0);
-        self.cursor.show(w);
-        self.was_changed = true;
-    }
-
     pub fn writing(&self) -> bool {
         self.writing
+    }
+
+    pub fn set_writing(&mut self, w: bool) {
+        self.writing = w;
     }
 
     pub fn mode(&self) -> ScrollMode {
         self.mode
     }
 
-    pub fn cursor_shown(&self) -> bool {
-        self.cursor.show
+    fn cursor_pos(&self) -> (usize, usize) {
+        (self.cursor.0, self.cursor.1)
     }
 
-    pub fn set_cursor(&mut self, line: usize, col: usize, max: usize) {
-        self.cursor.set(line, col, max);
-    }
-
-    pub fn get_cursor(&self) -> (usize, usize) {
-        let offset = match self.cursor.offset > self.cursor.max {
-            true => self.cursor.max,
-            false => self.cursor.offset,
-        };
-           
-        let pos = self.cursor.col + offset;
-        (self.cursor.line, pos)
-    }
-
-    pub fn get_cursor_offset(&self) -> usize {
-        self.cursor.offset
-    }
-
-    pub fn set_cursor_offset(&mut self, new: usize) -> usize {
-        self.was_changed = true;
-        let old = self.cursor.offset;
-        if new > old {
-            if new < self.cursor.max {
-                self.cursor.offset = new;
-                return new;
-            } else {
-                self.cursor.offset = self.cursor.max;
-                return 0usize;
+    pub fn set_w_h() {
+        unsafe {
+            let mut ws: winsize = mem::zeroed();
+            if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
+                self.old_width = self.width;
+                self.old_height = self.height;
+                self.width = ws.ws_col as usize;
+                self.height = ws.ws_row as usize;
             }
-        } else {
-            self.cursor.offset = new;
-            return new;
+            self.changed = WinChange::Screen;
         }
     }
+    
+    pub fn set_w_pointer(&mut self, w) {
+        if w > 0 && w < self.num_cols {
+            self.w_pointer = w;
+            self.changed = WinChange::Focus;
 
-    pub fn set_w_h(&mut self, cur_w: usize, cur_h: usize) {
-        if self.width != cur_w {
-            self.width = cur_w;
-            self.was_changed = true;
-        }
-        if self.height == cur_h {
-            self.height = cur_h;
-            self.was_changed = true;
-        }
-    }
-
-    pub fn h_offset_up(&mut self) {
-        match self.mode {
-            ScrollMode::Text => (),
-            ScrollMode::Cell => self.dec_h_pointer(),
-            ScrollMode::Axis => self.unshift_page_h(),
-            ScrollMode::Page => self.dec_page_h(),
-        }
-    }
-
-    pub fn h_offset_down(&mut self) {
-        match self.mode {
-            ScrollMode::Text => (),
-            ScrollMode::Cell => self.inc_h_pointer(),
-            ScrollMode::Axis => self.shift_page_h(),
-            ScrollMode::Page => self.inc_page_h(),
-        }
-    }
-
-    pub fn w_offset_left(&mut self, cells: &mut Cells) {
-        match self.mode {
-            ScrollMode::Text => {
-                let mut w_cell = cells.w_cell();
-                w_cell.dec_text_offset(1);
-                self.was_changed = true;
-            }
-            ScrollMode::Cell => self.dec_w_pointer(),
-            ScrollMode::Axis => self.unshift_page_w(),
-            ScrollMode::Page => self.dec_page_w(),
-        }
-    }
-
-    pub fn w_offset_right(&mut self, cells: &mut Cells) {
-        match self.mode {
-            ScrollMode::Text => {
-                let mut w_cell = cells.w_cell();
-                w_cell.inc_text_offset(1);
-                self.was_changed = true;
-            }
-            ScrollMode::Cell => self.inc_w_pointer(),
-            ScrollMode::Axis => self.shift_page_w(),
-            ScrollMode::Page => self.inc_page_w(),
-        }
-    }
-
-    // private functions
-    //
-    fn dec_h_pointer(&mut self) {
-        let dec = (self.h_pointer > 0) as usize;
-        self.h_pointer = self.h_pointer.saturating_sub(dec);
-        let sub = (self.h_pointer < self.h_offset) as usize * dec;
-        self.h_offset = self.h_offset.saturating_sub(sub);
-        self.was_changed = dec == 1;
-    }
-
-    fn inc_h_pointer(&mut self) {
-        let inc = (self.h_pointer < self.max_h) as usize;
-        self.h_pointer += inc;
-        let offset = (self.h_pointer >= self.h_offset + self.y_page + 2) as usize;
-        self.h_offset += offset;
-        self.was_changed = inc == 1 || offset == 1;
-    }
-
-    fn dec_page_h(&mut self) {
-        let gtz = (self.h_offset > 0) as usize;
-        let is_in = (self.h_offset
-            .saturating_sub(self.y_page) > 0) 
-            as usize * gtz;
-        self.h_offset = self.h_offset.saturating_sub(self.y_page * is_in);
-        let is_hin = (self.h_pointer
-            .saturating_sub(self.y_page) > 0) 
-            as usize * gtz;
-        self.h_pointer = self.h_pointer.saturating_sub(self.y_page * is_hin);
-        self.was_changed = is_in == 1 || is_hin == 1;
-    }
-
-    fn inc_page_h(&mut self) {
-        if self.h_offset + self.y_page < self.max_h {
-            if self.h_offset + self.y_page < self.max_h.saturating_sub(self.y_page) {
-                self.h_offset += self.y_page;
-                self.h_pointer += self.y_page;
-            } else {
-                let inc = self.max_h.saturating_sub(self.h_offset);
-                self.h_offset += inc;
-                self.h_pointer += inc;
-            }
-            self.was_changed = true;
-        } else {
-            self.h_offset = self.max_h;
-            self.h_pointer = self.max_h;
-        }
-    }
-
-    fn unshift_page_h(&mut self) {
-        if self.h_offset > 1 {
-            self.h_offset = self.h_offset.saturating_sub(1);
-            if self.h_pointer > 1 {
-                self.h_pointer = self.h_pointer.saturating_sub(1);
-            }
-            self.was_changed = true;
-        }
-    }
-
-    fn shift_page_h(&mut self) {
-        // always stay within page
-        if self.h_offset <= self.max_h.saturating_sub(self.y_page) {
-            self.h_offset += 1;
-            if self.h_pointer < self.max_h {
-                self.h_pointer += 1;
-            }
-            self.was_changed = true;
-        }
-    }
-
-    fn dec_w_pointer(&mut self) {
-        if self.w_pointer > 0 {
-            self.w_pointer = self.w_pointer.saturating_sub(1);
+            // change w_offset if w_pointer has gone out of view
             if self.w_pointer < self.w_offset {
-                self.w_offset = self.w_offset.saturating_sub(1);
+                let diff = self.w_offset.saturating_sub(self.w_pointer);
+                self.w_offset= self.w_offset.saturating_sub(diff);
+                self.changed = WinChange::Columns;
+            } else if self.w_pointer > self.w_offset + self.w_page {
+                let diff = self.w_pointer.saturating_sub(self.w_offset) + self.w_page;
+                self.w_offset = self.w_offset + diff;
+                self.changed = WinChange::Columns;
             }
-            self.was_changed = true;
         }
     }
 
-    fn inc_w_pointer(&mut self) {
-        if self.w_pointer < self.max_w {
-            self.w_pointer += 1;
+    pub fn set_w_offset(&mut self, w) {
+        if w > 0 && w < self.num_cols {
+            let old_w = self.w_offset;
+            self.w_offset = w;
 
-            if self.w_pointer >= self.w_offset + self.x_page {
-                self.w_offset += 1;
-            }
-            self.was_changed = true;
-        }    
-    }
-
-    fn dec_page_w(&mut self) {
-        if self.w_offset > 0 {
-            if self.w_offset.saturating_sub(self.x_page) > 0 {
-                self.w_offset = self.w_offset.saturating_sub(self.x_page);
+            // keep w_pointer at same relative spot it was before
+            if old_w > self.w_offset {
+                let diff = old_w.saturating_sub(self.w_offset);
+                self.w_pointer = self.w_pointer.saturating_sub(diff);
             } else {
-                self.w_offset = 0;
+                let diff = self.w_offset.saturating_sub(old_w);
+                self.w_pointer += diff;
             }
-            if self.w_pointer.saturating_sub(self.x_page) > 0 {
-                self.w_pointer = self.w_pointer.saturating_sub(self.x_page);
+            
+            self.changed = WinChange::Columns;
+        }
+    }
+    
+    pub fn set_h_pointer(&mut self, h) {
+        if h > 0 && h < self.num_rows {
+            self.h_pointer = h;
+            self.changed = WinChange::Focus;
+
+            // change h_offset if h_pointer has gone out of view
+            if self.h_pointer < self.h_offset {
+                let diff = self.h_offset.saturating_sub(self.h_pointer);
+                self.h_offset= self.h_offset.saturating_sub(diff);
+                self.changed = WinChange::Rows;
+            } else if self.h_pointer > self.h_offset + self.h_page {
+                let diff = self.h_pointer.saturating_sub(self.h_offset) + self.h_page;
+                self.h_offset = self.h_offset + diff;
+                self.changed = WinChange::Rows;
+            }
+        }
+    }
+
+    pub fn set_h_offset(&mut self, h) {
+        if h > 0 && h < self.num_rows {
+            let old_h = self.h_offset;
+            self.h_offset = h;
+
+            // keep h_pointer at same relative spot it was before
+            if old_h > self.h_offset {
+                let diff = old_h.saturating_sub(self.h_offset);
+                self.h_pointer = self.h_pointer.saturating_sub(diff);
             } else {
-                self.w_pointer = 0;
+                let diff = self.h_offset.saturating_sub(old_h);
+                self.h_pointer += diff;
             }
-            self.was_changed = true;
+            
+            self.changed = WinChange::Rows;
         }
     }
 
+    pub fn draw_focused_content(&mut self) {
+        let focused = &self.focused_content;
+        let row = self.height;
+        let col = self.width;
+        let content = "\x1b[" + row + ":" + col "H\x1b[K" + focused;
+        self.push_to_frame(content);
+    }
 
-    fn inc_page_w(&mut self) {
-        if self.w_offset + self.x_page < self.max_w {
-            if self.w_offset + self.x_page < self.max_w.saturating_sub(self.x_page) {
-                self.w_offset += self.x_page;
-                self.w_pointer += self.x_page;
-            } else {
-                let inc = self.max_w - self.w_offset - self.x_page + 1;
-                self.w_offset += inc;
-                self.w_pointer += inc;
-            }
-            self.was_changed = true;
+    pub fn draw_column(&mut self, id: &str, name: &str, col: Column) {
+        let start = col.start;
+        
+        for i in self.h_offset..self.height {
+            let cell = col.get_cell(i);
+            let content = cell.format();
+            self.push_to_frame(content);
         }
     }
 
-    fn unshift_page_w(&mut self) {
-        if self.w_offset > 0 {
-            self.w_offset = self.w_offset.saturating_sub(1);
-            if self.w_pointer > 0 {
-                self.w_pointer = self.w_pointer.saturating_sub(1);
-            }
-            self.was_changed = true;
-        }
+    pub fn push_to_frame(&mut self, content: &str) {
+        self.frame.push_str(content);
     }
 
-    fn shift_page_w(&mut self) {
-        if self.w_offset < self.max_w.saturating_sub(self.x_page) {
-            self.w_offset += 1;
-            if self.w_pointer < self.max_w {
-                self.w_pointer += 1;
-            }
-            self.was_changed = true;
+    pub fn flush(&mut self) {
+        let mut out = std::io::stdout();
+        if writing {
+            // show cursor
+            let (l, c) = self.cursor_pos();
+            let cursor = "\x1b[" + l ":" + c + "H\x1b[?25h";
+            self.push_to_frame(cursor);
         }
+        write!(out, "\x1b[?25l{}", frame);
+        self.changed = WinChange::Non;
+        self.frame = String::new();
     }
 }
 
 // Terminal takeover + signal handling + globals for WIDTH and HEIGHT
 
 static mut ORIG_TERM: Option<termios> = None;
-static mut WIDTH: usize = 0;
-static mut HEIGHT: usize = 0;
-
-#[inline(always)]
-pub unsafe fn w_ptr() -> *mut usize {
-    &raw mut WIDTH
-}
-
-#[inline(always)]
-pub unsafe fn h_ptr() -> *mut usize {
-    &raw mut HEIGHT
-}
-
-#[inline(always)]
-pub fn set_w_h() {
-    unsafe {
-        let mut ws: winsize = mem::zeroed();
-        if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
-            let w = w_ptr();
-            let h = h_ptr();
-            *w = ws.ws_col as usize;
-            *h = ws.ws_row as usize;
-        }
-    }
-}
 
 pub fn raw_mode(switch: bool) {
     unsafe {
@@ -444,13 +289,7 @@ extern "C" fn sig_quit(_sig: c_int) {
 
 pub fn check_flags(w_info: &mut WinInfo) -> bool {
     if GOT_WINCH.swap(false, Ordering::SeqCst) {
-        set_w_h();
-
-        unsafe {
-            let w = *w_ptr();
-            let h = *h_ptr();
-            w_info.set_w_h(w, h);
-        }
+        w_info.set_w_h();
     }
 
     return GOT_INT.swap(false, Ordering::SeqCst) || 
