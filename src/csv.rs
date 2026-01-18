@@ -6,7 +6,7 @@ use std::{
     io::{self, Error, ErrorKind, Read, Write, stdout}
 };
 
-use crate::terminal::{h_ptr, w_ptr, WinInfo};
+use crate::terminal::{WinChange, WinInfo};
 
 /*
  * To preserve cell formatting:
@@ -72,32 +72,25 @@ impl EscSeq {
 
 #[derive(Debug)]
 pub struct Cell {
-    content: Vec<String>,
+    content: String,
     escape_sequences: Vec<EscSeq>,
-    lens: Vec<usize>,
-    width: usize, // of the cell, not its content
-    height: usize, // of the cell, not its content
+    t_row: usize,
+    t_col: usize,
     pub text_offset: usize,
-    pub height_offset: usize,
 }
 
 impl Cell {
     fn new(content: String) -> Self {
-        // store content as lines separated by newlines;
         // store escapes and their indices
-        let mut lines = Vec::<String>::new();
         let mut esq = Vec::<EscSeq>::new();
 
         // len keeps track of "real" len
         // (i.e. the characters, not the formatting)
-        let mut lens = Vec::<usize>::new();
-        let mut len = 0usize;
+        let mut real_len = 0usize;
 
         let mut line = String::new();
         let mut e = EscSeq::new();
         
-        let mut i = 0usize;
-
         let mut x = false;
         let mut is_csi = false;
         // check for escape sequences;
@@ -106,10 +99,12 @@ impl Cell {
                 '\x1b' => {
                     x = true;
                     e.set_start(c, i);
+                    continue;
                 }
                 '[' if x => {
                     is_csi = true;
                     e.push_seq(c);
+                    continue;
                 }
                 '@'..='~' if x => {
                     e.set_end(c, i);
@@ -118,18 +113,15 @@ impl Cell {
 
                     x = false;
                     is_csi = false;
+                    continue;
                 }
-                '\n' if !x => {
-                    // push line and len
-                    lines.push(line);
-                    lens.push(len);
-                    line = String::new();
-                    len = 0usize;
+                '\n' => {
+                    // skip new lines
                     continue;
                 }
                 _ => {
                     match x {
-                        false => len += 1,
+                        false => line.push(c),
                         true => {
                             match is_csi {
                                 true => e.push_seq(c),
@@ -145,153 +137,39 @@ impl Cell {
                     }
                 }
             }
-           
-            line.push(c);
-            i += 1;
         }
-
-        // push final line and len
-        lines.push(line);
-        lens.push(len);
 
         Self { 
-            content: lines,
+            content: line,
             escape_sequences: esq,
-            lens,
-            width: 12usize,
-            height: 1usize,
+            t_row: 0usize,
+            t_col: 0usize,
             text_offset: 0usize,
-            height_offset: 0usize,
         }
     }
 
-    fn format_cell(&self) -> (String, usize) {
-        let mut cell = String::new();
-        let mut content = self.content();
-        let mut extra_len = 0usize;
-      
-        // iterate through escape_sequences
-        // while escape_sequence[i] < self.text_offset;
-        // any escape sequence before the
-        // (real) text offset will be added to the start
-        // of the formatted string; and escape sequence
-        // after will be added to the end of the string
-        let mut fmt_start = String::new();
-        let mut fmt_end = String::new();
-        let mut skip = self.text_offset;
-        for esc in &self.escape_sequences {
-            if esc.start > skip {
-                fmt_end.push_str(&esc.seq);
-                extra_len += esc.len;
-            } else {
-                fmt_start.push_str(&esc.seq);
-                extra_len += esc.len;
-                skip += (esc.end.saturating_sub(skip) + 1);
-            }
-        }
-
-        let mut take = self.width;
-        for esc in &self.escape_sequences {
-        // should have skipped past all previous EscSeq,
-        // so only need to take remaining into account
-            if esc.end < skip || esc.start > skip + take {
-                continue;
-            }
-            take += esc.len;
-        }
-
-        let mut post_skip: String = content
-            .chars()
-            .skip(skip)
-            .collect();
-
-        let pslen = post_skip.len();
-        let mut add = String::new();
-
-        if pslen > take {
-            take = take.saturating_sub(3);
-            add = "...".to_string();
-        } else if post_skip.len() < take {
-            let ws = take.saturating_sub(pslen);
-            add = format!("\x1b[4m{:<width$}", " ", width = ws);
-        }
-
-        extra_len += add.len();
-
-        let mut taken: String = post_skip
-            .chars()
-            .take(take)
-            .collect();
-
-        taken.push_str(&add);
-        fmt_end.push_str("\x1b[4m");
-
-        cell = format!(
-            "| {}{}{} ", 
-            fmt_start, taken, fmt_end, 
-        );
-
-        (cell, extra_len)
-    }
-
-    pub fn write(&mut self, input: String, cur_pos: usize) {
-        let old_len = self.len();
+    // ignore escapes for now
+    fn format(&self) -> &str {
         let content = self.content();
-        let take = self.text_offset + cur_pos;
-        let start: String = content
-            .chars()
-            .take(take)
-            .collect();
-        let end: String = content
-            .chars()
-            .skip(take)
-            .collect();
+     
+        let skip = self.text_offset;
+        let take = self.width;
 
-        self.set_content(format!("{start}{input}{end}"));
-        
-        let cur_len = self.len() + input.len();
-        self.set_len(cur_len);
+        let taken = &content[skip..skip + take];
+
+        "| " + taken + " "    
     }
 
-    pub fn delete(&mut self, cur_pos: usize) {
-        // check if at beginning of string;
-        // if so, don't delete anything
-        let check = cur_pos;
-        let subbed = cur_pos.saturating_sub(1);
-        if check.saturating_sub(subbed) == 0 && self.text_offset == 0 { return; }
-
-        let take = self.text_offset + subbed;
-        let content = self.content();
-
-        let start: String = content
-            .chars()
-            .take(take)
-            .collect();
-        let end: String = content
-            .chars()
-            .skip(take + 1)
-            .collect();
-
-        self.set_content(format!("{start}{end}"));
-        self.set_len(self.len().saturating_sub(1));
-    }
-    
-    fn set_content(&mut self, new: String) {
-        let mut content = self.content.get_mut(self.height_offset).unwrap();
-        *content = new;
+    pub fn len(&self) -> usize {
+        self.content.len()
     }
 
-    fn set_len(&mut self, new: usize) {
-        let mut len = self.lens.get_mut(self.height_offset).unwrap();
-        *len = new;
+    pub fn content(&self) -> &str {
+        &self.content
     }
 
-    fn set_width(&mut self, w: usize) {
-        self.width = w;
-    }
-
-    fn set_height(&mut self, h: usize) {
-        self.height = h;
+    pub fn set_content(&mut self, input: String) {
+        self.content = input;
     }
 
     // directly set it
@@ -310,92 +188,102 @@ impl Cell {
             self.text_offset = self.len().saturating_sub(self.width);
         }
     }
+}
 
-    #[inline]
-    pub fn len(&self) -> usize {
-        *self.lens.get(self.height_offset).unwrap()
+pub struct Column {
+    cells: Vec<Cell>,
+    start: usize, // terminal col where this begins
+    width: usize,
+}
+
+impl Column {
+    fn new() -> Self {
+        Self {
+            cells: Vec::<Cell>::new(),
+            width: 12usize,
+        }
     }
 
-    #[inline]
-    pub fn content(&self) -> String {
-        self.content.get(self.height_offset).unwrap().clone()
+    fn push_cell(&mut self, cell: Cell) {
+        self.cells.push(cell);
+    }
+
+    pub fn set_width(&mut self, w: usize) {
+        self.width = w;
     }
 
     pub fn width(&self) -> usize {
         return self.width
     }
+
+    pub fn get_cell(&self, idx: usize) -> &Cell {
+        &self.cells[idx]
+    }
 }
 
 pub struct Cells {
-    rows: Vec<Vec<Cell>>,
-    num_cols: usize,
-    num_rows: usize,
+    header: Vec<Cell>,
+    col_idx: Vec<Cell>,
+    row_idx: Column,
+    columns: Vec<Column>,
     w_cell: (usize, usize),
-    were_changed: bool,
+    changed: bool,
     pub written: bool,
 }
 
 impl Cells {
-    fn new(num_cols: usize, num_rows: usize) -> Self {
-        let rows = Vec::<Vec<Cell>>::new();
-        let text_offsets = vec![0usize; num_cols];
+    fn new(header: Vec<Cell>, col_idx: Vec<Cell>, row_idx: Column, num_cols: usize) -> Self {
+        let columns = Vec::<Cell>::with_capacity(num_cols);
         let w_cell = (0usize, 0usize);
-        let were_changed = false;
+        let changed = false;
         let written = false;
 
-        Self { rows, num_cols, num_rows, w_cell, were_changed, written }
+        Self { row_idx, columns, w_cell, changed, written }
     }
 
     fn changed(&mut self) -> bool {
-        let ret = self.were_changed;
-        self.were_changed ^= ret;
+        let ret = self.changed;
+        self.changed ^= ret;
 
         ret
     }
 
-    pub fn xy(&self) -> (usize, usize) {
-        (self.num_cols, self.num_rows)
+    pub fn set_column_width(&mut self, w: usize) {
+        let width = (3 > w) as usize * 3 + (w > 3) as usize * w;
+        let idx = self.w_cell.0; // w_cell is where the focus is
+        let mut column = self.columns.get_mut(col_idx).unwrap();
+        column.set_width(width);
+        self.changed = true;
     }
 
-    pub fn set_text_offset(&mut self, offset: usize) {
-        let mut w_cell = self.w_cell();
-        w_cell.text_offset = 0usize;
+    fn set_w_cell(&mut self, col: usize, row: usize) {
+        self.w_cell = (col, row);
     }
 
-    pub fn set_cell_width(&mut self, width: usize) {
-        if width > 2 {
-            let row = self.w_cell.0;
-            let col = self.w_cell.1;
-            for row in &mut self.rows {
-                let mut cell = row.get_mut(col).unwrap();
-                cell.width = width;
-            }
-            self.were_changed = true;
-        }
+    fn push_to_col(&mut self, col: usize, cell: Cell) {
+        self.columns[col].push(cell);
     }
 
-    fn set_w_cell(&mut self, row: usize, idx: usize) {
-        self.w_cell = (row, idx);
-    }
-
-    fn push_row(&mut self, row: Vec<Cell>) {
-        self.rows.push(row);
-    }
-
-    fn get_row(&mut self, idx: usize) -> &Vec<Cell> {
-        if idx > self.num_rows - 1 {
-            return self.rows.get(self.num_rows - 1).unwrap();
-        } else {
-            return self.rows.get(idx).unwrap();
-        }
+    fn get_column(&self, idx: usize) -> &Column {
+        &self.columns[idx]
     }
 
     fn num_cols(&self) -> usize {
-        self.num_cols
+        self.columns.len()
     }
 
     fn num_rows(&self) -> usize {
-        self.num_rows
+        self.columns[0].len()
+    }
+
+    fn get_col_id(&self, idx: usize) -> &str {
+        self.col_idx[0].format()
+    }
+
+    fn get_col_name(&self, idx: usize) -> &str {
+        let content = self.header[idx].format();
+        let formatted = "\x1b[30;47m" + content + "\x1b39;49m";
+        formatted
     }
 
     pub fn w_cell(&mut self) -> &mut Cell {
@@ -473,23 +361,9 @@ fn parse_by_delim(line: &str, delim: char) -> Vec<Cell> {
 
 fn make_col_idx(num_cols: usize) -> Vec<Cell> {
     let mut row = Vec::<Cell>::new();
+
     let mut idx = "A".to_string();
     for _ in 0..num_cols {
-        let con_width = idx.len();
-        let content = {
-            if con_width % 2 == 0{
-                let ws = 6_usize.saturating_sub(con_width / 2);
-                format!("{:<lw$}{}{:<rw$}",
-                     " ", idx.clone(), " ", lw = ws, rw = ws)
-            } else {
-                let lw = 5_usize.saturating_sub(con_width / 2);
-                let rw = 6_usize.saturating_sub(con_width / 2);
-                format!("{:<lw$}{}{:<rw$}",
-                     " ", idx.clone(), " ", lw = lw, rw = rw)
-
-            }
-        };
-                    
         let cell = Cell::new(content);
         row.push(cell);
        
@@ -531,23 +405,37 @@ fn make_col_idx(num_cols: usize) -> Vec<Cell> {
     row
 }
 
+fn make_row_idx(len: usize) -> Column {
+    let mut row_idx = Column::new();
+    row_idx.set_width(4usize);
+    let blank = Cell::new("    ");
+    let head = Cell::new("\x1b[1;4;30;47mHEAD\x1b[0m".to_string());
+    row_idx.push_cell(blank);
+    row_idx.push_cell(head);
+
+    for i in 1..=len {
+        let index: String = format!("\x1b[4;30;47m{:04X}\x1b[39;49m", i);
+        row_idx.push_cell(Cell::new(index));
+    }
+
+    row_idx
+}
+
 fn parse_csv_into_cells(csv: String, delim: char) -> Result<Cells, io::Error> {
+    // extract lines, but parse into columns
     let lines: Vec<String> = parse_by_newline(&csv);
 
-    let col_names: Vec<Cell> = parse_by_delim(&lines[0], delim);
+    let header: Vec<Cell> = parse_by_delim(&lines.remove(0), delim);
+    let col_len = header.len();
+    let col_idx: Vec<Cell> = make_col_idx(col_len);
     
-    let num_cols = col_names.len();
-    let num_rows = lines.len() + 1;
-    
-    let mut cells = Cells::new(num_cols.clone(), num_rows);
-    let col_idx: Vec<Cell> = make_col_idx(num_cols);
-    cells.push_row(col_idx);
-    cells.push_row(col_names);
+    let row_idx: Column = make_row_idx(lines.len());
+    let mut cells = Cells::new(header, col_idx, row_idx, col_len);
 
-    if num_rows > 1 {
-        for i in 1..num_rows.saturating_sub(1) {
-            let row: Vec<Cell> = parse_by_delim(&lines[i], delim);
-            cells.push_row(row);
+    for line in lines {
+        let row: Vec<Cell> = parse_by_delim(&line, delim);
+        for i in 0..col_len {
+            cells.push_to_col(i, row[i]);
         }
     }
 
@@ -565,172 +453,93 @@ pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
 }
 
 pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
-    unsafe {
-        // if w_info was changed, this is a window resize
-        // or a change in cursor/cell focus;
-        // if cells were changed, this is a write
-        if w_info.changed() || cells.changed() {
-            let cur_w = *w_ptr();
-            let cur_h = *h_ptr();
-
-            // use double-buffering for one smooth write
-            let mut frame = String::with_capacity(8192);
-
-            // move cursor to top_left
-            frame.push_str("\x1b[H\x1b[?25l");
-            
-            let h_offset = w_info.h_offset;
-            let w_offset = w_info.w_offset;
-            let rows = cur_h.saturating_sub(1);
-            let cols = cur_w.saturating_sub(1);
-
-            // row indexes the csv row according to the height offset
-            // t_row corresponds to the terminal's row
-            let mut row = h_offset;
-            let mut t_row = 0usize;
-
-            // indices for cells in rows
-            let orig_idx = w_offset;
-            let mut idx = orig_idx;
-
-            // save which cell can be written to
-            let mut w_row = 0usize;
-            let mut w_idx = 0usize;
-
-            // consistent row_len
-            let row_len = cells.num_cols();
-            let num_rows = cells.num_rows();
-
-            // length of rendered line
-            // (starts with row index and ANSI)
-            let mut index_len = 7usize;
-            let mut line_w = index_len;
-
-            let mut focus = String::new();
-
-            for _ in 0..rows.min(cells.num_rows().saturating_sub(h_offset)) {
-                /*
-                * Each line needs to be formatted like so:
-                * | content(...) | content(...) | content(...) |
-                * so the total width of the screen needs to be portioned:
-                * 5 + n x (1 + 1 + cell_width + 1)
-                * if the cell at the end goes over, it is dropped
-                */
-
-                // move cursor to (row+1, col=1)
-                frame.push_str(&format!("\x1b[{};1H\x1b[2K", t_row + 1));
-
-                let mut line: String = "".to_string();
-                // reference to vec of cols
-                let mut v_cols = &Vec::<Cell>::new();
-                // always print col names
-                match t_row {
-                    0 => {
-                        line = "\x1b[4m    ".to_string();
-                        v_cols = cells.get_row(0);
-                    }
-                    1 => {
-                        line = "\x1b[1;4;30;47mHEAD\x1b[0m".to_string();
-                        v_cols = cells.get_row(1);
-                    }
-                    _ => {
-                        // if reached cells.num_rows(),
-                        // print XXXX instead of row number
-                        if row < cells.num_rows() {
-                            // print in hexadecimal (space-saving)
-                            line = format!("\x1b[4;30;47m{:04X}\x1b[39;49m", row.saturating_sub(1));
-                            v_cols = cells.get_row(row);
-                        } else {
-                            line = "XXXX| EOF".to_string();
+    match w_info.changed {
+        WinChange::Cell => {
+            // redraw the focused cell,
+            // with changed content,
+            // plus the rest of the line
+            //
+            // 1 line
+        }
+        WinChange::Focus => {
+            // redraw the last focused cell,
+            // w/o highlighting,
+            // plus the rest of its line,
+            // and the new focused cell, 
+            // w/ highlighting,
+            // plus the rest of its line
+            //
+            // 2 lines
+        }
+        WinChange::ColWidth => {
+            // redraw the column whose width has changed,
+            // plus all columns after
+            //
+            // all lines
+        }
+        WinChange::Row => {
+            // shift rows and row_idx,
+            // but no need to redraw header and col_idx
+            //
+            // all lines, except for header and col_idx
+        }
+        WinChange::Columns => {
+            // shift columns and col_idx,
+            // but no need to redraw row_idx
+            //
+            // all lines, but not the row_idx column
+        }
+        WinChange::Screen => {
+            // draw to the new terminal screen dimensions;
+            // if they shrink, 
+            // only maybe need to redraw focused content
+            //
+            let mut flush = false;
+            if w_info.old_height > w_info.height {
+                // focused content always drawn at height, width
+                w_info.draw_focused_content();
+                flush = true;
+            }
+            if w_info.width > w_info.old_width {
+                let mut gap_start = w_info.old_width;
+                let orig = w_info.w_offset + w_info.w_page;
+                let mut idx = orig;
+                let mut reset_lines = true;
+                loop {
+                    idx += 1;
+                    let col = cells.get_column(idx);
+                    if col.start + col.width < w_info.width {
+                        if reset_lines {
+                            // if this is the first pass through, 
+                            // reset each line starting at the column
+                            for row in 0..w_info.height {
+                                let reset = "\x1b[" + 
+                                            row + ":" + 
+                                            col.start "H\x1b[K";
+                                w_info.push_to_frame(reset);
+                            }
                         }
+                        let col_id = cells.get_col_id(idx);
+                        let col_name = cells.get_col_name(idx);
+                        w_info.draw_column(col_id, col_name, col);
+                    } else {
+                        break;
                     }
                 }
-
-                // reset index and len for each row
-                idx = orig_idx;
-                line_w = index_len;
-                if row_len > 0 && idx < row_len {
-                    loop {
-                        if idx < row_len {
-                            let row_cell = match v_cols.get(idx) {
-                                Some(cell) => cell,
-                                // always have a cell; fill with dummy value for now
-                                None => &Cell::new("!!!CSVERR!!!".to_string()),
-                            };
-                            
-                            if line_w + row_cell.width > cur_w {
-                                if w_info.w_pointer == idx {
-                                    w_info.w_offset_left(cells);
-                                }
-                                break;
-                            }
-                            
-                            let (mut cell, extra_len) = row_cell.format_cell();
-
-                            if w_info.w_pointer == idx &&
-                               w_info.h_pointer == row {
-                                // save info for showing cursor:
-                                // t_row + 1 because terminal rows start at 1;
-                                // line_w - 1 because terminal rows start at 1 (+ 1),
-                                // and ANSI escapes should be removed from the length (- 2);
-                                // row_cell.width sets the max 
-                                // for the cursor's position within the cell
-                                w_info.set_cursor(t_row + 1, line_w - 1, row_cell.width);
-                                // highlight cell
-                                cell = format!(
-                                    "\x1b[7;36;47m{}\x1b[39;49;27m", 
-                                    cell
-                                );
-                                // take escape sequence into account for width calculation above
-                                focus = row_cell.content();
-                                if focus.len() > cur_w {
-                                    focus = (&focus[0..cur_w]).to_string();
-                                }
-                                w_row = row;
-                                w_idx = idx;
-                            }
-                            
-                            if t_row == 1 {
-                                // highlight header
-                                cell = format!("\x1b[4;30;47m{}\x1b[39;49m", cell);
-                            } else {
-                                cell = format!("\x1b[4m{}", cell);
-                            }
-                            // + 3 to account for escape sequences
-                            line_w += (row_cell.width + 3);
-                            line += &cell;
-                            idx += 1;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    // write line
-                    frame.push_str(&format!("{line}|\x1b[24m"));
-
-                    row += 1;
-                    t_row += 1;
+                if idx != orig {
+                    w_info.set_w_page(
+                        w_info.w_offset, idx
+                    );
+                    flush = true;
                 }
             }
-            // set cell for writing
-            cells.set_w_cell(w_row, w_idx);
-            w_info.set_x_page(idx, orig_idx);
-            // subtract two to account for fixed rows
-            w_info.set_y_page(row.saturating_sub(2), h_offset);
 
-            // show content of focused cell at bottom
-            frame.push_str(&format!("\x1b[{};{}H\x1b[2K{}", cur_h, 1, focus));
-
-            // end update
-            let mut out = stdout().lock();
-            write!(out, "{}", frame).unwrap();
-
-            if w_info.cursor_shown() {
-                let (l, c) = w_info.get_cursor();
-                write!(out, "\x1b[{};{}H\x1b[?25h", l, c + 1);
+            if flush {
+                w_info.flush();
             }
-
-            out.flush().unwrap();
+        }
+        WinChange::Non => {
+            // do nothing
         }
     }
 }
