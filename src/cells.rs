@@ -345,103 +345,16 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             //
             // all lines, but not the row_idx column
         }
-        WinChange::Screen => {
-            // draw to the new terminal screen dimensions;
-            // if they shrink, 
-            // only maybe need to redraw focused content
-            //
-            /*
-            let mut flush = false;
-            if w_info.old_height > w_info.height {
-                // focused content always drawn at height, width
-                w_info.draw_focused_content();
-                flush = true;
-            } else {
-                // draw rows
-                // w_info.draw_focused_content();
-                // flush = true;
-            }
-
-            if w_info.width > w_info.old_width {
-                let mut start = w_info.old_width;
-                let orig = w_info.w_offset + w_info.w_page;
-                let mut idx = orig;
-                loop {
-                    let mut col = cells.get_column(idx + 1);
-                    let col_width = col.col_width();
-                    if start + col_width < w_info.width {
-                        w_info.draw_column(&mut col, start);
-                        start += col_width;
-                        idx += 1;
-                    } else {
-                        break;
-                    }
-                }
-                if idx != orig {
-                    w_info.set_w_page(
-                        w_info.w_offset, idx
-                    );
-                    flush = true;
-                }
-            }
-
-            if flush {
-                w_info.flush();
-            }
-            
-            w_info.changed = WinChange::Non;
-            */
+        WinChange::Screen => { // redraw everything on resize (unavoidable)
+            w_info.draw_screen(cells);
+            w_info.flush();
         }
-        WinChange::Init => { // first draw
-            // a blank cell and HEAD never change,
-            // so just write these now and once;
-            // also, start the underline that should never end
-            // (i.e. only write \x1b[0m or \x1b[24m
-            // before the focused content at the bottom)
-            //
-            w_info.push_to_frame("\x1b[1;1H");
-            w_info.push_to_frame("\x1b[4m    |");
-            w_info.push_to_frame("\x1b[2;1H");
-            w_info.push_to_frame("\x1b[1;30;47mHEAD \x1b[22;39;49m");
+        WinChange::Init => { // first draw sets w_cell
+            let mut w_cell = cells.get_column(0).get_cell(0);
+            w_cell.set_focused(true);
 
-            w_info.draw_row_idx(cells);
-
-            let mut id = 0usize;
-            let mut start = 6usize; // width of row_idx 
-                                    // + column to begin
-            loop {
-                let mut col = cells.get_column(id);
-                let col_width = col.col_width();
-
-                // set pointer to upperleftmost cell;
-                // ensures highlighting of this cell
-                if start == 6usize {
-                    let mut w_cell = col.get_cell(0);
-                    w_cell.set_focused(true);
-                }
-                
-                if start + col_width < w_info.width {
-                    w_info.draw_column(&mut col, start);
-                    start += col_width;
-                    id += 1;
-                } else {
-                    break;
-                }
-            }
-
-            // set w_cell to upperleftmost cell
-            cells.set_w_cell(0,0);
-
-            // offsets are at zero
-            w_info.set_w_page(
-                id, 0
-            );
-            // - 2 because of fixed col_ids and header
-            w_info.set_h_page(
-                w_info.height.saturating_sub(2), 0
-            );
-            
-            w_info.flush(); 
+            w_info.draw_screen(cells);
+            w_info.flush();
         }
         WinChange::Non => {
             // do nothing
