@@ -1,4 +1,4 @@
-use crate::csv::Cells;
+use crate::cells::Cells;
 use crate::terminal::{ScrollMode, WinInfo};
 
 pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
@@ -30,77 +30,83 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 match d {
                     65 => { // up
                         match w_info.mode {
-                            ScrollMode::Axis {
+                            ScrollMode::Axis => {
                                 w_info.set_h_offset(
                                     w_info.h_offset.saturating_sub(1)
                                 );
                             }
-                            ScrollMode::Page {
+                            ScrollMode::Page => {
                                 w_info.set_h_offset(
                                     w_info.h_offset.saturating_sub(w_info.h_page)
                                 );
+                            }
                             _ => (),
                         }
                     }
                     66 => { // down
                         match w_info.mode {
-                            ScrollMode::Axis {
+                            ScrollMode::Axis => {
                                 w_info.set_h_offset(
                                     w_info.h_offset + 1
                                 );
                             }
-                            ScrollMode::Page {
+                            ScrollMode::Page => {
                                 w_info.set_h_offset(
                                     w_info.h_offset + w_info.h_page
                                 );
+                            }
                             _ => (),
                         }
                     }
                     67 => { // right
-                        let mut w_cell = cells.w_cell();
                         if winch {
-                            let col = w_cell.col;
-                            let width = w_cell.width;
-                            cells.set_column_width(col, width + 1);
+                            let col = cells.get_column(
+                                cells.w_cell.0
+                            );
+                            let width = col.width;
+                            cells.set_column_width(width + 1);
                         } else {
                             match w_info.mode {
-                                ScrollMode::Text {
+                                ScrollMode::Text => {
+                                    let mut w_cell = cells.w_cell();
                                     w_cell.set_text_offset(
                                         w_cell.text_offset + 1
                                     );
                                 }
-                                ScrollMode::Axis {
+                                ScrollMode::Axis => {
                                     w_info.set_w_offset(
                                         w_info.w_offset + 1
-                                    }
+                                    );
                                 }
-                                ScrollMode::Page {
+                                ScrollMode::Page => {
                                     w_info.set_w_offset(
                                         w_info.w_offset + w_info.w_page
                                     );
                                 }
+                                _ => (),
                             }
                         }
                     }
                     68 => { // left
-                        let mut w_cell = cells.w_cell();
                         if winch {
-                            let col = w_cell.col;
-                            let width = w_cell.width;
-                            cells.set_column_width(col, width.saturating_sub(1));
+                            let col = cells.get_column(
+                                cells.w_cell.0
+                            );
+                            let width = col.width;
                         } else {
                             match w_info.mode {
-                                ScrollMode::Text {
+                                ScrollMode::Text => {
+                                    let mut w_cell = cells.w_cell();
                                     w_cell.set_text_offset(
                                         w_cell.text_offset.saturating_sub(1)
                                     );
                                 }
-                                ScrollMode::Axis {
+                                ScrollMode::Axis => {
                                     w_info.set_w_offset(
                                         w_info.w_offset.saturating_sub(1)
                                     );
                                 }
-                                ScrollMode::Page {
+                                ScrollMode::Page => {
                                     w_info.set_w_offset(
                                         w_info.w_offset.saturating_sub(w_info.w_page)
                                     );
@@ -109,6 +115,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                             }
                         }
                     }
+                    _ => (),
                 }
             }
             // ctrl + w (write)
@@ -162,25 +169,15 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             [1..=22] | [24..=26] => {
                 // ignore other control characters
             }
-            // backspace
-            [8] | [127] => {
-            }
-            [27, 91, 50, 126] => { //insert
-            }
-            [27, 91, 51, 126] => { // delete
-            }
-            [27, 91, 70] => { // end
-            }
-            [27, 91, 72] => { // home
-            }
-            [27, 91, 50, 59, 53, 126] => { // ctrl + insert
-            }
-            [27, 91, 51, 59, 53, 126] => { // ctrl + delete
-            }
-            [27, 91, 49, 59, 53, 70] => { // ctrl + end
-            }
-            [27, 91, 49, 59, 53, 72] => { // ctrl + home
-            }
+            [8] | [127] => { /* backspace */ }
+            [27, 91, 50, 126] => { /* insert */ }
+            [27, 91, 51, 126] => { /* delete */ }
+            [27, 91, 70] => { /* end */ }
+            [27, 91, 72] => { /* home */ }
+            [27, 91, 50, 59, 53, 126] => { /* ctrl + insert */ }
+            [27, 91, 51, 59, 53, 126] => { /* ctrl + delete */ }
+            [27, 91, 49, 59, 53, 70] => { /* ctrl + end */ }
+            [27, 91, 49, 59, 53, 72] => { /* ctrl + home */ }
             _ => {
                 let c = match str::from_utf8(input) {
                     Ok(valid) => valid,
