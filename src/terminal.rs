@@ -7,7 +7,7 @@ use libc::{
     termios, tcgetattr, tcsetattr, cfmakeraw, TCSANOW,
 };
 
-use crate::csv::{Cell, Cells};
+use crate::cells::{Cell, Cells, Column};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScrollMode {
@@ -26,24 +26,25 @@ pub enum WinChange {
     Rows,       //// the view of rows has shifted
     Columns,    // the view of columns has shifted
     Screen,     //// the screen's dimensions have changed
-    Non,        ////// no change has occurred
+    Init,       ////// first draw; draws everything
+    Non,        //// no change has occurred
 }
 
 pub struct WinInfo {
-    width: usize,
-    height: usize,
-    old_width: usize,
-    old_height: usize,
+    pub width: usize,
+    pub height: usize,
+    pub old_width: usize,
+    pub old_height: usize,
     pub w_offset: usize,
     pub h_offset: usize,
-    num_cols: usize,
-    num_rows: usize,
-    w_page: usize,
-    h_page: usize,
-    changed: WinChange,
-    mode: ScrollMode,
     pub w_pointer: usize,
     pub h_pointer: usize,
+    pub w_page: usize,
+    pub h_page: usize,
+    pub changed: WinChange,
+    pub mode: ScrollMode,
+    num_cols: usize,
+    num_rows: usize,
     frame: String,
     focused_content: String,
     writing: bool,
@@ -52,16 +53,31 @@ pub struct WinInfo {
 
 impl WinInfo {
     pub fn new(num_cols: usize, num_rows: usize) -> Self {
+        let (width, height) = {
+            unsafe {
+                let mut w = 0usize;
+                let mut h = 0usize;
+                let mut ws: winsize = mem::zeroed();
+                if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
+                    w = ws.ws_col as usize;
+                    h = ws.ws_row as usize;
+                }
+                (w, h)
+            }
+        };
+
         Self {
-            width: 0usize,
-            height: 0usize,
+            width: width,
+            height: height,
             old_width: 0usize,
             old_height: 0usize,
             w_offset: 0usize,
             h_offset: 0usize,
             num_cols: num_cols,
             num_rows: num_rows,
-            changed: WinChange::Screen,
+            focused_content: String::new(),
+            frame: String::new(),
+            changed: WinChange::Init,
             mode: ScrollMode::Cell,
             w_pointer: 0usize,
             h_pointer: 0usize,
@@ -70,10 +86,6 @@ impl WinInfo {
             writing: false,
             cursor: (0usize, 0usize),
         }
-    }
-
-    pub fn changed(&mut self) -> WinChange {
-        self.changed
     }
 
     // set w_page and h_page whenever screen is redrawn
@@ -104,7 +116,7 @@ impl WinInfo {
         (self.cursor.0, self.cursor.1)
     }
 
-    pub fn set_w_h() {
+    pub fn set_w_h(&mut self) {
         unsafe {
             let mut ws: winsize = mem::zeroed();
             if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
@@ -117,7 +129,7 @@ impl WinInfo {
         }
     }
     
-    pub fn set_w_pointer(&mut self, w) {
+    pub fn set_w_pointer(&mut self, w: usize) {
         if w > 0 && w < self.num_cols {
             self.w_pointer = w;
             self.changed = WinChange::Focus;
@@ -135,7 +147,7 @@ impl WinInfo {
         }
     }
 
-    pub fn set_w_offset(&mut self, w) {
+    pub fn set_w_offset(&mut self, w: usize) {
         if w > 0 && w < self.num_cols {
             let old_w = self.w_offset;
             self.w_offset = w;
@@ -153,7 +165,7 @@ impl WinInfo {
         }
     }
     
-    pub fn set_h_pointer(&mut self, h) {
+    pub fn set_h_pointer(&mut self, h: usize) {
         if h > 0 && h < self.num_rows {
             self.h_pointer = h;
             self.changed = WinChange::Focus;
@@ -171,7 +183,7 @@ impl WinInfo {
         }
     }
 
-    pub fn set_h_offset(&mut self, h) {
+    pub fn set_h_offset(&mut self, h: usize) {
         if h > 0 && h < self.num_rows {
             let old_h = self.h_offset;
             self.h_offset = h;
@@ -189,21 +201,68 @@ impl WinInfo {
         }
     }
 
+    pub fn set_focused_content(&mut self, focused: &str) {
+        self.focused_content.clear();
+        self.focused_content.push_str(focused);
+        eprintln!("{}", self.focused_content);
+    }
+
     pub fn draw_focused_content(&mut self) {
         let focused = &self.focused_content;
         let row = self.height;
-        let col = self.width;
-        let content = "\x1b[" + row + ":" + col "H\x1b[K" + focused;
-        self.push_to_frame(content);
+        let content = format!("\x1b[{row};1H\x1b[K\x1b[0m{focused}");
+        self.push_to_frame(&content);
     }
 
-    pub fn draw_column(&mut self, id: &str, name: &str, col: Column) {
-        let start = col.start;
-        
-        for i in self.h_offset..self.height {
-            let cell = col.get_cell(i);
-            let content = cell.format();
-            self.push_to_frame(content);
+    pub fn draw_column(&mut self, col: &mut Column, start: usize) {
+        let id = &col.id.content;
+        let header = &col.header.content;
+
+        let col_id = format!(
+            "\x1b[1;{}H {:<width$} |", start, id,
+            width = col.width,
+        );
+        let col_header = format!(
+            "\x1b[2;{}H\x1b[30;47m {:<width$} |\x1b[39;49m", 
+            start, header, width = col.width
+        );
+        self.push_to_frame(&col_id);
+        self.push_to_frame(&col_header);
+       
+        // start at 3 because of fixed col_ids and header
+        for row in 3..self.height {
+            let idx = row.saturating_sub(3) + self.h_offset;
+            let cell = col.get_cell(idx);
+            let content = &cell.content;
+            let width = cell.width;
+            // position at line + 2 because of fixed col_ids and header
+            let positioned = {
+                if cell.is_focused {
+                    self.set_focused_content(content);
+                    format!(
+                        "\x1b[{};{}H\x1b[K\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
+                        row, start, content, width = width
+                    )
+                } else {
+                    format!(
+                        "\x1b[{};{}H\x1b[K {:<width$} |",
+                        row, start, content, width = width
+                    )
+                }
+            };
+            self.push_to_frame(&positioned);
+        }
+    
+        col.set_start(start);
+    }
+
+    pub fn draw_row_idx(&mut self, cells: &mut Cells) {
+        let mut row_idx = &mut cells.row_idx;
+        for i in 3..self.height {
+            let idx = i.saturating_sub(3) + self.h_offset;
+            let content = &row_idx.get_cell(idx).content;
+            let positioned = format!("\x1b[{i};1H\x1b[30;47m{content} \x1b[39;49m");
+            self.push_to_frame(&positioned);
         }
     }
 
@@ -212,16 +271,20 @@ impl WinInfo {
     }
 
     pub fn flush(&mut self) {
+        self.draw_focused_content();
+
         let mut out = std::io::stdout();
-        if writing {
+        if self.writing {
             // show cursor
             let (l, c) = self.cursor_pos();
-            let cursor = "\x1b[" + l ":" + c + "H\x1b[?25h";
-            self.push_to_frame(cursor);
+            let cursor = format!("\x1b[{l};{c}H\x1b[?25h");
+            self.push_to_frame(&cursor);
         }
-        write!(out, "\x1b[?25l{}", frame);
-        self.changed = WinChange::Non;
+        write!(out, "\x1b[?25l{}\x1b", self.frame);
+        out.flush().unwrap();
+
         self.frame = String::new();
+        self.changed = WinChange::Non;
     }
 }
 
