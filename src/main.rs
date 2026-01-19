@@ -1,15 +1,17 @@
 use std::env;
 use std::io::{self, Read, Write, stdin};
 
-mod csv;
+mod cells;
 mod input;
+mod csv_io;
 mod terminal;
 
-use crate::csv::{
-    Cells, load_csv, show_csv, save_backup, write_to_file
+use crate::{
+    cells::{Cells, show_csv},
+    input::process_input,
+    terminal::{check_flags, WinInfo},
+    csv_io::{load_csv, save_backup, write_to_file},
 };
-use crate::input::process_input;
-use crate::terminal::{check_flags, WinInfo};
 
 fn main() {
     let mut args = env::args();
@@ -54,13 +56,13 @@ fn main() {
         }
     };
 
-    let (max_w, max_h) = cells.xy();
+    let max_w = cells.num_cols();
+    let max_h = cells.num_rows();
     let mut w_info = WinInfo::new(max_w, max_h);
 
     terminal::install_panic_hook();
     terminal::install_sig_handlers();
     terminal::raw_mode(true);
-    terminal::set_w_h();
 
     let mut buffer = [0u8; 16];
 
