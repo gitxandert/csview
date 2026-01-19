@@ -146,7 +146,7 @@ impl Cell {
     }
 
     pub fn set_focused(&mut self, focused: bool) {
-        self.is_focused = true;
+        self.is_focused = focused;
     }
 
     // directly set it
@@ -278,6 +278,8 @@ impl Cells {
 
     pub fn set_w_cell(&mut self, col: usize, row: usize) {
         self.w_cell = (col, row);
+        let mut w_cell = self.w_cell();
+        w_cell.set_focused(true);
     }
 
     pub fn push_column(&mut self, col: Column) {
@@ -325,7 +327,10 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // w/ highlighting,
             // plus the rest of its line
             //
-            // 2 lines
+            // 1 or 2 lines
+            //
+            w_info.draw_focus(cells);
+            w_info.flush();
         }
         WinChange::ColWidth => {
             // redraw the column whose width has changed,
@@ -344,6 +349,8 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // but no need to redraw row_idx
             //
             // all lines, but not the row_idx column
+            w_info.draw_screen(cells);
+            w_info.flush();
         }
         WinChange::Screen => { // redraw everything on resize (unavoidable)
             w_info.draw_screen(cells);
