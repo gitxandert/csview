@@ -136,20 +136,11 @@ fn make_row_idx(len: usize) -> Column {
     row_idx
 }
 
-fn format_header(header: &mut Vec<Cell>) {
-    for i in 0..header.len() {
-        let content = &header[i].content;
-        header[i] = Cell::new(&format!("\x1b[30;47m{content}\x1b[0m"));
-    }
-}
-        
-
 fn parse_csv_into_cells(csv: String, delim: char) -> Result<Cells, io::Error> {
     // extract lines, but parse into columns
     let mut lines: Vec<String> = parse_by_newline(&csv);
 
     let mut header: Vec<Cell> = parse_by_delim(&lines.remove(0), delim);
-    format_header(&mut header);
     let col_len = header.len();
     let col_idx: Vec<Cell> = make_col_idx(col_len);
     
@@ -320,7 +311,6 @@ pub fn save_backup(file: String) -> Result<(), io::Error> {
         Ok(()) => {
             println!("Wrote backup to {:?}", backup);
             for path in stage_for_removal {
-                eprintln!("removing");
                 match fs::remove_file(path) {
                     Ok(()) => (),
                     Err(e) => eprintln!("{e}"),
