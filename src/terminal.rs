@@ -130,7 +130,7 @@ impl WinInfo {
     }
     
     pub fn set_w_pointer(&mut self, w: usize) {
-        if w > 0 && w < self.num_cols {
+        if w >= 0 && w < self.num_cols {
             self.w_pointer = w;
             self.changed = WinChange::Focus;
 
@@ -148,7 +148,7 @@ impl WinInfo {
     }
 
     pub fn set_w_offset(&mut self, w: usize) {
-        if w > 0 && w < self.num_cols {
+        if w >= 0 && w < self.num_cols {
             let old_w = self.w_offset;
             self.w_offset = w;
 
@@ -156,12 +156,12 @@ impl WinInfo {
             if old_w > self.w_offset {
                 let diff = old_w.saturating_sub(self.w_offset);
                 self.w_pointer = self.w_pointer.saturating_sub(diff);
-            } else {
+                self.changed = WinChange::Columns;
+            } else if old_w < self.w_offset {
                 let diff = self.w_offset.saturating_sub(old_w);
                 self.w_pointer += diff;
+                self.changed = WinChange::Columns;
             }
-            
-            self.changed = WinChange::Columns;
         }
     }
     
@@ -296,7 +296,8 @@ impl WinInfo {
                 let mut col_name = &header[id];
                 let mut col_width = col_name.width + 3; // + 3 for formatting
                 while start + col_width < self.width {
-                    let content = &col_name.content;
+                    let take = col_name.text_offset + col_name.width.min(col_name.len());
+                    let content = &col_name.content[col_name.text_offset..take];
                     let positioned = format!(
                         "\x1b[30;47m {:<width$} |\x1b[39;49m", 
                         content, width = col_name.width
@@ -328,7 +329,8 @@ impl WinInfo {
 
                 while start + col_width < self.width {
                     let mut cell = col.get_cell(row_id);
-                    let content = &cell.content;
+                    let take = cell.text_offset + cell.width.min(cell.len());
+                    let content = &cell.content[cell.text_offset..take];
                     let positioned = {
                         if cell.is_focused {
                             w = id;
@@ -347,6 +349,7 @@ impl WinInfo {
                     };
                     self.push_to_frame(&positioned);
 
+                    col.set_start(start);
                     start += col_width;
                     id += 1;
                     if id < self.num_cols {
@@ -367,6 +370,59 @@ impl WinInfo {
             self.height + self.h_offset,
             self.h_offset
         );
+    }
+
+    pub fn draw_focus(&mut self, cells: &mut Cells) {
+        // erase the previously-focused cell
+        // and whatever follows it
+        let (wc_c, wc_l) = cells.w_cell;
+        {
+            let mut w_cell = cells.w_cell();
+            w_cell.set_focused(false);
+            cells.set_w_cell(
+                self.w_pointer, self.h_pointer
+            );
+        }
+
+        let prev_start = cells.columns[wc_c].start;
+        let cur_start = cells.columns[self.w_pointer].start;
+        let mut start = prev_start.min(cur_start);
+        eprintln!("start = {}", start);
+        let prev_l = 3 + self.h_offset.saturating_sub(wc_l); 
+        
+        let beg = format!("\x1b[{};{}H\x1b[K\x1b[4m", prev_l, start);
+        self.push_to_frame(&beg);
+        
+        let mut i = wc_c.min(self.w_pointer);
+        let mut col = &mut cells.columns[i];
+        let mut width = col.col_width();
+
+        // redraw previous row and the new row
+        // if the new row is different from the previous
+        while start + width < self.width {
+            let mut cell = col.get_cell(wc_l);
+            let take = cell.text_offset + cell.width.min(cell.len());
+            let content = &cell.content[cell.text_offset..take];
+            let formatted = {
+                if wc_l == self.h_pointer && cell.is_focused {
+                    format!("\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
+                        content, width = width - 3
+                    )
+                } else {
+                    format!(" {:<width$} |", content, width = width - 3)
+                }
+            };
+            self.push_to_frame(&formatted);
+
+            start += width;
+            i += 1;
+            if i < self.num_cols {
+                col = &mut cells.columns[i];
+                width = col.col_width();
+            } else {
+                break;
+            }
+        }
     }
 
     pub fn draw_row_idx(&mut self, cells: &mut Cells) {
@@ -393,7 +449,6 @@ impl WinInfo {
             let cursor = format!("\x1b[{l};{c}H\x1b[?25h");
             self.push_to_frame(&cursor);
         }
-        eprintln!("{}", self.frame);
         write!(out, "\x1b[?25l{}\x1b", self.frame);
         out.flush().unwrap();
 
