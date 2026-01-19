@@ -166,7 +166,7 @@ impl WinInfo {
     }
     
     pub fn set_h_pointer(&mut self, h: usize) {
-        if h > 0 && h < self.num_rows {
+        if h >= 0 && h < self.num_rows {
             self.h_pointer = h;
             self.changed = WinChange::Focus;
 
@@ -184,7 +184,7 @@ impl WinInfo {
     }
 
     pub fn set_h_offset(&mut self, h: usize) {
-        if h > 0 && h < self.num_rows {
+        if h >= 0 && h < self.num_rows {
             let old_h = self.h_offset;
             self.h_offset = h;
 
@@ -192,12 +192,12 @@ impl WinInfo {
             if old_h > self.h_offset {
                 let diff = old_h.saturating_sub(self.h_offset);
                 self.h_pointer = self.h_pointer.saturating_sub(diff);
-            } else {
+                self.changed = WinChange::Rows;
+            } else if self.h_offset > old_h {
                 let diff = self.h_offset.saturating_sub(old_h);
                 self.h_pointer += diff;
             }
             
-            self.changed = WinChange::Rows;
         }
     }
 
@@ -387,9 +387,7 @@ impl WinInfo {
         let prev_start = cells.columns[wc_c].start;
         let cur_start = cells.columns[self.w_pointer].start;
         let mut start = prev_start.min(cur_start);
-        eprintln!("start = {}", start);
-        let prev_l = 3 + self.h_offset.saturating_sub(wc_l); 
-        
+        let prev_l = 3 + wc_l.saturating_sub(self.h_offset); 
         let beg = format!("\x1b[{};{}H\x1b[K\x1b[4m", prev_l, start);
         self.push_to_frame(&beg);
         
@@ -421,6 +419,45 @@ impl WinInfo {
                 width = col.col_width();
             } else {
                 break;
+            }
+        }
+        
+        if wc_l != self.h_pointer {
+            i = self.w_pointer;
+            col = &mut cells.columns[i];
+            start = col.start;
+            width = col.col_width();
+
+            let cur_l = 3 + self.h_pointer.saturating_sub(self.h_offset); 
+            let beg = format!(
+                "\x1b[{};{}H\x1b[K\x1b[4m", cur_l, start
+            );
+            self.push_to_frame(&beg);
+
+            while start + width < self.width {
+                let mut cell = col.get_cell(self.h_pointer);
+                let take = cell.text_offset + cell.width.min(cell.len());
+                let content = &cell.content[cell.text_offset..take];
+                let formatted = {
+                    eprintln!("is focused = {}", cell.is_focused);
+                    if cell.is_focused {
+                        format!("\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
+                            content, width = width - 3
+                        )
+                    } else {
+                        format!(" {:<width$} |", content, width = width - 3)
+                    }
+                };
+                self.push_to_frame(&formatted);
+
+                start += width;
+                i += 1;
+                if i < self.num_cols {
+                    col = &mut cells.columns[i];
+                    width = col.col_width();
+                } else {
+                    break;
+                }
             }
         }
     }
