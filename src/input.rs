@@ -1,5 +1,5 @@
 use crate::cells::Cells;
-use crate::terminal::{ScrollMode, WinInfo};
+use crate::terminal::{ScrollMode, WinChange, WinInfo};
 
 pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
     if !w_info.writing() {
@@ -72,6 +72,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                                     w_cell.set_text_offset(
                                         w_cell.text_offset + 1
                                     );
+                                    w_info.changed = WinChange::Cell;
                                 }
                                 ScrollMode::Axis => {
                                     w_info.set_w_offset(
@@ -100,6 +101,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                                     w_cell.set_text_offset(
                                         w_cell.text_offset.saturating_sub(1)
                                     );
+                                    w_info.changed = WinChange::Cell;
                                 }
                                 ScrollMode::Axis => {
                                     w_info.set_w_offset(
