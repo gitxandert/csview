@@ -1,7 +1,9 @@
-use std::mem;
-use std::fs::File;
-use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::{
+    mem, 
+    io::Write,
+    fs::{File, OpenOptions},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering}
+};
 use libc::{
     self, c_int, ioctl, winsize, STDOUT_FILENO, TIOCGWINSZ,
     termios, tcgetattr, tcsetattr, cfmakeraw, TCSANOW,
@@ -137,17 +139,21 @@ impl WinInfo {
             // change w_offset if w_pointer has gone out of view
             if self.w_pointer < self.w_offset {
                 let diff = self.w_offset.saturating_sub(self.w_pointer);
-                self.w_offset= self.w_offset.saturating_sub(diff);
+                self.w_offset = self.w_offset.saturating_sub(diff);
                 self.changed = WinChange::Columns;
-            } else if self.w_pointer > self.w_offset + self.w_page {
-                let diff = self.w_pointer.saturating_sub(self.w_offset) + self.w_page;
+            } else if self.w_pointer >= self.w_offset + self.w_page.saturating_sub(1) {
+                let diff = self.w_pointer.saturating_sub(self.w_offset + self.w_page.saturating_sub(1));
                 self.w_offset = self.w_offset + diff;
                 self.changed = WinChange::Columns;
             }
+        } else if w >= self.num_cols {
+            self.w_pointer = self.num_cols.saturating_sub(1);
+            self.changed = WinChange::Focus;
         }
     }
 
     pub fn set_w_offset(&mut self, w: usize) {
+        eprintln!("w = {} num cols = {}", w, self.num_cols);
         if w >= 0 && w < self.num_cols {
             let old_w = self.w_offset;
             self.w_offset = w;
@@ -169,22 +175,21 @@ impl WinInfo {
         if h >= 0 && h < self.num_rows {
             self.h_pointer = h;
             self.changed = WinChange::Focus;
-
             // change h_offset if h_pointer has gone out of view
             if self.h_pointer < self.h_offset {
                 let diff = self.h_offset.saturating_sub(self.h_pointer);
-                self.h_offset= self.h_offset.saturating_sub(diff);
+                self.h_offset = self.h_offset.saturating_sub(diff);
                 self.changed = WinChange::Rows;
             } else if self.h_pointer > self.h_offset + self.h_page {
-                let diff = self.h_pointer.saturating_sub(self.h_offset) + self.h_page;
-                self.h_offset = self.h_offset + diff;
+                let diff = self.h_pointer.saturating_sub(self.h_offset + self.h_page);
+                self.h_offset += diff;
                 self.changed = WinChange::Rows;
             }
         }
     }
 
     pub fn set_h_offset(&mut self, h: usize) {
-        if h >= 0 && h < self.num_rows {
+        if h >= 0 && h <= self.num_rows.saturating_sub(self.h_page) {
             let old_h = self.h_offset;
             self.h_offset = h;
 
@@ -196,14 +201,15 @@ impl WinInfo {
             } else if self.h_offset > old_h {
                 let diff = self.h_offset.saturating_sub(old_h);
                 self.h_pointer += diff;
+                self.changed = WinChange::Rows;
             }
-            
         }
     }
 
     pub fn set_focused(&mut self, focused: &str) {
         self.focused_content.clear();
-        self.focused_content.push_str(focused);
+        let take = focused.len().min(self.width);
+        self.focused_content.push_str(&focused[..take]);
     }
 
     pub fn draw_focused_content(&mut self) {
@@ -213,50 +219,10 @@ impl WinInfo {
         self.push_to_frame(&content);
     }
 
-    pub fn draw_column(&mut self, col: &mut Column, start: usize) {
-        let id = &col.id.content;
-        let header = &col.header.content;
-
-        let width = col.width;
-
-        let col_id = format!(
-            "\x1b[1;{}H {:<width$} |", start, id,
-            width = width,
-        );
-        let col_header = format!(
-            "\x1b[2;{}H\x1b[30;47m {:<width$} |\x1b[39;49m", 
-            start, header, width = width
-        );
-        self.push_to_frame(&col_id);
-        self.push_to_frame(&col_header);
-       
-        // start at 3 because of fixed col_ids and header
-        for row in 3..self.height {
-            let idx = row.saturating_sub(3) + self.h_offset;
-            let cell = col.get_cell(idx);
-            let content = &cell.content;
-            // position at line + 2 because of fixed col_ids and header
-            let positioned = {
-                if cell.is_focused {
-                    self.set_focused(content);
-                    format!(
-                        "\x1b[{};{}H\x1b[K\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
-                        row, start, content, width = width
-                    )
-                } else {
-                    format!(
-                        "\x1b[{};{}H\x1b[K {:<width$} |",
-                        row, start, content, width = width
-                    )
-                }
-            };
-            self.push_to_frame(&positioned);
-        }
-    
-        col.set_start(start);
-    }
-
     pub fn draw_screen(&mut self, cells: &mut Cells) {
+        // reset focused cell
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
+
         let mut id = self.w_offset;
         let mut w = 0usize;
         let mut h = 0usize;
@@ -315,6 +281,10 @@ impl WinInfo {
                 }
             } else {
                 let row_id = (i - 3) + self.h_offset;
+                if row_id >= self.num_rows {
+                    break;
+                }
+
                 let row_idx = &cells.row_idx.get_cell(row_id).content;
                 let row_num = format!(
                     "\x1b[30;47m{row_idx} \x1b[39;49m"
@@ -330,7 +300,8 @@ impl WinInfo {
                 while start + col_width < self.width {
                     let mut cell = col.get_cell(row_id);
                     let take = cell.text_offset + cell.width.min(cell.len());
-                    let content = &cell.content[cell.text_offset..take];
+                    let content = &cell.content;
+                    let visible = &content[cell.text_offset..take];
                     let positioned = {
                         if cell.is_focused {
                             w = id;
@@ -338,12 +309,12 @@ impl WinInfo {
                             self.set_focused(content);
                             format!(
                                 "\x1b[7;36;47m {:<width$} \x1b[27;39;49m|", 
-                                content, width = col_width - 3
+                                visible, width = col_width - 3
                             )
                         } else {
                             format!(
                                 " {:<width$} |",
-                                content, width = col_width - 3
+                                visible, width = col_width - 3
                             )
                         }
                     };
@@ -362,52 +333,32 @@ impl WinInfo {
             }
         }
 
-        cells.set_w_cell(w, h);
         self.set_w_page(
-            id - 1, self.w_offset
+            id, self.w_offset
         );
         self.set_h_page(
-            self.height + self.h_offset,
+            self.height.saturating_sub(4) + self.h_offset,
             self.h_offset
         );
     }
 
-    pub fn draw_focus(&mut self, cells: &mut Cells) {
-        // erase the previously-focused cell
-        // and whatever follows it
-        let (wc_c, wc_l) = cells.w_cell;
-        {
-            let mut w_cell = cells.w_cell();
-            w_cell.set_focused(false);
-            cells.set_w_cell(
-                self.w_pointer, self.h_pointer
-            );
-        }
-
-        let prev_start = cells.columns[wc_c].start;
-        let cur_start = cells.columns[self.w_pointer].start;
-        let mut start = prev_start.min(cur_start);
-        let prev_l = 3 + wc_l.saturating_sub(self.h_offset); 
-        let beg = format!("\x1b[{};{}H\x1b[K\x1b[4m", prev_l, start);
-        self.push_to_frame(&beg);
-        
-        let mut i = wc_c.min(self.w_pointer);
+    fn print_columns(&mut self, cells: &mut Cells, mut i: usize, row: usize) {
         let mut col = &mut cells.columns[i];
+        let mut start = col.start;
         let mut width = col.col_width();
-
-        // redraw previous row and the new row
-        // if the new row is different from the previous
         while start + width < self.width {
-            let mut cell = col.get_cell(wc_l);
+            let mut cell = col.get_cell(row);
             let take = cell.text_offset + cell.width.min(cell.len());
-            let content = &cell.content[cell.text_offset..take];
+            let content = &cell.content;
+            let visible = &content[cell.text_offset..take];
             let formatted = {
-                if wc_l == self.h_pointer && cell.is_focused {
+                if cell.is_focused {
+                    self.set_focused(&content);
                     format!("\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
-                        content, width = width - 3
+                        visible, width = width - 3
                     )
                 } else {
-                    format!(" {:<width$} |", content, width = width - 3)
+                    format!(" {:<width$} |", visible, width = width - 3)
                 }
             };
             self.push_to_frame(&formatted);
@@ -421,54 +372,35 @@ impl WinInfo {
                 break;
             }
         }
+    }
+
+    pub fn draw_focus(&mut self, cells: &mut Cells) {
+        // erase the previously-focused cell
+        // and whatever follows it
+        let (wc_c, wc_l) = cells.w_cell;
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
+
+        let prev_start = cells.columns[wc_c].start;
+        let cur_start = cells.columns[self.w_pointer].start;
+        let mut start = prev_start.min(cur_start);
+        let prev_l = 3 + wc_l.saturating_sub(self.h_offset); 
+        let beg = format!("\x1b[{};{}H\x1b[K\x1b[4m", prev_l, start);
+        self.push_to_frame(&beg);
+        
+
+        // redraw previous row and the new row
+        // if the new row is different from the previous
+        let i = wc_c.min(self.w_pointer);
+        self.print_columns(cells, i, wc_l); 
         
         if wc_l != self.h_pointer {
-            i = self.w_pointer;
-            col = &mut cells.columns[i];
-            start = col.start;
-            width = col.col_width();
-
             let cur_l = 3 + self.h_pointer.saturating_sub(self.h_offset); 
             let beg = format!(
                 "\x1b[{};{}H\x1b[K\x1b[4m", cur_l, start
             );
             self.push_to_frame(&beg);
 
-            while start + width < self.width {
-                let mut cell = col.get_cell(self.h_pointer);
-                let take = cell.text_offset + cell.width.min(cell.len());
-                let content = &cell.content[cell.text_offset..take];
-                let formatted = {
-                    eprintln!("is focused = {}", cell.is_focused);
-                    if cell.is_focused {
-                        format!("\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
-                            content, width = width - 3
-                        )
-                    } else {
-                        format!(" {:<width$} |", content, width = width - 3)
-                    }
-                };
-                self.push_to_frame(&formatted);
-
-                start += width;
-                i += 1;
-                if i < self.num_cols {
-                    col = &mut cells.columns[i];
-                    width = col.col_width();
-                } else {
-                    break;
-                }
-            }
-        }
-    }
-
-    pub fn draw_row_idx(&mut self, cells: &mut Cells) {
-        let mut row_idx = &mut cells.row_idx;
-        for i in 3..self.height {
-            let idx = i.saturating_sub(3) + self.h_offset;
-            let content = &row_idx.get_cell(idx).content;
-            let positioned = format!("\x1b[{i};1H\x1b[30;47m{content} \x1b[39;49m");
-            self.push_to_frame(&positioned);
+            self.print_columns(cells, self.w_pointer, self.h_pointer);
         }
     }
 
@@ -594,9 +526,13 @@ pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         raw_mode(false);
         let panic_info = format!("Panic: {info}");
-        if let Ok(mut log) = File::create("/tmp/csview.log") {
+        if let Ok(mut log) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/csview.log") 
+        {
             log.write_all(panic_info.as_bytes());
-        } else {}
+        } else { eprintln!("couldn't open /tmp/csview.log"); }
         std::process::exit(130);
     }));
 }
