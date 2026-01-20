@@ -151,7 +151,7 @@ impl Cell {
 
     // directly set it
     pub fn set_text_offset(&mut self, val: usize) {
-        self.text_offset = val;
+        self.text_offset = val.min(self.len().saturating_sub(self.width));
     }
 
     pub fn dec_text_offset(&mut self, val: usize) {
@@ -277,9 +277,15 @@ impl Cells {
     }
 
     pub fn set_w_cell(&mut self, col: usize, row: usize) {
-        self.w_cell = (col, row);
-        let mut w_cell = self.w_cell();
-        w_cell.set_focused(true);
+        // first unfocus the previous w_cell
+        if col < self.num_cols() && row < self.num_rows() {
+            let mut w_cell = self.w_cell();
+            w_cell.set_focused(false);
+        
+            self.w_cell = (col, row);
+            w_cell = self.w_cell();
+            w_cell.set_focused(true);
+        }
     }
 
     pub fn push_column(&mut self, col: Column) {
@@ -299,7 +305,7 @@ impl Cells {
     }
 
     pub fn num_rows(&self) -> usize {
-        self.columns[0].len()
+        self.row_idx.len()
     }
 
     pub fn w_cell(&mut self) -> &mut Cell {
@@ -316,8 +322,8 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // plus the rest of the line
             //
             // 1 line
-            let mut w_cell = cells.w_cell();
-
+            w_info.draw_screen(cells);
+            w_info.flush();
         }
         WinChange::Focus => {
             // redraw the last focused cell,
@@ -343,6 +349,8 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // but no need to redraw header and col_idx
             //
             // all lines, except for header and col_idx
+            w_info.draw_screen(cells);
+            w_info.flush();
         }
         WinChange::Columns => {
             // shift columns and col_idx,
