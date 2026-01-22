@@ -36,8 +36,8 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                                 );
                             }
                             ScrollMode::Page => {
-                                w_info.set_h_offset(
-                                    w_info.h_offset.saturating_sub(w_info.h_page)
+                                w_info.set_h_pointer(
+                                    w_info.h_pointer.saturating_sub(w_info.h_page)
                                 );
                             }
                             _ => (),
@@ -51,8 +51,8 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                                 );
                             }
                             ScrollMode::Page => {
-                                w_info.set_h_offset(
-                                    w_info.h_offset + w_info.h_page
+                                w_info.set_h_pointer(
+                                    w_info.h_pointer + w_info.h_page
                                 );
                             }
                             _ => (),
@@ -65,6 +65,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                             );
                             let width = col.width;
                             cells.set_column_width(width + 1);
+                            w_info.changed = WinChange::Columns;
                         } else {
                             match w_info.mode {
                                 ScrollMode::Text => {
@@ -80,8 +81,8 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                                     );
                                 }
                                 ScrollMode::Page => {
-                                    w_info.set_w_offset(
-                                        w_info.w_offset + w_info.w_page
+                                    w_info.set_w_pointer(
+                                        w_info.w_pointer + w_info.w_page
                                     );
                                 }
                                 _ => (),
@@ -94,6 +95,8 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                                 cells.w_cell.0
                             );
                             let width = col.width;
+                            cells.set_column_width(width.saturating_sub(1));
+                            w_info.changed = WinChange::Columns;
                         } else {
                             match w_info.mode {
                                 ScrollMode::Text => {
@@ -109,8 +112,8 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                                     );
                                 }
                                 ScrollMode::Page => {
-                                    w_info.set_w_offset(
-                                        w_info.w_offset.saturating_sub(w_info.w_page)
+                                    w_info.set_w_pointer(
+                                        w_info.w_pointer.saturating_sub(w_info.w_page)
                                     );
                                 }
                                 _ => (),
