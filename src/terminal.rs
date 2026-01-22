@@ -151,7 +151,7 @@ impl WinInfo {
             if self.w_pointer != self.num_cols.saturating_sub(1) {
                 self.w_pointer = self.num_cols.saturating_sub(1);
                 self.w_offset = self.num_cols.saturating_sub(self.w_page);
-                self.changed = WinChange::Columns;
+                self.changed = WinChange::Focus;
             }
         }
     }
@@ -194,7 +194,7 @@ impl WinInfo {
             if self.h_pointer != self.num_rows.saturating_sub(1) {
                 self.h_pointer = self.num_rows.saturating_sub(1);
                 self.h_offset = self.num_rows.saturating_sub(self.h_page + 1);
-                self.changed = WinChange::Rows;
+                self.changed = WinChange::Focus;
             }
         }
     }
@@ -250,9 +250,13 @@ impl WinInfo {
                 let mut col_width = col_id.width + 3; // + 3 for formatting
                 while start + col_width < self.width {
                     let content = &col_id.content;
+                    let ws = (col_id.width / 2).saturating_sub(1);
+                    let with_ws = format!(
+                        "{:<ws$}{}{:<ws$}", 
+                        " ", content, " ", ws = ws
+                    );
                     let positioned = format!(
-                        " {:<width$} |", 
-                        content, width = col_id.width
+                        " {:<width$} |", with_ws, width = col_id.width
                     );
                     self.push_to_frame(&positioned);
                     start += col_width;
@@ -353,7 +357,7 @@ impl WinInfo {
         );
     }
 
-    fn print_columns(&mut self, cells: &mut Cells, mut i: usize, row: usize) {
+    fn print_row(&mut self, cells: &mut Cells, mut i: usize, row: usize) {
         let mut col = &mut cells.columns[i];
         let mut start = col.start;
         let mut width = col.col_width();
@@ -402,7 +406,7 @@ impl WinInfo {
         // redraw previous row and the new row
         // if the new row is different from the previous
         let i = wc_c.min(self.w_pointer);
-        self.print_columns(cells, i, wc_l); 
+        self.print_row(cells, i, wc_l); 
         
         if wc_l != self.h_pointer {
             let cur_l = 3 + self.h_pointer.saturating_sub(self.h_offset); 
@@ -411,7 +415,7 @@ impl WinInfo {
             );
             self.push_to_frame(&beg);
 
-            self.print_columns(cells, self.w_pointer, self.h_pointer);
+            self.print_row(cells, self.w_pointer, self.h_pointer);
         }
     }
 
