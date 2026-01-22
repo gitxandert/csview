@@ -108,10 +108,25 @@ impl WinInfo {
 
     pub fn set_writing(&mut self, w: bool) {
         self.writing = w;
+        let mut out = std::io::stdout();
+        match w {
+            true => {
+                let (l, c) = self.cursor_pos();
+                write!(out, "\x1b[{l};{c}H\x1b[?25h");
+            }
+            false => {
+                write!(out, "\x1b[?25l");
+            }
+        };
+        out.flush().unwrap();
     }
 
     pub fn mode(&self) -> ScrollMode {
         self.mode
+    }
+
+    pub fn set_cursor_pos(&mut self, l: usize, c: usize) {
+        self.cursor = (l, c);
     }
 
     fn cursor_pos(&self) -> (usize, usize) {
@@ -322,6 +337,7 @@ impl WinInfo {
                             w = id;
                             h = row_id;
                             self.set_focused(content);
+                            self.set_cursor_pos(row_id + 3, start);
                             format!(
                                 "\x1b[7;36;47m {:<width$} \x1b[27;39;49m|", 
                                 visible, width = col_width - 3
@@ -369,6 +385,7 @@ impl WinInfo {
             let formatted = {
                 if cell.is_focused {
                     self.set_focused(&content);
+                    self.set_cursor_pos(row + 3, start);
                     format!("\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
                         visible, width = width - 3
                     )
@@ -426,14 +443,15 @@ impl WinInfo {
     pub fn flush(&mut self) {
         self.draw_focused_content();
 
-        let mut out = std::io::stdout();
         if self.writing {
             // show cursor
             let (l, c) = self.cursor_pos();
-            let cursor = format!("\x1b[{l};{c}H\x1b[?25h");
+            let cursor = format!("\x1b[{l};{c}H");
             self.push_to_frame(&cursor);
         }
-        write!(out, "\x1b[?25l{}\x1b", self.frame);
+        
+        let mut out = std::io::stdout();
+        write!(out, "{}", self.frame);
         out.flush().unwrap();
 
         self.frame = String::new();
