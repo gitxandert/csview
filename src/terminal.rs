@@ -148,16 +148,19 @@ impl WinInfo {
     
     pub fn set_w_pointer(&mut self, w: usize) {
         if w >= 0 && w < self.num_cols {
+            let old_w = self.w_pointer;
             self.w_pointer = w;
             self.changed = WinChange::Focus;
 
             // change w_offset if w_pointer has gone out of view
             if self.w_pointer < self.w_offset {
-                self.w_offset = self.w_offset.saturating_sub(self.w_page);
+                self.w_offset = self.w_offset.saturating_sub(
+                    old_w.saturating_sub(self.w_pointer)
+                );
                 self.changed = WinChange::Columns;
             } else if self.w_pointer >= self.w_offset + self.w_page {
-                let diff = self.w_pointer.saturating_sub(self.w_offset + self.w_page);
-                self.w_offset = self.w_pointer.saturating_sub(diff).min(
+                let diff = self.w_pointer.saturating_sub(old_w);
+                self.w_offset = (self.w_offset + diff).min(
                     self.num_cols.saturating_sub(self.w_page)
                 );
                 self.changed = WinChange::Columns;
@@ -174,7 +177,7 @@ impl WinInfo {
     pub fn set_w_offset(&mut self, w: usize) {
         if w >= 0 && w < self.num_cols {
             let old_w = self.w_offset;
-            self.w_offset = w;
+            self.w_offset = w.min(self.num_cols.saturating_sub(self.w_page));
 
             // keep w_pointer at same relative spot it was before
             if old_w > self.w_offset {
@@ -196,11 +199,13 @@ impl WinInfo {
             self.changed = WinChange::Focus;
             // change h_offset if h_pointer has gone out of view
             if self.h_pointer < self.h_offset {
-                self.h_offset = self.h_offset.saturating_sub(self.h_page);
+                self.h_offset = self.h_offset.saturating_sub(
+                    old_h.saturating_sub(self.h_pointer)
+                );
                 self.changed = WinChange::Rows;
             } else if self.h_pointer >= self.h_offset + self.h_page {
-                let diff = self.h_pointer.saturating_sub(self.h_offset + self.h_page);
-                self.h_offset = self.h_pointer.saturating_sub(diff).min(
+                let diff = self.h_pointer.saturating_sub(old_h);
+                self.h_offset = (self.h_offset + diff).min(
                     self.num_rows.saturating_sub(self.h_page + 1)
                 );
                 self.changed = WinChange::Rows;
@@ -215,7 +220,7 @@ impl WinInfo {
     }
 
     pub fn set_h_offset(&mut self, h: usize) {
-        if h >= 0 && h <= self.num_rows.saturating_sub(self.h_page) {
+        if h >= 0 && h <= self.num_rows.saturating_sub(self.h_page + 1) {
             let old_h = self.h_offset;
             self.h_offset = h;
 
