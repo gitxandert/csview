@@ -138,22 +138,25 @@ impl WinInfo {
 
             // change w_offset if w_pointer has gone out of view
             if self.w_pointer < self.w_offset {
-                let diff = self.w_offset.saturating_sub(self.w_pointer);
-                self.w_offset = self.w_offset.saturating_sub(diff);
+                self.w_offset = self.w_offset.saturating_sub(self.w_page);
                 self.changed = WinChange::Columns;
-            } else if self.w_pointer >= self.w_offset + self.w_page.saturating_sub(1) {
-                let diff = self.w_pointer.saturating_sub(self.w_offset + self.w_page.saturating_sub(1));
-                self.w_offset = self.w_offset + diff;
+            } else if self.w_pointer >= self.w_offset + self.w_page {
+                let diff = self.w_pointer.saturating_sub(self.w_offset + self.w_page);
+                self.w_offset = self.w_pointer.saturating_sub(diff).min(
+                    self.num_cols.saturating_sub(self.w_page)
+                );
                 self.changed = WinChange::Columns;
             }
         } else if w >= self.num_cols {
-            self.w_pointer = self.num_cols.saturating_sub(1);
-            self.changed = WinChange::Focus;
+            if self.w_pointer != self.num_cols.saturating_sub(1) {
+                self.w_pointer = self.num_cols.saturating_sub(1);
+                self.w_offset = self.num_cols.saturating_sub(self.w_page);
+                self.changed = WinChange::Columns;
+            }
         }
     }
 
     pub fn set_w_offset(&mut self, w: usize) {
-        eprintln!("w = {} num cols = {}", w, self.num_cols);
         if w >= 0 && w < self.num_cols {
             let old_w = self.w_offset;
             self.w_offset = w;
@@ -173,16 +176,24 @@ impl WinInfo {
     
     pub fn set_h_pointer(&mut self, h: usize) {
         if h >= 0 && h < self.num_rows {
+            let old_h = self.h_pointer;
             self.h_pointer = h;
             self.changed = WinChange::Focus;
             // change h_offset if h_pointer has gone out of view
             if self.h_pointer < self.h_offset {
-                let diff = self.h_offset.saturating_sub(self.h_pointer);
-                self.h_offset = self.h_offset.saturating_sub(diff);
+                self.h_offset = self.h_offset.saturating_sub(self.h_page);
                 self.changed = WinChange::Rows;
-            } else if self.h_pointer > self.h_offset + self.h_page {
+            } else if self.h_pointer >= self.h_offset + self.h_page {
                 let diff = self.h_pointer.saturating_sub(self.h_offset + self.h_page);
-                self.h_offset += diff;
+                self.h_offset = self.h_pointer.saturating_sub(diff).min(
+                    self.num_rows.saturating_sub(self.h_page + 1)
+                );
+                self.changed = WinChange::Rows;
+            }
+        } else {
+            if self.h_pointer != self.num_rows.saturating_sub(1) {
+                self.h_pointer = self.num_rows.saturating_sub(1);
+                self.h_offset = self.num_rows.saturating_sub(self.h_page + 1);
                 self.changed = WinChange::Rows;
             }
         }
