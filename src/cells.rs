@@ -165,6 +165,10 @@ impl Cell {
             self.text_offset = self.len().saturating_sub(self.width);
         }
     }
+
+    pub fn set_width(&mut self, w: usize) {
+        self.width = w;
+    }
 }
 
 #[derive(Debug)]
@@ -272,7 +276,11 @@ impl Cells {
         let width = (3 > w) as usize * 3 + (w > 3) as usize * w;
         let idx = self.w_cell.0; // w_cell is where the focus is
         let mut column = self.columns.get_mut(idx).unwrap();
+        let mut col_id = self.col_idx.get_mut(idx).unwrap();
+        let mut col_name = self.header.get_mut(idx).unwrap();
         column.set_width(width);
+        col_id.set_width(width);
+        col_name.set_width(width);
         self.changed = true;
     }
 
