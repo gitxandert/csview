@@ -2,7 +2,7 @@ use crate::cells::Cells;
 use crate::terminal::{ScrollMode, WinChange, WinInfo};
 
 pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
-    if !w_info.writing() {
+    if !w_info.writing {
         match input {
             // normal arrows
             [27, 91, 65] => { // up
@@ -130,7 +130,9 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             }
             // ctrl + w (write)
             [23] => {
+                w_info.set_write_buffer_w_cell(&cells.w_cell());
                 w_info.set_writing(true);
+                w_info.changed = WinChange::Write;
             }
             _ => (),
         }
@@ -146,9 +148,11 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             }
             [27, 91, 67] => { // right
                 // scrolls cursor right within a cell
+                w_info.move_cursor_right();
             }
             [27, 91, 68] => { // left
                 // sim. but left
+                w_info.move_cursor_left();
             }
             [27] => { // escape by itself
                 // ignore for now
