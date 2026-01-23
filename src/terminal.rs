@@ -250,137 +250,59 @@ impl WinInfo {
         self.push_to_frame(&content);
     }
 
-    pub fn draw_screen(&mut self, cells: &mut Cells) {
-        // reset focused cell
-        cells.set_w_cell(self.w_pointer, self.h_pointer);
-
-        let mut id = self.w_offset;
-        let mut w = 0usize;
-        let mut h = 0usize;
-        for i in 1..=self.height {
-            let beg = format!("\x1b[{i};1H\x1b[2K");
-            self.push_to_frame(&beg);
-
-            if i == 1 {
-                self.push_to_frame("\x1b[4m    |");
-                let mut start = 6usize;
-
-                let col_ids = &cells.col_idx;
-                let mut col_id = &col_ids[id];
-                let mut col_width = col_id.width + 3; // + 3 for formatting
-                while start + col_width < self.width {
-                    let content = &col_id.content;
-                    let ws = (col_id.width / 2).saturating_sub(1);
-                    let with_ws = format!(
-                        "{:<ws$}{}{:<ws$}", 
-                        " ", content, " ", ws = ws
-                    );
-                    let positioned = format!(
-                        " {:<width$} |", with_ws, width = col_id.width
-                    );
-                    self.push_to_frame(&positioned);
-                    start += col_width;
-                    id += 1;
-                    if id < self.num_cols {
-                        col_id = &col_ids[id];
-                        col_width = col_id.width + 3;
-                    } else {
-                        break;
-                    }
-                }
-            } else if i == 2 {
-                self.push_to_frame("\x1b[1;30;47mHEAD|\x1b[22;39;49m");
-                let mut start = 6usize;
-                id = self.w_offset;
-
-                let header = &cells.header;
-                let mut col_name = &header[id];
-                let mut col_width = col_name.width + 3; // + 3 for formatting
-                while start + col_width < self.width {
-                    let take = col_name.text_offset + col_name.width.min(col_name.len());
-                    let content = &col_name.content[col_name.text_offset..take];
-                    let positioned = format!(
-                        "\x1b[30;47m {:<width$} |\x1b[39;49m", 
-                        content, width = col_name.width
-                    );
-                    self.push_to_frame(&positioned);
-
-                    start += col_width;
-                    id += 1;
-                    if id < self.num_cols {
-                        col_name = &header[id];
-                        col_width = col_name.width + 3;
-                    } else {
-                        break;
-                    }
-                }
+    
+    fn print_col_ids(&mut self, cells: &mut Cells, mut i: usize, mut start: usize) {
+        let col_ids = &cells.col_ids;
+        let mut col_id = &col_ids[i];
+        let mut col_width = col_id.width + 3; // + 3 for formatting
+        while start + col_width < self.width {
+            let content = &col_id.content;
+            let ws = (col_id.width / 2).saturating_sub(1);
+            let with_ws = format!(
+                "{:<ws$}{}{:<ws$}",
+                " ", content, " ", ws = ws
+            );
+            let positioned = format!(
+                " {:<width$} |", with_ws, width = col_id.width
+            );
+            self.push_to_frame(&positioned);
+            start += col_width;
+            i += 1;
+            if i < self.num_cols {
+                col_id = &col_ids[i];
+                col_width = col_id.width + 3;
             } else {
-                let row_id = (i - 3) + self.h_offset;
-                if row_id >= self.num_rows {
-                    break;
-                }
-
-                let row_idx = &cells.row_idx.get_cell(row_id).content;
-                let row_num = format!(
-                    "\x1b[30;47m{row_idx} \x1b[39;49m"
-                );
-                self.push_to_frame(&row_num);
-
-                let mut start = 6usize;
-                id = self.w_offset;
-                let columns = &mut cells.columns;
-                let mut col = &mut columns[id];
-                let mut col_width = col.col_width();
-
-                while start + col_width < self.width {
-                    let mut cell = col.get_cell(row_id);
-                    let take = cell.text_offset + cell.width.min(cell.len());
-                    let content = &cell.content;
-                    let visible = &content[cell.text_offset..take];
-                    let positioned = {
-                        if cell.is_focused {
-                            w = id;
-                            h = row_id;
-                            self.set_focused(content);
-                            self.set_cursor_pos(row_id + 3, start);
-                            format!(
-                                "\x1b[7;36;47m {:<width$} \x1b[27;39;49m|", 
-                                visible, width = col_width - 3
-                            )
-                        } else {
-                            format!(
-                                " {:<width$} |",
-                                visible, width = col_width - 3
-                            )
-                        }
-                    };
-                    self.push_to_frame(&positioned);
-
-                    col.set_start(start);
-                    start += col_width;
-                    id += 1;
-                    if id < self.num_cols {
-                        col = &mut columns[id];
-                        col_width = col.col_width();
-                    } else {
-                        break;
-                    }
-                }
+                break;
             }
         }
-
-        self.set_w_page(
-            id, self.w_offset
-        );
-        self.set_h_page(
-            self.height.saturating_sub(3) + self.h_offset,
-            self.h_offset
-        );
     }
 
-    fn print_row(&mut self, cells: &mut Cells, mut i: usize, row: usize) {
-        let mut col = &mut cells.columns[i];
-        let mut start = col.start;
+    fn print_header(&mut self, cells: &mut Cells, mut i: usize, mut start: usize) {
+        let header = &cells.header;
+        let mut col_name = &header[i];
+        let mut col_width = col_name.width + 3; // + 3 for formatting
+        while start + col_width < self.width {
+            let take = col_name.text_offset + col_name.width.min(col_name.len());
+            let content = &col_name.content[col_name.text_offset..take];
+            let positioned = format!(
+                "\x1b[30;47m {:<width$} |\x1b[39;49m", 
+                content, width = col_name.width
+            );
+            self.push_to_frame(&positioned);
+
+            start += col_width;
+            i += 1;
+            if i < self.num_cols {
+                col_name = &header[i];
+                col_width = col_name.width + 3;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn print_row(&mut self, cells: &mut Cells, i: &mut usize, row: usize, mut start: usize) {
+        let mut col = &mut cells.columns[*i];
         let mut width = col.col_width();
 
         while start + width < self.width {
@@ -401,15 +323,89 @@ impl WinInfo {
             };
             self.push_to_frame(&formatted);
 
+            col.set_start(start);
             start += width;
-            i += 1;
-            if i < self.num_cols {
-                col = &mut cells.columns[i];
+            *i += 1;
+            if *i < self.num_cols {
+                col = &mut cells.columns[*i];
                 width = col.col_width();
             } else {
                 break;
             }
         }
+    }
+
+    pub fn draw_screen(&mut self, cells: &mut Cells) {
+        // reset focused cell
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
+
+        let mut id = self.w_offset;
+        for i in 1..=self.height {
+            let beg = format!("\x1b[{i};1H\x1b[2K");
+            self.push_to_frame(&beg);
+
+            if i == 1 {
+                self.push_to_frame("\x1b[4m    |");
+                let mut start = 6usize;
+                self.print_col_ids(cells, id, start);
+            } else if i == 2 {
+                self.push_to_frame("\x1b[1;30;47mHEAD|\x1b[22;39;49m");
+                let mut start = 6usize;
+                id = self.w_offset;
+                self.print_header(cells, id, start);
+            } else {
+                let row_id = i.saturating_sub(3) + self.h_offset;
+                if row_id >= self.num_rows {
+                    break;
+                }
+
+                let row_idx = &cells.row_idx.get_cell(row_id).content;
+                let row_num = format!(
+                    "\x1b[30;47m{row_idx} \x1b[39;49m"
+                );
+                self.push_to_frame(&row_num);
+
+                let start = 6usize;
+                id = self.w_offset;
+                self.print_row(cells, &mut id, row_id, start);
+            }
+        }
+
+        self.set_w_page(
+            id, self.w_offset
+        );
+        self.set_h_page(
+            self.height.saturating_sub(3) + self.h_offset,
+            self.h_offset
+        );
+    }
+
+    pub fn draw_from_column(&mut self, cells: &mut Cells) {
+        let (col_id, _) = cells.w_cell;
+        let start = cells.columns[col_id].start;
+
+        let mut c = col_id;
+        for row in 1..=self.height {
+            let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
+                row, start
+            );
+            self.push_to_frame(&cursor);
+
+            match row {
+                1 => self.print_col_ids(cells, col_id, start),
+                2 => self.print_header(cells, col_id, start),
+                _ => {
+                    c = col_id;
+                    self.print_row(
+                        cells, 
+                        &mut c, 
+                        row.saturating_sub(3) + self.h_offset,
+                        start
+                    );
+                }
+            }
+        }
+        self.set_w_page(c, self.w_offset);
     }
 
     pub fn draw_focus(&mut self, cells: &mut Cells) {
@@ -427,8 +423,8 @@ impl WinInfo {
 
         // redraw previous row and the new row
         // if the new row is different from the previous
-        let i = wc_c.min(self.w_pointer);
-        self.print_row(cells, i, wc_l); 
+        let mut i = wc_c.min(self.w_pointer);
+        self.print_row(cells, &mut i, wc_l, start); 
         
         if wc_l != self.h_pointer {
             let cur_l = 3 + self.h_pointer.saturating_sub(self.h_offset); 
@@ -436,18 +432,20 @@ impl WinInfo {
                 "\x1b[{};{}H\x1b[K\x1b[4m", cur_l, start
             );
             self.push_to_frame(&beg);
-
-            self.print_row(cells, self.w_pointer, self.h_pointer);
+            
+            let mut col = self.w_pointer;
+            self.print_row(cells, &mut col, self.h_pointer, start);
         }
     }
 
     pub fn draw_w_cell(&mut self, cells: &mut Cells) {
-        let (i, row) = cells.w_cell;
+        let (mut i, row) = cells.w_cell;
         let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
             row.saturating_sub(self.h_offset) + 3, &cells.columns[i].start
         );
         self.push_to_frame(&cursor);
-        self.print_row(cells, i, row);
+        let start = cells.columns[i].start;
+        self.print_row(cells, &mut i, row, start);
     }
 
     pub fn push_to_frame(&mut self, content: &str) {
