@@ -230,7 +230,7 @@ impl Column {
 
 pub struct Cells {
     pub header: Vec<Cell>,
-    pub col_idx: Vec<Cell>,
+    pub col_ids: Vec<Cell>,
     pub row_idx: Column,
     pub columns: Vec<Column>,
     pub w_cell: (usize, usize),
@@ -239,7 +239,7 @@ pub struct Cells {
 }
 
 impl Cells {
-    pub fn new(header: &Vec<Cell>, col_idx: &Vec<Cell>, row_idx: Column, num_cols: usize) -> Self {
+    pub fn new(header: &Vec<Cell>, col_ids: &Vec<Cell>, row_idx: Column, num_cols: usize) -> Self {
         let columns = Vec::<Column>::with_capacity(num_cols);
         let w_cell = (0usize, 0usize);
         let changed = false;
@@ -247,7 +247,7 @@ impl Cells {
 
         Self { 
             header: Self::clone_cell_row(header), 
-            col_idx: Self::clone_cell_row(col_idx), 
+            col_ids: Self::clone_cell_row(col_ids), 
             row_idx, 
             columns, 
             w_cell, 
@@ -276,7 +276,7 @@ impl Cells {
         let width = (3 > w) as usize * 3 + (w > 3) as usize * w;
         let idx = self.w_cell.0; // w_cell is where the focus is
         let mut column = self.columns.get_mut(idx).unwrap();
-        let mut col_id = self.col_idx.get_mut(idx).unwrap();
+        let mut col_id = self.col_ids.get_mut(idx).unwrap();
         let mut col_name = self.header.get_mut(idx).unwrap();
         column.set_width(width);
         col_id.set_width(width);
@@ -351,17 +351,19 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // plus all columns after
             //
             // all lines
+            w_info.draw_from_column(cells);
+            w_info.flush();
         }
         WinChange::Rows => {
             // shift rows and row_idx,
-            // but no need to redraw header and col_idx
+            // but no need to redraw header and col_ids
             //
-            // all lines, except for header and col_idx
+            // all lines, except for header and col_ids
             w_info.draw_screen(cells);
             w_info.flush();
         }
         WinChange::Columns => {
-            // shift columns and col_idx,
+            // shift columns and col_ids,
             // but no need to redraw row_idx
             //
             // all lines, but not the row_idx column
