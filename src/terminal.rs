@@ -29,6 +29,7 @@ pub enum WinChange {
     Columns,    // the view of columns has shifted
     Screen,     //// the screen's dimensions have changed
     Init,       ////// first draw; draws everything
+    Write,      //// write contents of WriteBuf + row
     Non,        //// no change has occurred
 }
 
@@ -36,6 +37,7 @@ pub struct Cursor {
     line: usize,
     col: usize,
     offset: usize,
+    limit: usize,
 }
 
 impl Cursor {
@@ -43,17 +45,9 @@ impl Cursor {
         Self {
             line: 0usize,
             col: 0usize,
-            offset: 0usize
+            offset: 0usize,
+            limit: 0usize,
         }
-    }
-
-    pub fn set_pos(&mut self, l: usize, c: usize) {
-        self.line = l;
-        self.col = c;
-    }
-
-    pub fn set_offset(&mut self, o: usize) {
-        self.offset = o;
     }
 }
 
@@ -62,6 +56,8 @@ struct WriteBuf {
     gap_start: usize,
     gap_len: usize,
     offset: usize,
+    content_len: usize,
+    window: usize,
 }
 
 impl WriteBuf {
@@ -71,6 +67,8 @@ impl WriteBuf {
             gap_start: 0,
             gap_len: capacity,
             offset: 0usize,
+            content_len: 0usize,
+            window: 12usize,
         }
     }
 
@@ -82,7 +80,10 @@ impl WriteBuf {
         for i in post_gap..self.data.len() {
             self.data[i] = ' ';
         }
-        self.gap_start = 0;
+        self.gap_start = 0usize;
+        self.offset = 0usize;
+        self.content_len = 0usize;
+        self.window = 12usize;
     }
 
     // moves with cursor
@@ -207,11 +208,11 @@ impl WinInfo {
 
     pub fn set_writing(&mut self, w: bool) {
         self.writing = w;
+        self.cursor.offset = 0usize;
         let mut out = std::io::stdout();
         match w {
             true => {
-                let (l, c) = self.cursor_pos();
-                write!(out, "\x1b[{l};{c}H\x1b[?25h");
+                write!(out, "\x1b[?25h");
             }
             false => {
                 write!(out, "\x1b[?25l");
@@ -220,26 +221,70 @@ impl WinInfo {
         out.flush().unwrap();
     }
 
-    pub fn fill_write_buffer(&mut self, content: &String) {
-        self.write_buffer.reset();
-        let mut i = 0usize;
-        for c in content.chars() {
-            self.write_buffer.data[i] = c;
-            i += 1;
+    pub fn set_write_buffer_w_cell(&mut self, cell: &Cell) {
+        let buf = &mut self.write_buffer;
+        buf.reset();
+       
+        for c in cell.content.chars() {
+            buf.insert(c);
         }
-        eprintln!("{:?}", self.write_buffer.data);
+       
+        buf.move_gap(0usize);
+
+        buf.content_len = cell.content.len();
+        buf.offset = cell.text_offset;
+        buf.window = cell.width;
     }
 
     pub fn mode(&self) -> ScrollMode {
         self.mode
     }
 
-    pub fn set_cursor_pos(&mut self, l: usize, c: usize) {
-        self.cursor.set_pos(l, c);
+    pub fn set_cursor(&mut self, line: usize, col: usize, limit: usize) {
+        self.cursor.line = line;
+        self.cursor.col = col;
+        self.cursor.limit = limit;
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        let cursor = &mut self.cursor;
+        let buf = &mut self.write_buffer;
+
+        let new_cur_off = cursor.offset + 1;
+        if new_cur_off > cursor.limit {
+            let new_buf_off = buf.offset + 1;
+            let diff = buf.content_len.saturating_sub(new_buf_off);
+            if diff > buf.window {
+                buf.offset = new_buf_off;
+                buf.move_gap(buf.gap_start + 1);
+                self.changed = WinChange::Write;
+            }
+        } else {
+            cursor.offset = new_cur_off;
+            buf.move_gap(buf.gap_start + 1);
+            self.changed = WinChange::Write;
+        }
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        let cursor = &mut self.cursor;
+        let buf = &mut self.write_buffer;
+
+        if cursor.offset == 0 {
+            if buf.offset > 0 {
+                buf.offset = buf.offset - 1;
+                buf.move_gap(buf.gap_start - 1);
+                self.changed = WinChange::Write;
+            }
+        } else {
+            cursor.offset = cursor.offset - 1;
+            buf.move_gap(buf.gap_start - 1);
+            self.changed = WinChange::Write;
+        }
     }
 
     fn cursor_pos(&self) -> (usize, usize) {
-        (self.cursor.line, self.cursor.col)
+        (self.cursor.line, self.cursor.col + self.cursor.offset)
     }
 
     pub fn set_w_h(&mut self) {
@@ -356,9 +401,8 @@ impl WinInfo {
         let focused = &self.focused_content;
         let row = self.height;
         let content = format!("\x1b[{row};1H\x1b[2K\x1b[0m{focused}");
-        self.push_to_frame(&content);
+        self.push_str_to_frame(&content);
     }
-
     
     fn print_col_ids(&mut self, cells: &mut Cells, mut i: usize, mut start: usize) {
         let col_ids = &cells.col_ids;
@@ -374,7 +418,7 @@ impl WinInfo {
             let positioned = format!(
                 " {:<width$} |", with_ws, width = col_id.width
             );
-            self.push_to_frame(&positioned);
+            self.push_str_to_frame(&positioned);
             start += col_width;
             i += 1;
             if i < self.num_cols {
@@ -397,7 +441,7 @@ impl WinInfo {
                 "\x1b[30;47m {:<width$} |\x1b[39;49m", 
                 content, width = col_name.width
             );
-            self.push_to_frame(&positioned);
+            self.push_str_to_frame(&positioned);
 
             start += col_width;
             i += 1;
@@ -422,7 +466,9 @@ impl WinInfo {
             let formatted = {
                 if cell.is_focused {
                     self.set_focused(&content);
-                    self.set_cursor_pos(row + 3, start);
+                    self.set_cursor(
+                        row + 3, start + 1, cell.width
+                    );
                     format!("\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
                         visible, width = width - 3
                     )
@@ -430,7 +476,7 @@ impl WinInfo {
                     format!(" {:<width$} |", visible, width = width - 3)
                 }
             };
-            self.push_to_frame(&formatted);
+            self.push_str_to_frame(&formatted);
 
             col.set_start(start);
             start += width;
@@ -451,14 +497,14 @@ impl WinInfo {
         let mut id = self.w_offset;
         for i in 1..=self.height {
             let beg = format!("\x1b[{i};1H\x1b[2K");
-            self.push_to_frame(&beg);
+            self.push_str_to_frame(&beg);
 
             if i == 1 {
-                self.push_to_frame("\x1b[4m    |");
+                self.push_str_to_frame("\x1b[4m    |");
                 let mut start = 6usize;
                 self.print_col_ids(cells, id, start);
             } else if i == 2 {
-                self.push_to_frame("\x1b[1;30;47mHEAD|\x1b[22;39;49m");
+                self.push_str_to_frame("\x1b[1;30;47mHEAD|\x1b[22;39;49m");
                 let mut start = 6usize;
                 id = self.w_offset;
                 self.print_header(cells, id, start);
@@ -472,7 +518,7 @@ impl WinInfo {
                 let row_num = format!(
                     "\x1b[30;47m{row_idx} \x1b[39;49m"
                 );
-                self.push_to_frame(&row_num);
+                self.push_str_to_frame(&row_num);
 
                 let start = 6usize;
                 id = self.w_offset;
@@ -498,7 +544,7 @@ impl WinInfo {
             let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
                 row, start
             );
-            self.push_to_frame(&cursor);
+            self.push_str_to_frame(&cursor);
 
             match row {
                 1 => self.print_col_ids(cells, col_id, start),
@@ -528,7 +574,7 @@ impl WinInfo {
         let mut start = prev_start.min(cur_start);
         let prev_l = 3 + wc_l.saturating_sub(self.h_offset); 
         let beg = format!("\x1b[{};{}H\x1b[K\x1b[4m", prev_l, start);
-        self.push_to_frame(&beg);
+        self.push_str_to_frame(&beg);
 
         // redraw previous row and the new row
         // if the new row is different from the previous
@@ -540,10 +586,47 @@ impl WinInfo {
             let beg = format!(
                 "\x1b[{};{}H\x1b[K\x1b[4m", cur_l, start
             );
-            self.push_to_frame(&beg);
+            self.push_str_to_frame(&beg);
             
             let mut col = self.w_pointer;
             self.print_row(cells, &mut col, self.h_pointer, start);
+        }
+    }
+
+    pub fn draw_edited(&mut self, cells: &mut Cells) {
+        let (mut id, row) = cells.w_cell;
+        let col = &cells.columns[id];
+        let cursor = format!(
+            "\x1b[{};{}H\x1b[K\x1b[4;7;36;47m ",
+            row.saturating_sub(self.h_offset) + 3, col.start
+        );
+        self.push_str_to_frame(&cursor);
+
+        // take before gap
+        let offset = self.write_buffer.offset;
+        let max_take = self.write_buffer.content_len.min(col.width);
+        let take_1 = offset + self.write_buffer.gap_start.min(max_take);
+        for i in offset..take_1 {
+            self.push_to_frame(self.write_buffer.data[i]);
+        }
+        // take after gap
+        let post_gap = self.write_buffer.gap_start + self.write_buffer.gap_len;
+        let take_2 = post_gap + col.width.saturating_sub(take_1 - offset);
+        eprintln!("post_gap = {} take_2 = {}", post_gap, take_2);
+        for i in post_gap..take_2 {
+            if i < self.write_buffer.data.len() {
+                self.push_to_frame(self.write_buffer.data[i]);
+            } else {
+                self.push_to_frame(' ');
+            }
+        }
+        self.push_str_to_frame(" \x1b[27;39;49m|");
+        
+        // only print rest of row if not editing last cell
+        if id < self.w_offset + self.w_page - 1 {
+            id += 1;
+            let start = cells.columns[id].start;
+            self.print_row(cells, &mut id, row, start); 
         }
     }
 
@@ -552,12 +635,16 @@ impl WinInfo {
         let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
             row.saturating_sub(self.h_offset) + 3, &cells.columns[i].start
         );
-        self.push_to_frame(&cursor);
+        self.push_str_to_frame(&cursor);
         let start = cells.columns[i].start;
         self.print_row(cells, &mut i, row, start);
     }
 
-    pub fn push_to_frame(&mut self, content: &str) {
+    pub fn push_to_frame(&mut self, c: char) {
+        self.frame.push(c);
+    }
+
+    pub fn push_str_to_frame(&mut self, content: &str) {
         self.frame.push_str(content);
     }
 
@@ -568,7 +655,7 @@ impl WinInfo {
             // show cursor
             let (l, c) = self.cursor_pos();
             let cursor = format!("\x1b[{l};{c}H");
-            self.push_to_frame(&cursor);
+            self.push_str_to_frame(&cursor);
         }
         
         let mut out = std::io::stdout();
