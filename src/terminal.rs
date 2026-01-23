@@ -206,15 +206,15 @@ impl WinInfo {
             } else if self.h_pointer >= self.h_offset + self.h_page {
                 let diff = self.h_pointer.saturating_sub(old_h);
                 self.h_offset = (self.h_offset + diff).min(
-                    self.num_rows.saturating_sub(self.h_page + 1)
+                    self.num_rows.saturating_sub(self.h_page)
                 );
                 self.changed = WinChange::Rows;
             }
         } else {
             if self.h_pointer != self.num_rows.saturating_sub(1) {
                 self.h_pointer = self.num_rows.saturating_sub(1);
-                self.h_offset = self.num_rows.saturating_sub(self.h_page + 1);
-                self.changed = WinChange::Focus;
+                self.h_offset = self.num_rows.saturating_sub(self.h_page);
+                self.changed = WinChange::Rows;
             }
         }
     }
@@ -373,7 +373,7 @@ impl WinInfo {
             id, self.w_offset
         );
         self.set_h_page(
-            self.height.saturating_sub(4) + self.h_offset,
+            self.height.saturating_sub(3) + self.h_offset,
             self.h_offset
         );
     }
