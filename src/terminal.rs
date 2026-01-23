@@ -382,6 +382,7 @@ impl WinInfo {
         let mut col = &mut cells.columns[i];
         let mut start = col.start;
         let mut width = col.col_width();
+
         while start + width < self.width {
             let mut cell = col.get_cell(row);
             let take = cell.text_offset + cell.width.min(cell.len());
@@ -423,7 +424,6 @@ impl WinInfo {
         let prev_l = 3 + wc_l.saturating_sub(self.h_offset); 
         let beg = format!("\x1b[{};{}H\x1b[K\x1b[4m", prev_l, start);
         self.push_to_frame(&beg);
-        
 
         // redraw previous row and the new row
         // if the new row is different from the previous
@@ -439,6 +439,15 @@ impl WinInfo {
 
             self.print_row(cells, self.w_pointer, self.h_pointer);
         }
+    }
+
+    pub fn draw_w_cell(&mut self, cells: &mut Cells) {
+        let (i, row) = cells.w_cell;
+        let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
+            row.saturating_sub(self.h_offset) + 3, &cells.columns[i].start
+        );
+        self.push_to_frame(&cursor);
+        self.print_row(cells, i, row);
     }
 
     pub fn push_to_frame(&mut self, content: &str) {
