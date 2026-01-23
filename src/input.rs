@@ -63,9 +63,14 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                             let col = cells.get_column(
                                 cells.w_cell.0
                             );
-                            let width = col.width;
-                            cells.set_column_width(width + 1);
-                            w_info.changed = WinChange::Columns;
+                            let new_width = col.width + 1;
+                            // only change col_width if the current cell doesn't go out of bounds
+                            if col.start + new_width + 3 < w_info.width {
+                            
+                                cells.set_column_width(new_width);
+                                w_info.changed = WinChange::ColWidth;
+
+                            }
                         } else {
                             match w_info.mode {
                                 ScrollMode::Text => {
@@ -96,7 +101,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                             );
                             let width = col.width;
                             cells.set_column_width(width.saturating_sub(1));
-                            w_info.changed = WinChange::Columns;
+                            w_info.changed = WinChange::ColWidth;
                         } else {
                             match w_info.mode {
                                 ScrollMode::Text => {
@@ -134,7 +139,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
         match input {
             // normal arrows
             [27, 91, 65] => { // up
-                // maybe be used to shift back by the cell's width
+                // maybe used to shift back by the cell's width
             }
             [27, 91, 66] => { // down
                 // sim. but forward
