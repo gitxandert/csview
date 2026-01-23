@@ -381,6 +381,12 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             w_info.draw_screen(cells);
             w_info.flush();
         }
+        WinChange::Write => {
+            // write contents of WriteBuf,
+            // plus the rest of the row following w_cell
+            w_info.draw_edited(cells);
+            w_info.flush();
+        }
         WinChange::Non => {
             // do nothing
         }
