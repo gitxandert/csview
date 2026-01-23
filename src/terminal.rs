@@ -32,6 +32,107 @@ pub enum WinChange {
     Non,        //// no change has occurred
 }
 
+pub struct Cursor {
+    line: usize,
+    col: usize,
+    offset: usize,
+}
+
+impl Cursor {
+    pub fn new() -> Self {
+        Self {
+            line: 0usize,
+            col: 0usize,
+            offset: 0usize
+        }
+    }
+
+    pub fn set_pos(&mut self, l: usize, c: usize) {
+        self.line = l;
+        self.col = c;
+    }
+
+    pub fn set_offset(&mut self, o: usize) {
+        self.offset = o;
+    }
+}
+
+struct WriteBuf {
+    data: Vec<char>,
+    gap_start: usize,
+    gap_len: usize,
+    offset: usize,
+}
+
+impl WriteBuf {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            data: vec![' '; capacity],
+            gap_start: 0,
+            gap_len: capacity,
+            offset: 0usize,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        for i in 0..self.gap_start {
+            self.data[i] = ' ';
+        }
+        let post_gap = self.gap_start + self.gap_len;
+        for i in post_gap..self.data.len() {
+            self.data[i] = ' ';
+        }
+        self.gap_start = 0;
+    }
+
+    // moves with cursor
+    pub fn move_gap(&mut self, pos: usize) {
+        while pos < self.gap_start {
+            self.gap_start = self.gap_start.saturating_sub(1);
+            self.data[self.gap_start + self.gap_len] = self.data[self.gap_start];
+        }
+        while pos > self.gap_start {
+            self.data[self.gap_start] = self.data[self.gap_start + self.gap_len];
+            self.gap_start += 1;
+        }
+    }
+
+    pub fn insert(&mut self, c: char) {
+        if self.gap_len == 0 { self.grow(); }
+
+        self.data[self.gap_start] = c;
+        self.gap_start += 1;
+        self.gap_len = self.gap_len.saturating_sub(1);
+    }
+
+    fn grow(&mut self) {
+        let old_cap = self.data.len();
+        let new_cap = old_cap * 2;
+
+        let mut new_data = vec![' '; new_cap];
+
+        for i in 0..self.gap_start {
+            new_data[i] = self.data[i];
+        }
+
+        let new_gap_len = old_cap.saturating_sub(
+            self.gap_start + self.gap_len
+        );
+        let new_gap_start = new_cap.saturating_sub(
+            new_gap_len
+        );
+
+        for i in 0..new_gap_len {
+            new_data[new_gap_start + i] = self.data[self.gap_start + self.gap_len + i];
+        }
+
+        self.data = new_data;
+        self.gap_len = new_cap.saturating_sub(
+            self.gap_start.saturating_sub(new_gap_len)
+        );
+    }
+}
+
 pub struct WinInfo {
     pub width: usize,
     pub height: usize,
@@ -49,8 +150,9 @@ pub struct WinInfo {
     num_rows: usize,
     frame: String,
     focused_content: String,
-    writing: bool,
-    cursor: (usize, usize),
+    pub writing: bool,
+    cursor: Cursor,
+    write_buffer: WriteBuf,
 }
 
 impl WinInfo {
@@ -86,7 +188,8 @@ impl WinInfo {
             w_page: 0usize,
             h_page: 0usize,
             writing: false,
-            cursor: (0usize, 0usize),
+            cursor: Cursor::new(),
+            write_buffer: WriteBuf::new(1024),
         }
     }
 
@@ -100,10 +203,6 @@ impl WinInfo {
 
     pub fn set_mode(&mut self, mode: ScrollMode) {
         self.mode = mode;
-    }
-
-    pub fn writing(&self) -> bool {
-        self.writing
     }
 
     pub fn set_writing(&mut self, w: bool) {
@@ -121,16 +220,26 @@ impl WinInfo {
         out.flush().unwrap();
     }
 
+    pub fn fill_write_buffer(&mut self, content: &String) {
+        self.write_buffer.reset();
+        let mut i = 0usize;
+        for c in content.chars() {
+            self.write_buffer.data[i] = c;
+            i += 1;
+        }
+        eprintln!("{:?}", self.write_buffer.data);
+    }
+
     pub fn mode(&self) -> ScrollMode {
         self.mode
     }
 
     pub fn set_cursor_pos(&mut self, l: usize, c: usize) {
-        self.cursor = (l, c);
+        self.cursor.set_pos(l, c);
     }
 
     fn cursor_pos(&self) -> (usize, usize) {
-        (self.cursor.0, self.cursor.1)
+        (self.cursor.line, self.cursor.col)
     }
 
     pub fn set_w_h(&mut self) {
