@@ -330,7 +330,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // plus the rest of the line
             //
             // 1 line
-            w_info.draw_screen(cells);
+            w_info.draw_w_cell(cells);
             w_info.flush();
         }
         WinChange::Focus => {
