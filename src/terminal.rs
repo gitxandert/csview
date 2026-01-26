@@ -51,8 +51,10 @@ impl Cursor {
     }
 }
 
+#[derive(Debug)]
 struct WriteBuf {
     data: Vec<char>,
+    capacity: usize,
     gap_start: usize,
     gap_len: usize,
     offset: usize,
@@ -64,6 +66,7 @@ impl WriteBuf {
     pub fn new(capacity: usize) -> Self {
         Self {
             data: vec![' '; capacity],
+            capacity: capacity,
             gap_start: 0,
             gap_len: capacity,
             offset: 0usize,
@@ -80,6 +83,7 @@ impl WriteBuf {
         for i in post_gap..self.data.len() {
             self.data[i] = ' ';
         }
+        self.gap_len = self.capacity;
         self.gap_start = 0usize;
         self.offset = 0usize;
         self.content_len = 0usize;
@@ -89,7 +93,7 @@ impl WriteBuf {
     // moves with cursor
     pub fn move_gap(&mut self, pos: usize) {
         while pos < self.gap_start {
-            self.gap_start = self.gap_start.saturating_sub(1);
+            self.gap_start -= 1;
             self.data[self.gap_start + self.gap_len] = self.data[self.gap_start];
         }
         while pos > self.gap_start {
@@ -103,6 +107,7 @@ impl WriteBuf {
 
         self.data[self.gap_start] = c;
         self.gap_start += 1;
+        self.content_len += 1;
         self.gap_len = self.gap_len.saturating_sub(1);
     }
 
@@ -128,6 +133,7 @@ impl WriteBuf {
         }
 
         self.data = new_data;
+        self.capacity = new_cap;
         self.gap_len = new_cap.saturating_sub(
             self.gap_start.saturating_sub(new_gap_len)
         );
@@ -208,11 +214,11 @@ impl WinInfo {
 
     pub fn set_writing(&mut self, w: bool) {
         self.writing = w;
-        self.cursor.offset = 0usize;
         let mut out = std::io::stdout();
         match w {
             true => {
                 write!(out, "\x1b[?25h");
+                self.cursor.offset = 0usize;
             }
             false => {
                 write!(out, "\x1b[?25l");
@@ -224,16 +230,27 @@ impl WinInfo {
     pub fn set_write_buffer_w_cell(&mut self, cell: &Cell) {
         let buf = &mut self.write_buffer;
         buf.reset();
-       
+    
         for c in cell.content.chars() {
             buf.insert(c);
         }
        
-        buf.move_gap(0usize);
-
-        buf.content_len = cell.content.len();
         buf.offset = cell.text_offset;
+        buf.move_gap(buf.offset);
         buf.window = cell.width;
+    }
+
+    pub fn write_to_cell(&mut self, cell: &mut Cell) {
+        let buf = &mut self.write_buffer;
+        cell.content = String::new();
+        for i in 0..buf.gap_start {
+            cell.content.push(buf.data[i]);
+        }
+        for i in (buf.gap_start + buf.gap_len)..buf.data.len() {
+            cell.content.push(buf.data[i]);
+        }
+        cell.text_offset = buf.offset;
+        self.changed = WinChange::Cell;
     }
 
     pub fn mode(&self) -> ScrollMode {
@@ -260,9 +277,11 @@ impl WinInfo {
                 self.changed = WinChange::Write;
             }
         } else {
-            cursor.offset = new_cur_off;
-            buf.move_gap(buf.gap_start + 1);
-            self.changed = WinChange::Write;
+            if buf.gap_start < buf.content_len {
+                cursor.offset = new_cur_off;
+                buf.move_gap(buf.gap_start + 1);
+                self.changed = WinChange::Write;
+            }
         }
     }
 
@@ -273,12 +292,12 @@ impl WinInfo {
         if cursor.offset == 0 {
             if buf.offset > 0 {
                 buf.offset = buf.offset - 1;
-                buf.move_gap(buf.gap_start - 1);
+                buf.move_gap(buf.gap_start.saturating_sub(1));
                 self.changed = WinChange::Write;
             }
         } else {
             cursor.offset = cursor.offset - 1;
-            buf.move_gap(buf.gap_start - 1);
+            buf.move_gap(buf.gap_start.saturating_sub(1));
             self.changed = WinChange::Write;
         }
     }
@@ -395,6 +414,31 @@ impl WinInfo {
         self.focused_content.clear();
         let take = focused.len().min(self.width);
         self.focused_content.push_str(&focused[..take]);
+    }
+
+    pub fn to_write_buffer(&mut self, content: &str) {
+        for c in content.chars() {
+            self.write_buffer.insert(c);
+            
+            let cursor = &mut self.cursor;
+            let buf = &mut self.write_buffer;
+          
+            let new_cur_off = cursor.offset + 1;
+            if new_cur_off > cursor.limit {
+                let new_buf_off = buf.offset + 1;
+                let diff = buf.content_len.saturating_sub(new_buf_off);
+                if diff >= buf.window {
+                    buf.offset = new_buf_off;
+                    self.changed = WinChange::Write;
+                }
+            } else {
+                if buf.gap_start <= buf.content_len {
+                    cursor.offset = new_cur_off;
+                    self.changed = WinChange::Write;
+                }
+            }
+        }
+        self.changed = WinChange::Write;
     }
 
     pub fn draw_focused_content(&mut self) {
@@ -594,6 +638,8 @@ impl WinInfo {
     }
 
     pub fn draw_edited(&mut self, cells: &mut Cells) {
+        self.focused_content.clear();
+
         let (mut id, row) = cells.w_cell;
         let col = &cells.columns[id];
         let cursor = format!(
@@ -604,21 +650,39 @@ impl WinInfo {
 
         // take before gap
         let offset = self.write_buffer.offset;
-        let max_take = self.write_buffer.content_len.min(col.width);
-        let take_1 = offset + self.write_buffer.gap_start.min(max_take);
-        for i in offset..take_1 {
-            self.push_to_frame(self.write_buffer.data[i]);
-        }
-        // take after gap
-        let post_gap = self.write_buffer.gap_start + self.write_buffer.gap_len;
-        let take_2 = post_gap + col.width.saturating_sub(take_1 - offset);
-        eprintln!("post_gap = {} take_2 = {}", post_gap, take_2);
-        for i in post_gap..take_2 {
-            if i < self.write_buffer.data.len() {
-                self.push_to_frame(self.write_buffer.data[i]);
-            } else {
-                self.push_to_frame(' ');
+        let max_take = self.write_buffer.content_len
+                           .saturating_sub(offset)
+                           .min(col.width);
+        let take_1 = self.write_buffer.gap_start.min(
+            offset + max_take
+        );
+
+        let mut c: char = ' ';
+        for i in 0..take_1 {
+            c = self.write_buffer.data[i];
+            if i >= offset {
+                self.push_to_frame(c);
             }
+            self.focused_content.push(c.clone());
+        }
+        
+        // take after gap
+        let mut post_gap = self.write_buffer.gap_start + self.write_buffer.gap_len;
+        let take_2 = post_gap + col.width.saturating_sub(take_1.saturating_sub(offset));
+        for i in post_gap..self.write_buffer.data.len() {
+            c = self.write_buffer.data[i];
+            if i < take_2 {
+                self.push_to_frame(c.clone());
+                post_gap += 1;
+            }
+            if self.focused_content.len() < self.width {
+                self.focused_content.push(c.clone());
+            }
+        }
+        // pad end with whitespace
+        while take_2 > post_gap {
+            self.push_to_frame(' ');
+            post_gap += 1;
         }
         self.push_str_to_frame(" \x1b[27;39;49m|");
         
