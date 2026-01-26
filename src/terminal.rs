@@ -11,15 +11,6 @@ use libc::{
 
 use crate::cells::{Cell, Cells, Column};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ScrollMode {
-    Text, // scroll through text within a cell
-    Cell, //// change focus from cell to cell
-    Axis, ////// shift all rows/columns
-    Page, //////// replace all rows/columns with
-          //////// the next screenful of rows/columns
-}
-
 #[derive(Debug, PartialEq)]
 pub enum WinChange {
     Cell,       // one cell's content has changed
@@ -31,6 +22,22 @@ pub enum WinChange {
     Init,       ////// first draw; draws everything
     Write,      //// write contents of WriteBuf + row
     Non,        //// no change has occurred
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ScrollMode {
+    Text, // scroll through text within a cell
+    Cell, //// change focus from cell to cell
+    Axis, ////// shift all rows/columns
+    Page, //////// replace all rows/columns with
+          //////// the next screenful of rows/columns
+}
+
+#[derive(Debug, PartialEq)]
+pub enum InputMode {
+    Scroll,     // input translates to scrolling
+    Write,      // input affects write buffer
+    Command,    // input is processed as commands
 }
 
 pub struct Cursor {
@@ -160,12 +167,12 @@ pub struct WinInfo {
     pub w_page: usize,
     pub h_page: usize,
     pub changed: WinChange,
-    pub mode: ScrollMode,
+    pub scroll_mode: ScrollMode,
+    pub input_mode: InputMode,
     num_cols: usize,
     num_rows: usize,
     frame: String,
     focused_content: String,
-    pub writing: bool,
     cursor: Cursor,
     write_buffer: WriteBuf,
 }
@@ -197,12 +204,12 @@ impl WinInfo {
             focused_content: String::new(),
             frame: String::new(),
             changed: WinChange::Init,
-            mode: ScrollMode::Cell,
+            scroll_mode: ScrollMode::Cell,
+            input_mode: InputMode::Scroll,
             w_pointer: 0usize,
             h_pointer: 0usize,
             w_page: 0usize,
             h_page: 0usize,
-            writing: false,
             cursor: Cursor::new(),
             write_buffer: WriteBuf::new(1024),
         }
@@ -216,19 +223,16 @@ impl WinInfo {
         self.h_page = end.saturating_sub(beg);
     }
 
-    pub fn set_mode(&mut self, mode: ScrollMode) {
-        self.mode = mode;
-    }
-
     pub fn set_writing(&mut self, w: bool) {
-        self.writing = w;
         let mut out = std::io::stdout();
         match w {
             true => {
+                self.input_mode = InputMode::Write;
                 write!(out, "\x1b[?25h");
                 self.cursor.offset = 0usize;
             }
             false => {
+                self.input_mode = InputMode::Scroll;
                 write!(out, "\x1b[?25l");
             }
         };
@@ -259,10 +263,6 @@ impl WinInfo {
         }
         cell.text_offset = buf.offset;
         self.changed = WinChange::Cell;
-    }
-
-    pub fn mode(&self) -> ScrollMode {
-        self.mode
     }
 
     pub fn set_cursor(&mut self, line: usize, col: usize, limit: usize) {
@@ -529,7 +529,7 @@ impl WinInfo {
 
         while start + width < self.width {
             let mut cell = col.get_cell(row);
-            let take = cell.text_offset + cell.width.min(cell.len());
+            let take = cell.text_offset + cell.width.min(cell.len() - cell.text_offset);
             let content = &cell.content;
             let visible = &content[cell.text_offset..take];
             let formatted = {
@@ -740,7 +740,7 @@ impl WinInfo {
     pub fn flush(&mut self) {
         self.draw_focused_content();
 
-        if self.writing {
+        if self.input_mode != InputMode::Scroll {
             // show cursor
             let (l, c) = self.cursor_pos();
             let cursor = format!("\x1b[{l};{c}H");
