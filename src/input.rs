@@ -130,8 +130,13 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 // ctrl + w (write)
                 [23] => {
                     w_info.set_write_buffer_w_cell(&cells.w_cell());
-                    w_info.set_writing(true);
+                    w_info.set_write_mode(true);
                     w_info.changed = WinChange::Write;
+                }
+                // : (command)
+                [58] => {
+                    w_info.set_command_mode(true);
+                    w_info.changed = WinChange::Command;
                 }
                 _ => (),
             }
@@ -149,10 +154,12 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 [27, 91, 67] => { // right
                     // scrolls cursor right within a cell
                     w_info.move_cursor_right();
+                    w_info.changed = WinChange::Write;
                 }
                 [27, 91, 68] => { // left
                     // sim. but left
                     w_info.move_cursor_left();
+                    w_info.changed = WinChange::Write;
                 }
                 [27] => { // escape by itself
                     // ignore for now
@@ -176,7 +183,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 }
                 // ctrl + w (write)
                 [23] => {
-                    w_info.set_writing(false);
+                    w_info.set_write_mode(false);
                     let mut w_cell = cells.w_cell();
                     w_info.write_to_cell(w_cell);
                 }
@@ -185,6 +192,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 }
                 [8] | [127] => { /* backspace */ 
                     w_info.delete_from_write_buffer();
+                    w_info.changed = WinChange::Write;
                     cells.written = true;
                 }
                 [27, 91, 50, 126] => { /* insert */ }
@@ -204,11 +212,85 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                         }
                     };
                     w_info.add_to_write_buffer(c);
+                    w_info.changed = WinChange::Write;
                     cells.written = true;
                 }
             }
         }
         InputMode::Command => {
+            match input {
+                // normal arrows
+                [27, 91, 65] => { // up
+                }
+                [27, 91, 66] => { // down
+                }
+                [27, 91, 67] => { // right
+                    // scrolls cursor right
+                    w_info.move_cursor_right();
+                    w_info.changed = WinChange::Command;
+                }
+                [27, 91, 68] => { // left
+                    // sim. but left
+                    w_info.move_cursor_left();
+                    w_info.changed = WinChange::Command;
+                }
+                [27] => { // escape by itself
+                    // ignore for now
+                }
+                [27, 91, 90] => { // shift-tab
+                    // ignore for now
+                }
+                // modified arrows
+                [27, 91, 49, 59, m, d] => {
+                    match m {
+                        // affect scroll speed
+                        _ => (),
+                    }
+                    match d {
+                        65 => (),
+                        66 => (),
+                        67 => (),
+                        68 => (),
+                        _ => (),
+                    }
+                }
+                [1..10] | [11..13] | [14..26] | [31] => {
+                    // ignore other control characters
+                }
+                [8] | [127] => { /* backspace */ 
+                    w_info.delete_from_write_buffer();
+                    w_info.changed = WinChange::Command;
+                }
+                [10] | [13] => { /* enter (\n, \r) */
+                    w_info.process_command();
+                    w_info.set_command_mode(false);
+                    w_info.input_mode = InputMode::Scroll;
+                }
+                [13, 10] => { /* enter (\r\n) */
+                    w_info.process_command();
+                    w_info.set_command_mode(false);
+                    w_info.input_mode = InputMode::Scroll;
+                }
+                [27, 91, 50, 126] => { /* insert */ }
+                [27, 91, 51, 126] => { /* delete */ }
+                [27, 91, 70] => { /* end */ }
+                [27, 91, 72] => { /* home */ }
+                [27, 91, 50, 59, 53, 126] => { /* ctrl + insert */ }
+                [27, 91, 51, 59, 53, 126] => { /* ctrl + delete */ }
+                [27, 91, 49, 59, 53, 70] => { /* ctrl + end */ }
+                [27, 91, 49, 59, 53, 72] => { /* ctrl + home */ }
+                _ => {
+                    let c = match str::from_utf8(input) {
+                        Ok(valid) => valid,
+                        Err(_) => {
+                            eprintln!("Invalid input {:?}", input);
+                            return;
+                        }
+                    };
+                    w_info.add_to_write_buffer(c);
+                    w_info.changed = WinChange::Command;
+                }
+            }
         }
     }
 }
