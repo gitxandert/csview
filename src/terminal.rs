@@ -111,6 +111,14 @@ impl WriteBuf {
         self.gap_len = self.gap_len.saturating_sub(1);
     }
 
+    pub fn delete(&mut self) {
+        if self.gap_start == 0 { return; }
+
+        self.gap_start = self.gap_start.saturating_sub(1);
+        self.content_len = self.content_len.saturating_sub(1);
+        self.gap_len += 1;
+    }
+
     fn grow(&mut self) {
         let old_cap = self.data.len();
         let new_cap = old_cap * 2;
@@ -416,7 +424,7 @@ impl WinInfo {
         self.focused_content.push_str(&focused[..take]);
     }
 
-    pub fn to_write_buffer(&mut self, content: &str) {
+    pub fn add_to_write_buffer(&mut self, content: &str) {
         for c in content.chars() {
             self.write_buffer.insert(c);
             
@@ -439,6 +447,23 @@ impl WinInfo {
             }
         }
         self.changed = WinChange::Write;
+    }
+
+    pub fn delete_from_write_buffer(&mut self) {
+        self.write_buffer.delete();
+
+        let cursor = &mut self.cursor;
+        let buf = &mut self.write_buffer;
+
+        if cursor.offset > 0 {
+            cursor.offset -= 1;
+            self.changed = WinChange::Write;
+        } else {
+            if buf.offset > 0 {
+                buf.offset -= 1;
+            }
+            self.changed = WinChange::Write;
+        }
     }
 
     pub fn draw_focused_content(&mut self) {
