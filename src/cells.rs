@@ -344,6 +344,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             // 1 or 2 lines
             //
             w_info.draw_focus(cells);
+            w_info.draw_focused_content();
             w_info.flush();
         }
         WinChange::ColWidth => {
@@ -352,6 +353,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             //
             // all lines
             w_info.draw_from_column(cells);
+            w_info.draw_focused_content();
             w_info.flush();
         }
         WinChange::Rows => {
@@ -360,6 +362,7 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             //
             // all lines, except for header and col_ids
             w_info.draw_screen(cells);
+            w_info.draw_focused_content();
             w_info.flush();
         }
         WinChange::Columns => {
@@ -368,10 +371,12 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             //
             // all lines, but not the row_idx column
             w_info.draw_screen(cells);
+            w_info.draw_focused_content();
             w_info.flush();
         }
         WinChange::Screen => { // redraw everything on resize (unavoidable)
             w_info.draw_screen(cells);
+            w_info.draw_focused_content();
             w_info.flush();
         }
         WinChange::Init => { // first draw sets w_cell
@@ -379,12 +384,19 @@ pub fn show_csv(cells: &mut Cells, w_info: &mut WinInfo) {
             w_cell.set_focused(true);
 
             w_info.draw_screen(cells);
+            w_info.draw_focused_content();
             w_info.flush();
         }
         WinChange::Write => {
             // write contents of WriteBuf,
             // plus the rest of the row following w_cell
             w_info.draw_edited(cells);
+            w_info.draw_focused_content();
+            w_info.flush();
+        }
+        WinChange::Command => {
+            // write contents of WriteBuf at bottom of screen
+            w_info.draw_command();
             w_info.flush();
         }
         WinChange::Non => {
