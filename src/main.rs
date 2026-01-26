@@ -71,7 +71,6 @@ fn main() {
         if check_flags(&mut w_info) {
             break;
         }
-        show_csv(&mut cells, &mut w_info);
         match std::io::stdin().read(&mut buffer) {
             Ok(n) => {
                 let input = &buffer[..n];
@@ -85,6 +84,8 @@ fn main() {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
+
+        show_csv(&mut cells, &mut w_info);
     }
 
     // restore terminal
