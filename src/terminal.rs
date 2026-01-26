@@ -21,6 +21,7 @@ pub enum WinChange {
     Screen,     //// the screen's dimensions have changed
     Init,       ////// first draw; draws everything
     Write,      //// write contents of WriteBuf + row
+    Command,    // write currently-typed command at bottom
     Non,        //// no change has occurred
 }
 
@@ -223,7 +224,7 @@ impl WinInfo {
         self.h_page = end.saturating_sub(beg);
     }
 
-    pub fn set_writing(&mut self, w: bool) {
+    pub fn set_write_mode(&mut self, w: bool) {
         let mut out = std::io::stdout();
         match w {
             true => {
@@ -235,7 +236,28 @@ impl WinInfo {
                 self.input_mode = InputMode::Scroll;
                 write!(out, "\x1b[?25l");
             }
-        };
+        }
+        out.flush().unwrap();
+    }
+
+    pub fn set_command_mode(&mut self, b: bool) {
+        let mut out = std::io::stdout();
+        match b {
+            true => {
+                self.input_mode = InputMode::Command;
+                // set cursor to a space after a colon at the bottom of the screen
+                self.set_cursor(self.height, 2, self.width.saturating_sub(1));
+                self.cursor.offset = 0usize;
+                self.write_buffer.reset();
+                write!(out, "\x1b[{};1H\x1b[2K:\x1b[{};{}H\x1b[?25h",
+                    self.height, self.cursor.line, self.cursor.col
+                );
+            }
+            false => {
+                self.input_mode = InputMode::Scroll;
+                write!(out, "\x1b[?25l");
+            }
+        }
         out.flush().unwrap();
     }
 
@@ -282,13 +304,11 @@ impl WinInfo {
             if diff > buf.window {
                 buf.offset = new_buf_off;
                 buf.move_gap(buf.gap_start + 1);
-                self.changed = WinChange::Write;
             }
         } else {
             if buf.gap_start < buf.content_len {
                 cursor.offset = new_cur_off;
                 buf.move_gap(buf.gap_start + 1);
-                self.changed = WinChange::Write;
             }
         }
     }
@@ -301,12 +321,10 @@ impl WinInfo {
             if buf.offset > 0 {
                 buf.offset = buf.offset - 1;
                 buf.move_gap(buf.gap_start.saturating_sub(1));
-                self.changed = WinChange::Write;
             }
         } else {
             cursor.offset = cursor.offset - 1;
             buf.move_gap(buf.gap_start.saturating_sub(1));
-            self.changed = WinChange::Write;
         }
     }
 
@@ -437,12 +455,10 @@ impl WinInfo {
                 let diff = buf.content_len.saturating_sub(new_buf_off);
                 if diff >= buf.window {
                     buf.offset = new_buf_off;
-                    self.changed = WinChange::Write;
                 }
             } else {
                 if buf.gap_start <= buf.content_len {
                     cursor.offset = new_cur_off;
-                    self.changed = WinChange::Write;
                 }
             }
         }
@@ -455,14 +471,12 @@ impl WinInfo {
         let cursor = &mut self.cursor;
         let buf = &mut self.write_buffer;
 
-        if cursor.offset > 0 {
-            cursor.offset -= 1;
-            self.changed = WinChange::Write;
+        if buf.offset > 0 {
+            buf.offset -= 1;
         } else {
-            if buf.offset > 0 {
-                buf.offset -= 1;
+            if cursor.offset > 0 {
+                cursor.offset -= 1;
             }
-            self.changed = WinChange::Write;
         }
     }
 
@@ -719,6 +733,44 @@ impl WinInfo {
         }
     }
 
+    fn push_write_buffer_to_frame(&mut self) {
+        // take before gap
+        let offset = self.write_buffer.offset;
+        let max_take = self.write_buffer.content_len
+                           .saturating_sub(offset)
+                           .min(self.width);
+        let take_1 = self.write_buffer.gap_start.min(
+            offset + max_take
+        );
+
+        for i in 0..take_1 {
+            if i >= offset {
+                self.push_to_frame(self.write_buffer.data[i]);
+            }
+        }
+        
+        // take after gap
+        let mut post_gap = self.write_buffer.gap_start + self.write_buffer.gap_len;
+        let take_2 = post_gap + self.width.saturating_sub(take_1.saturating_sub(offset));
+        for i in post_gap..self.write_buffer.data.len() {
+            if i < take_2 {
+                self.push_to_frame(self.write_buffer.data[i]);
+                post_gap += 1;
+            }
+        }
+    }
+
+    pub fn draw_command(&mut self) {
+        let beg = format!("\x1b[{};1H\x1b[2K:", self.height);
+        self.push_str_to_frame(&beg);
+       
+        self.push_write_buffer_to_frame();
+
+        let (cursor_l, cursor_c) = self.cursor_pos();
+        let cursor = format!("\x1b[{};{}H", cursor_l, cursor_c);
+        self.push_str_to_frame(&cursor);
+    }
+
     pub fn draw_w_cell(&mut self, cells: &mut Cells) {
         let (mut i, row) = cells.w_cell;
         let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
@@ -738,8 +790,6 @@ impl WinInfo {
     }
 
     pub fn flush(&mut self) {
-        self.draw_focused_content();
-
         if self.input_mode != InputMode::Scroll {
             // show cursor
             let (l, c) = self.cursor_pos();
@@ -753,6 +803,13 @@ impl WinInfo {
 
         self.frame = String::new();
         self.changed = WinChange::Non;
+    }
+
+    pub fn process_command(&mut self) {
+        let formatted = format!("\x1b[{};1\x1b[2K\x1b[{};1HInvalid command: ", self.height, self.height);
+        self.push_str_to_frame(&formatted);
+        self.push_write_buffer_to_frame();
+        self.flush();
     }
 }
 
