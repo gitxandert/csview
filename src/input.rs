@@ -183,7 +183,10 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             [1..=22] | [24..=26] | [31] => {
                 // ignore other control characters
             }
-            [8] | [127] => { /* backspace */ }
+            [8] | [127] => { /* backspace */ 
+               w_info.delete_from_write_buffer();
+               cells.written = true;
+            }
             [27, 91, 50, 126] => { /* insert */ }
             [27, 91, 51, 126] => { /* delete */ }
             [27, 91, 70] => { /* end */ }
@@ -200,7 +203,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                         return;
                     }
                 };
-                w_info.to_write_buffer(c);
+                w_info.add_to_write_buffer(c);
                 cells.written = true;
             }
         }
