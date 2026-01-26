@@ -178,9 +178,9 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
             [23] => {
                 w_info.set_writing(false);
                 let mut w_cell = cells.w_cell();
-                w_cell.set_text_offset(0usize);
+                w_info.write_to_cell(w_cell);
             }
-            [1..=22] | [24..=26] => {
+            [1..=22] | [24..=26] | [31] => {
                 // ignore other control characters
             }
             [8] | [127] => { /* backspace */ }
@@ -200,6 +200,8 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                         return;
                     }
                 };
+                w_info.to_write_buffer(c);
+                cells.written = true;
             }
         }
     }
