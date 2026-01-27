@@ -1,9 +1,12 @@
-use std::env;
-use std::io::{self, Read, Write, stdin};
+use std::{
+    env,
+    io::{self, Read, Write, stdin},
+};
 
 mod cells;
-mod input;
+mod cmd_err;
 mod csv_io;
+mod input;
 mod terminal;
 
 use crate::{
