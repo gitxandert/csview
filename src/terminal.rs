@@ -9,7 +9,10 @@ use libc::{
     termios, tcgetattr, tcsetattr, cfmakeraw, TCSANOW,
 };
 
-use crate::cells::{Cell, Cells, Column};
+use crate::{
+    cmd_err::{self, CmdErr},
+    cells::{Cell, Cells, Column},
+};
 
 #[derive(Debug, PartialEq)]
 pub enum WinChange {
@@ -125,6 +128,19 @@ impl WriteBuf {
         self.gap_start = self.gap_start.saturating_sub(1);
         self.content_len = self.content_len.saturating_sub(1);
         self.gap_len += 1;
+    }
+
+    pub fn as_string(&self) -> String {
+        let mut contents = String::new();
+        for i in 0..self.gap_start {
+            contents.push(self.data[i]);
+        }
+        let post_gap = self.gap_start + self.gap_len;
+        for i in post_gap..self.data.len() {
+            contents.push(self.data[i]);
+        }
+
+        contents
     }
 
     fn grow(&mut self) {
@@ -481,10 +497,12 @@ impl WinInfo {
     }
 
     pub fn draw_focused_content(&mut self) {
-        let focused = &self.focused_content;
-        let row = self.height;
-        let content = format!("\x1b[{row};1H\x1b[2K\x1b[0m{focused}");
-        self.push_str_to_frame(&content);
+        self.push_str_to_frame(
+            &format!(
+                "\x1b[{};1H\x1b[2K\x1b[0m{}",
+                self.height, self.focused_content
+            )
+        );
     }
     
     fn print_col_ids(&mut self, cells: &mut Cells, mut i: usize, mut start: usize) {
@@ -805,7 +823,62 @@ impl WinInfo {
         self.changed = WinChange::Non;
     }
 
-    pub fn process_command(&mut self) {
+    pub fn process_command(&mut self, cells: &mut Cells) {
+        let input = self.write_buffer.as_string();
+        let mut tokens = input.split_whitespace();
+        while let Some(tok) = tokens.next() {
+            match tok {
+                "cn" => {
+                    match tokens.next() {
+                        None => self.show_column_name(cells),
+                        Some(spec) => {
+                            match spec {
+                                "to" => {
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingName,
+                                                  spec, self.height),
+                                        Some(name) => self.change_col_name(cells, &name),
+                                    }
+                                }
+                                _ => cmd_err::print(
+                                        CmdErr::UnknownSpec,
+                                        spec, self.height),
+                            }
+                        }
+                    }
+                }
+                _ => self.invalid_command(),
+            }
+        }
+    }
+
+    fn show_column_name(&mut self, cells: &mut Cells) {
+        let col = &cells.header[self.w_pointer];
+        self.push_str_to_frame(
+            &format!("\x1b[{};1H\x1b[2K{}",
+                self.height, col.content)
+            );
+        self.flush();
+    }
+
+    fn change_col_name(&mut self, cells: &mut Cells, new_name: &str) {
+        cells.header[self.w_pointer].content = new_name.to_string();
+        cells.written = true;
+
+        let start = cells.columns[self.w_pointer].start;
+        self.push_str_to_frame(
+            &format!("\x1b[2;{}H\x1b[K", start)
+        );
+        self.print_header(cells, 
+                          self.w_pointer, 
+                          start
+        );
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    fn invalid_command(&mut self) {
         let formatted = format!("\x1b[{};1\x1b[2K\x1b[{};1HInvalid command: ", self.height, self.height);
         self.push_str_to_frame(&formatted);
         self.push_write_buffer_to_frame();
