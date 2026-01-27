@@ -856,12 +856,39 @@ impl WinInfo {
                                     }
                                 }
                                 _ => cmd_err::print(
-                                        CmdErr::UnknownSpec,
-                                        spec, self.height),
+                                       CmdErr::UnknownSpec,
+                                       spec, self.height),
                             }
                         }
                     }
                 }
+                // column
+                // whole-column functions
+                "col" => {
+                    match tokens.next() {
+                        None => cmd_err::print(
+                                  CmdErr::MissingSubCmd,
+                                  tok, self.height),
+                        Some(subcmd) => {
+                            match subcmd {
+                                "mv" | "move"    => {
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingLocation,
+                                                  subcmd, self.height),
+                                        Some(loc) => self.move_focused_column(cells, &loc),
+                                    }
+                                }
+                                "rm" | "remove"  => (),
+                                "n"  | "new"     => (),
+                                "uq" | "unique"  => (),
+                                "i"  | "isolate" => (),
+                                _ => (),
+                            }
+                        }
+                    }
+                }
+
                 _ => cmd_err::print(CmdErr::InvalidCommand, tok, self.height),
             }
         }
@@ -902,6 +929,59 @@ impl WinInfo {
             }
         }
         cmd_err::print(CmdErr::NoName, name, self.height);
+    }
+
+    fn move_focused_column(&mut self, cells: &mut Cells, loc: &str) {
+        let mut idx = match loc.chars().nth(0).unwrap() {
+            // column names must be quoted
+            '"' | '\'' => {
+                // make sure quotes match
+                let last = loc.len() - 1;
+                if loc.chars().nth(last).unwrap() == loc.chars().nth(0).unwrap() {
+                    let name = &loc[1..(last).max(1)];
+                    match cells.header.iter().position(|h| &h.content == name) {
+                        Some(index) => index,
+                        None => {
+                            cmd_err::print(CmdErr::NoName, name, self.height);
+                            return;
+                        }
+                    }
+                } else {
+                    cmd_err::print(CmdErr::UnmatchedQuote, loc, self.height);
+                    return;
+                }
+            }
+            // if unquoted, search col_ids
+            _ => {
+                // automatically discount loc if longer than any col_id
+                let last = cells.col_ids.len() - 1;
+                if loc.len() > cells.col_ids[last].content.len() {
+                    cmd_err::print(CmdErr::NoId, loc, self.height);
+                    return;
+                } else {
+                    match cells.col_ids.iter().position(|i| &i.content == loc) {
+                        Some(index) => index,
+                        None => {
+                            cmd_err::print(CmdErr::NoId, loc, self.height);
+                            return;
+                        }
+                    }
+                }
+            }
+        };
+        // if the target index is greater than the current one,
+        // decrement the target index by one, so that 
+        // the column gets placed before the targeted column, 
+        // not after (for consistency)
+        idx -= (idx > self.w_pointer) as usize;
+        let f_col = cells.columns.remove(self.w_pointer);
+        cells.columns.insert(idx, f_col);
+        let f_col_name = cells.header.remove(self.w_pointer);
+        cells.header.insert(idx, f_col_name);
+        cells.written = true;
+
+        self.set_w_pointer(idx);
+        self.changed = WinChange::Columns;
     }
 }
 
