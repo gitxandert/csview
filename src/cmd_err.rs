@@ -1,7 +1,9 @@
 use std::io::{self, Read, Write};
 
 pub enum CmdErr {
+    InvalidCommand,
     MissingName,
+    NoName,
     UnknownSpec,
 }
 
@@ -10,8 +12,18 @@ pub fn print(err: CmdErr, token: &str, line: usize) {
     let mut outstring = String::new();
     let outstring = {
         match err {
+            CmdErr::InvalidCommand => format!(
+                    "\x1b[{};1H\x1b[2KERR: invalid command '{}'",
+                    line, token
+                ),
+
             CmdErr::MissingName => format!(
                     "\x1b[{};1H\x1b[2KERR: missing name for '{}'",
+                    line, token
+                ),
+
+            CmdErr::NoName => format!(
+                    "\x1b[{};1H\x1b[2KERR: no column called '{}'",
                     line, token
                 ),
 
