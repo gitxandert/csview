@@ -828,17 +828,31 @@ impl WinInfo {
         let mut tokens = input.split_whitespace();
         while let Some(tok) = tokens.next() {
             match tok {
+                // column name
+                // can show, edit, and find column names
                 "cn" => {
                     match tokens.next() {
+                        // `cn` by itself shows the focused column's name
                         None => self.show_column_name(cells),
                         Some(spec) => {
                             match spec {
                                 "to" => {
+                                    // `cn to` changes the focused column's name
                                     match tokens.next() {
                                         None => cmd_err::print(
                                                   CmdErr::MissingName,
                                                   spec, self.height),
                                         Some(name) => self.change_col_name(cells, &name),
+                                    }
+                                }
+                                "find" => {
+                                    // `cn find` moves the focus to the
+                                    // column to find
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingName,
+                                                  spec, self.height),
+                                        Some(name) => self.find_column(cells, &name),
                                     }
                                 }
                                 _ => cmd_err::print(
@@ -848,7 +862,7 @@ impl WinInfo {
                         }
                     }
                 }
-                _ => self.invalid_command(),
+                _ => cmd_err::print(CmdErr::InvalidCommand, tok, self.height),
             }
         }
     }
@@ -878,11 +892,16 @@ impl WinInfo {
         self.flush();
     }
 
-    fn invalid_command(&mut self) {
-        let formatted = format!("\x1b[{};1\x1b[2K\x1b[{};1HInvalid command: ", self.height, self.height);
-        self.push_str_to_frame(&formatted);
-        self.push_write_buffer_to_frame();
-        self.flush();
+    fn find_column(&mut self, cells: &mut Cells, name: &str) {
+        let header = &cells.header;
+        for i in 0..header.len() {
+            if &header[i].content == name {
+                self.set_w_pointer(i);
+                self.changed = WinChange::Columns;
+                return;
+            }
+        }
+        cmd_err::print(CmdErr::NoName, name, self.height);
     }
 }
 
