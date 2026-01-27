@@ -262,12 +262,12 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                     w_info.changed = WinChange::Command;
                 }
                 [10] | [13] => { /* enter (\n, \r) */
-                    w_info.process_command();
+                    w_info.process_command(cells);
                     w_info.set_command_mode(false);
                     w_info.input_mode = InputMode::Scroll;
                 }
                 [13, 10] => { /* enter (\r\n) */
-                    w_info.process_command();
+                    w_info.process_command(cells);
                     w_info.set_command_mode(false);
                     w_info.input_mode = InputMode::Scroll;
                 }
