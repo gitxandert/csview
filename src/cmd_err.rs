@@ -4,6 +4,7 @@ pub enum CmdErr {
     InvalidCommand,
     MissingLocation,
     MissingName,
+    MissingValue,
     MissingSubCmd,
     NoId,
     NoName,
@@ -28,6 +29,11 @@ pub fn print(err: CmdErr, token: &str, line: usize) {
 
             CmdErr::MissingName => format!(
                     "\x1b[{};1H\x1b[2KERR: missing name for '{}'",
+                    line, token
+                ),
+
+            CmdErr::MissingValue => format!(
+                    "\x1b[{};1H\x1b[2KERR: missing value for '{}'",
                     line, token
                 ),
 
