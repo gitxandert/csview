@@ -173,8 +173,6 @@ impl Cell {
 
 #[derive(Debug)]
 pub struct Column {
-    pub id: Cell,
-    pub header: Cell,
     pub cells: Vec<Cell>,
     pub start: usize, // terminal col where this begins
     pub width: usize,
@@ -183,8 +181,6 @@ pub struct Column {
 impl Column {
     pub fn new() -> Self {
         Self {
-            id: Cell::new(""),
-            header: Cell::new(""),
             cells: Vec::<Cell>::new(),
             start: 0usize,
             width: 12usize,
@@ -193,14 +189,6 @@ impl Column {
 
     pub fn push_cell(&mut self, cell: Cell) {
         self.cells.push(cell);
-    }
-
-    pub fn set_col_id(&mut self, id: &str) {
-        self.id = Cell::new(id);
-    }
-
-    pub fn set_header(&mut self, header: &str) {
-        self.header = Cell::new(header);
     }
 
     pub fn set_start(&mut self, st: usize) {
@@ -300,6 +288,14 @@ impl Cells {
         self.columns.push(col);
     }
 
+    pub fn insert_column(&mut self, idx: usize, col: Column) {
+        self.columns.insert(idx, col);
+    }
+
+    pub fn insert_col_name(&mut self, idx: usize, col_name: Cell) {
+        self.header.insert(idx, col_name);
+    }
+
     pub fn push_to_col(&mut self, col: usize, cell: Cell) {
         self.columns[col].push_cell(cell);
     }
@@ -319,5 +315,44 @@ impl Cells {
     pub fn w_cell(&mut self) -> &mut Cell {
         let mut col = self.columns.get_mut(self.w_cell.0).unwrap();
         col.get_cell(self.w_cell.1)
+    }
+
+    // try to improve this... I hate it.
+    pub fn increment_col_ids(&mut self) {
+        let mut i = 1;
+        let mut add_a = false;
+        let mut inc_next = false;
+        let last = &self.col_ids[self.col_ids.len() - 1].content;
+        let mut new_id: String = last
+            .chars()
+            .rev()
+            .map(|c|
+                if c == 'Z' {
+                    if i == last.len() {
+                        add_a = true;
+                    } else {
+                        inc_next = true;
+                    }
+                    i += 1;
+                    'A'
+                } else {
+                    let mut cc = c;
+                    if i == 1 || inc_next {
+                        let num = c as u32 + 1;
+                        cc = char::from_u32(num).unwrap();
+                        inc_next = false;
+                    }
+                    i += 1;
+                    cc
+                }
+            )
+            .rev()
+            .collect();
+
+        if add_a {
+            new_id = format!("{}A", new_id);
+        }
+
+        self.col_ids.push(Cell::new(&new_id));
     }
 }
