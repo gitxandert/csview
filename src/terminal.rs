@@ -1,7 +1,7 @@
 use std::{
     mem, 
-    io::Write,
     fs::{File, OpenOptions},
+    io::{self, Read, Write},
     sync::atomic::{AtomicBool, AtomicUsize, Ordering}
 };
 use libc::{
@@ -257,24 +257,33 @@ impl WinInfo {
     }
 
     pub fn set_command_mode(&mut self, b: bool) {
-        let mut out = std::io::stdout();
         match b {
             true => {
+                unsafe {
+                    IN_COMMAND.store(true, Ordering::SeqCst);
+                }
                 self.input_mode = InputMode::Command;
                 // set cursor to a space after a colon at the bottom of the screen
                 self.set_cursor(self.height, 2, self.width.saturating_sub(1));
                 self.cursor.offset = 0usize;
                 self.write_buffer.reset();
-                write!(out, "\x1b[{};1H\x1b[2K:\x1b[{};{}H\x1b[?25h",
-                    self.height, self.cursor.line, self.cursor.col
+                self.push_str_to_frame(
+                    &format!(
+                        "\x1b[{};1H\x1b[2K:\x1b[{};{}H\x1b[?25h",
+                        self.height, self.cursor.line, self.cursor.col
+                    )
                 );
             }
             false => {
+                unsafe {
+                    IN_COMMAND.store(false, Ordering::SeqCst);
+                }
                 self.input_mode = InputMode::Scroll;
-                write!(out, "\x1b[?25l");
+                self.push_str_to_frame("\x1b[?25l");
+                self.draw_focused_content();
             }
         }
-        out.flush().unwrap();
+        self.flush();
     }
 
     pub fn set_write_buffer_w_cell(&mut self, cell: &Cell) {
@@ -779,7 +788,7 @@ impl WinInfo {
     }
 
     pub fn draw_command(&mut self) {
-        let beg = format!("\x1b[{};1H\x1b[2K:", self.height);
+        let beg = format!("\x1b[{};1H\x1b[2K\x1b[0m:", self.height);
         self.push_str_to_frame(&beg);
        
         self.push_write_buffer_to_frame();
@@ -823,9 +832,136 @@ impl WinInfo {
         self.changed = WinChange::Non;
     }
 
+    pub fn show_csv(&mut self, cells: &mut Cells) {
+        match self.changed {
+            WinChange::Cell => {
+                // redraw the focused cell,
+                // with changed content,
+                // plus the rest of the line
+                //
+                // 1 line
+                self.draw_w_cell(cells);
+                self.flush();
+            }
+            WinChange::Focus => {
+                // redraw the last focused cell,
+                // w/o highlighting,
+                // plus the rest of its line,
+                // and the new focused cell, 
+                // w/ highlighting,
+                // plus the rest of its line
+                //
+                // 1 or 2 lines
+                //
+                self.draw_focus(cells);
+                self.draw_focused_content();
+                self.flush();
+            }
+            WinChange::ColWidth => {
+                // redraw the column whose width has changed,
+                // plus all columns after
+                //
+                // all lines
+                self.draw_from_column(cells);
+                self.draw_focused_content();
+                self.flush();
+            }
+            WinChange::Rows => {
+                // shift rows and row_idx,
+                // but no need to redraw header and col_ids
+                //
+                // all lines, except for header and col_ids
+                self.draw_screen(cells);
+                self.draw_focused_content();
+                self.flush();
+            }
+            WinChange::Columns => {
+                // shift columns and col_ids,
+                // but no need to redraw row_idx
+                //
+                // all lines, but not the row_idx column
+                self.draw_screen(cells);
+                self.draw_focused_content();
+                self.flush();
+            }
+            WinChange::Screen => { // redraw everything on resize (unavoidable)
+                self.draw_screen(cells);
+                self.draw_focused_content();
+                self.flush();
+            }
+            WinChange::Init => { // first draw sets w_cell
+                let mut w_cell = cells.get_column(0).get_cell(0);
+                w_cell.set_focused(true);
+
+                self.draw_screen(cells);
+                self.draw_focused_content();
+                self.flush();
+            }
+            WinChange::Write => {
+                // write contents of WriteBuf,
+                // plus the rest of the row following w_cell
+                self.draw_edited(cells);
+                self.draw_focused_content();
+                self.flush();
+            }
+            WinChange::Command => {
+                // write contents of WriteBuf at bottom of screen
+                self.draw_command();
+                self.flush();
+            }
+            WinChange::Non => {
+                // do nothing
+            }
+        }
+    }
+
+    fn tokenize(input: &str) -> Vec<&str> {
+        let mut tokens = Vec::<&str>::new();
+        let mut start = 0usize;
+        let mut end = 0usize;
+        let mut quote: Option<char> = None;
+        // "safe warm babies"
+        for c in input.chars() {
+            match c {
+                ' ' => {
+                    // only push if not quoting
+                    match quote {
+                        None => {
+                            tokens.push(&input[start..end]);
+                            end += 1;
+                            start = end;
+                        }
+                        Some(_) => end += 1,
+                    }
+                }
+                '"' | '\'' => {
+                    // if not quoting, start;
+                    // if quoting, stop;
+                    // increment end regardless
+                    match quote {
+                        Some(q) => {
+                            if q == c {
+                                quote = None;
+                            }
+                        }
+                        None => {
+                            quote = Some(c);
+                        }
+                    }
+                    end += 1;
+                }
+                _ => end += 1,
+            }
+        }
+
+        tokens.push(&input[start..end]);
+
+        tokens
+    }
+
     pub fn process_command(&mut self, cells: &mut Cells) {
         let input = self.write_buffer.as_string();
-        let mut tokens = input.split_whitespace();
+        let mut tokens = Self::tokenize(&input).into_iter();
         while let Some(tok) = tokens.next() {
             match tok {
                 // column name
@@ -879,6 +1015,14 @@ impl WinInfo {
                                         Some(loc) => self.move_focused_column(cells, &loc),
                                     }
                                 }
+                                "f"  | "find"    => {
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingValue,
+                                                  subcmd, self.height),
+                                        Some(val) => self.find_value_in_col(cells, &val),
+                                    }
+                                }
                                 "rm" | "remove"  => (),
                                 "n"  | "new"     => (),
                                 "uq" | "unique"  => (),
@@ -904,6 +1048,8 @@ impl WinInfo {
     }
 
     fn change_col_name(&mut self, cells: &mut Cells, new_name: &str) {
+        let new_name = new_name.trim_start_matches(['\'', '"']);
+        let new_name = new_name.trim_end_matches(['\'', '"']);
         cells.header[self.w_pointer].content = new_name.to_string();
         cells.written = true;
 
@@ -920,11 +1066,14 @@ impl WinInfo {
     }
 
     fn find_column(&mut self, cells: &mut Cells, name: &str) {
+        let name = name.trim_start_matches(['\'', '"']);
+        let name = name.trim_end_matches(['\'', '"']);
         let header = &cells.header;
         for i in 0..header.len() {
             if &header[i].content == name {
                 self.set_w_pointer(i);
                 self.changed = WinChange::Columns;
+                self.show_csv(cells);
                 return;
             }
         }
@@ -969,19 +1118,116 @@ impl WinInfo {
                 }
             }
         };
-        // if the target index is greater than the current one,
-        // decrement the target index by one, so that 
-        // the column gets placed before the targeted column, 
-        // not after (for consistency)
-        idx -= (idx > self.w_pointer) as usize;
+        
         let f_col = cells.columns.remove(self.w_pointer);
-        cells.columns.insert(idx, f_col);
         let f_col_name = cells.header.remove(self.w_pointer);
+        // adjust col_id widths
+        cells.col_ids[self.w_pointer].width = cells.columns[self.w_pointer].width;
+        cells.col_ids[idx].width = f_col.width;
+        // move column and header
+        cells.columns.insert(idx, f_col);
         cells.header.insert(idx, f_col_name);
         cells.written = true;
 
         self.set_w_pointer(idx);
-        self.changed = WinChange::Columns;
+        self.show_csv(cells);
+    }
+    
+    fn draw_col_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<usize>) {
+        self.set_h_pointer(indices[idx]);
+        self.show_csv(cells);
+        self.push_str_to_frame(
+            &format!(
+                "\x1b[{};1H\x1b[2K\x1b[0m{}/{}",
+                self.height, idx + 1, indices.len()
+            )
+        );
+        self.flush();
+    }
+
+    fn find_value_in_col(&mut self, cells: &mut Cells, val: &str) {
+        let val = val.trim_start_matches(['\'', '"']);
+        let val = val.trim_end_matches(['\'', '"']);
+        let rows = &cells.columns[self.w_pointer].cells;
+        let indices: Vec<usize> = rows.iter()
+            .enumerate()
+            .filter(|&(_idx, cell)| cell.content.contains(val))
+            .map(|(idx, _cell)| idx)
+            .collect();
+        
+        if indices.len() == 0 {
+            self.push_str_to_frame(
+                &format!(
+                    "\x1b[{};1H\x1b[2KNo instance of '{}' in '{}'",
+                    self.height, val, cells.header[self.w_pointer].content)
+            );
+            self.flush();
+            return;
+        }
+        // hide cursor
+        self.push_str_to_frame("\x1b[?25l");
+
+        // - read from stdin: 'n', 'b', or 'esc'
+        // - print nth/n at bottom or "No rows in {col_name} contain {val}"
+        // - shift self.h_pointer with 'n' or 'b'
+        // - return to normal functionality with 'esc'
+        let mut idx = {
+            // start with the closest example of the value
+            let mut diff = rows.len();
+            let mut i = 0usize;
+            for _ in 0..indices.len() {
+                let idx = indices[i];
+                let cur_diff = self.h_pointer.max(idx) - self.h_pointer.min(idx);
+                if cur_diff < diff {
+                    diff = cur_diff;
+                    i += 1;
+                } else {
+                    break;
+                }
+            } 
+
+            i - 1
+        };
+        self.draw_col_find(cells, idx, &indices);
+
+        let mut stdin = std::io::stdin();
+        let mut buf = [0u8; 1];
+        loop {
+            match stdin.read_exact(&mut buf) {
+                Ok(_) => {
+                    match buf {
+                        [b'n'] => {
+                            idx = (idx + 1) % indices.len();
+                            self.draw_col_find(cells, idx, &indices);
+                            buf[0] = 0u8;
+                        }
+                        [b'b'] => {
+                            if idx == 0 {
+                                idx = indices.len() - 1;
+                            } else {
+                                idx -= 1;
+                            }
+                            self.draw_col_find(cells, idx, &indices);
+                            buf[0] = 0u8;
+                        }
+                        [17]   => { // ctrl + q (quit)
+                            self.draw_focused_content();
+                            self.flush();
+                            break;
+                        }
+                        [3]   => { // ctrl + c
+                            // catch to prevent close
+                            eprintln!("accidentally pressed ctrl + c");
+                            continue;
+                        }
+                        _     => (),
+                    }
+                }
+                _ => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
     }
 }
 
@@ -1004,7 +1250,7 @@ pub fn raw_mode(switch: bool) {
                 ORIG_TERM = Some(term);
                 let mut raw = term;
                 cfmakeraw(&mut raw);
-                //re-enable SIGINT
+                //re-enable signals
                 raw.c_lflag |= libc::ISIG;
                 // turn on non-blocking to catch sigs
                 raw.c_cc[libc::VMIN] = 0;
@@ -1031,6 +1277,9 @@ pub fn raw_mode(switch: bool) {
     }
 }
 
+// prevent signals from closing program when in command mode
+static IN_COMMAND: AtomicBool = AtomicBool::new(false);
+
 static GOT_WINCH: AtomicBool = AtomicBool::new(false);
 static GOT_INT: AtomicBool = AtomicBool::new(false);
 static GOT_QUIT: AtomicBool = AtomicBool::new(false);
@@ -1040,11 +1289,15 @@ extern "C" fn sig_winch(_sig: c_int) {
 }
 
 extern "C" fn sig_int(_sig: c_int) {
-    GOT_INT.store(true, Ordering::SeqCst);
+    if !IN_COMMAND.load(Ordering::Relaxed) {
+        GOT_INT.store(true, Ordering::SeqCst);
+    }
 }
 
 extern "C" fn sig_quit(_sig: c_int) {
-    GOT_QUIT.store(true, Ordering::SeqCst);
+    if !IN_COMMAND.load(Ordering::Relaxed) {
+        GOT_QUIT.store(true, Ordering::SeqCst);
+    }
 }
 
 pub fn check_flags(w_info: &mut WinInfo) -> bool {
