@@ -136,7 +136,6 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 // : (command)
                 [58] => {
                     w_info.set_command_mode(true);
-                    w_info.changed = WinChange::Command;
                 }
                 _ => (),
             }
@@ -234,8 +233,11 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                     w_info.move_cursor_left();
                     w_info.changed = WinChange::Command;
                 }
-                [27] => { // escape by itself
-                    // ignore for now
+                [27] => { //escape 
+                    // causes issues; ignore
+                }
+                [17] => { // q (quit)
+                    w_info.set_command_mode(false);
                 }
                 [27, 91, 90] => { // shift-tab
                     // ignore for now
@@ -264,12 +266,10 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 [10] | [13] => { /* enter (\n, \r) */
                     w_info.process_command(cells);
                     w_info.set_command_mode(false);
-                    w_info.input_mode = InputMode::Scroll;
                 }
                 [13, 10] => { /* enter (\r\n) */
                     w_info.process_command(cells);
                     w_info.set_command_mode(false);
-                    w_info.input_mode = InputMode::Scroll;
                 }
                 [27, 91, 50, 126] => { /* insert */ }
                 [27, 91, 51, 126] => { /* delete */ }
