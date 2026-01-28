@@ -10,7 +10,7 @@ mod input;
 mod terminal;
 
 use crate::{
-    cells::{Cells, show_csv},
+    cells::Cells,
     input::process_input,
     terminal::{check_flags, WinInfo},
     csv_io::{load_csv, save_backup, write_to_file},
@@ -88,7 +88,7 @@ fn main() {
             }
         }
 
-        show_csv(&mut cells, &mut w_info);
+        w_info.show_csv(&mut cells);
     }
 
     // restore terminal
