@@ -393,7 +393,7 @@ impl WinInfo {
             if self.w_pointer != self.num_cols.saturating_sub(1) {
                 self.w_pointer = self.num_cols.saturating_sub(1);
                 self.w_offset = self.num_cols.saturating_sub(self.w_page);
-                self.changed = WinChange::Focus;
+                self.changed = WinChange::Columns;
             }
         }
     }
@@ -1130,6 +1130,7 @@ impl WinInfo {
         cells.written = true;
 
         self.set_w_pointer(idx);
+        self.changed = WinChange::Columns;
         self.show_csv(cells);
     }
     
