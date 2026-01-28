@@ -1055,7 +1055,7 @@ impl WinInfo {
 
         let start = cells.columns[self.w_pointer].start;
         self.push_str_to_frame(
-            &format!("\x1b[2;{}H\x1b[K", start)
+            &format!("\x1b[2;{}H\x1b[K\x1b[4m", start)
         );
         self.print_header(cells, 
                           self.w_pointer, 
