@@ -269,7 +269,7 @@ impl WinInfo {
                 self.write_buffer.reset();
                 self.push_str_to_frame(
                     &format!(
-                        "\x1b[{};1H\x1b[2K:\x1b[{};{}H\x1b[?25h",
+                        "\x1b[{};1H\x1b[2K\x1b[0m:\x1b[{};{}H\x1b[?25h",
                         self.height, self.cursor.line, self.cursor.col
                     )
                 );
@@ -280,7 +280,6 @@ impl WinInfo {
                 }
                 self.input_mode = InputMode::Scroll;
                 self.push_str_to_frame("\x1b[?25l");
-                self.draw_focused_content();
             }
         }
         self.flush();
@@ -605,7 +604,7 @@ impl WinInfo {
         cells.set_w_cell(self.w_pointer, self.h_pointer);
 
         let mut id = self.w_offset;
-        for i in 1..=self.height {
+        for i in 1..self.height {
             let beg = format!("\x1b[{i};1H\x1b[2K");
             self.push_str_to_frame(&beg);
 
@@ -825,6 +824,7 @@ impl WinInfo {
         }
         
         let mut out = std::io::stdout();
+        eprintln!("{}", self.frame);
         write!(out, "{}", self.frame);
         out.flush().unwrap();
 
@@ -981,7 +981,7 @@ impl WinInfo {
                                         Some(name) => self.change_col_name(cells, &name),
                                     }
                                 }
-                                "find" => {
+                                "f" | "find" => {
                                     // `cn find` moves the focus to the
                                     // column to find
                                     match tokens.next() {
@@ -1023,8 +1023,15 @@ impl WinInfo {
                                         Some(val) => self.find_value_in_col(cells, &val),
                                     }
                                 }
+                                "n"  | "new"     => {
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingName,
+                                                  subcmd, self.height),
+                                        Some(name) => self.new_column(cells, &name),
+                                    }
+                                }
                                 "rm" | "remove"  => (),
-                                "n"  | "new"     => (),
                                 "uq" | "unique"  => (),
                                 "i"  | "isolate" => (),
                                 _ => (),
@@ -1041,7 +1048,7 @@ impl WinInfo {
     fn show_column_name(&mut self, cells: &mut Cells) {
         let col = &cells.header[self.w_pointer];
         self.push_str_to_frame(
-            &format!("\x1b[{};1H\x1b[2K{}",
+            &format!("\x1b[{};1H\x1b[2K\x1b[0m{}",
                 self.height, col.content)
             );
         self.flush();
@@ -1216,11 +1223,6 @@ impl WinInfo {
                             self.flush();
                             break;
                         }
-                        [3]   => { // ctrl + c
-                            // catch to prevent close
-                            eprintln!("accidentally pressed ctrl + c");
-                            continue;
-                        }
                         _     => (),
                     }
                 }
@@ -1229,6 +1231,42 @@ impl WinInfo {
                 }
             }
         }
+    }
+
+    fn new_column(&mut self, cells: &mut Cells, name: &str) {
+        let name = name.trim_start_matches(['\'', '"']);
+        let name = name.trim_end_matches(['\'', '"']);
+       
+        let mut w_cell = cells.w_cell();
+        w_cell.is_focused = false;
+
+        let mut new_col = Column::new();
+        for i in 0..self.num_rows {
+            new_col.push_cell(Cell::new(""));
+        }
+        cells.insert_column(self.w_pointer, new_col);
+        
+        let col_name = Cell::new(name);
+        cells.insert_col_name(self.w_pointer, col_name);
+        
+        cells.increment_col_ids();
+        // make sure each col_id's width
+        // matches the width of the column below
+        for i in self.w_pointer..cells.col_ids.len() {
+            cells.col_ids[i].width = cells.header[i].width;
+        }
+
+        cells.written = true;
+        // MAKE SURE TO INCREASE SELF.NUM_COLS
+        self.num_cols += 1;
+        self.draw_screen(cells);
+        self.push_str_to_frame(
+            &format!(
+                "\x1b[{};1H\x1b[2K\x1b[0m",
+                self.height
+            )
+        );
+        self.flush();
     }
 }
 
