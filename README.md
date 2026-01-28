@@ -54,5 +54,7 @@ csview also has a command mode, accessed through ':':
             - 'n': next
             - 'b': back
             - ctrl + Q: quit
+    - `col n '{name}'` | `col new '{name}'`
+        - creates a new column with the provided column name at the focused location
 - **ctrl + Q**
     - quits command mode
