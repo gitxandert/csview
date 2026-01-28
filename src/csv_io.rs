@@ -75,29 +75,29 @@ fn parse_by_delim(line: &str, delim: char) -> Vec<Cell> {
     parsed
 }
 
-fn make_col_idx(num_cols: usize) -> Vec<Cell> {
+fn make_col_ids(num_cols: usize) -> Vec<Cell> {
     let mut row = Vec::<Cell>::new();
 
-    let mut idx = "A".to_string();
+    let mut id = "A".to_string();
     for _ in 0..num_cols {
-        let cell = Cell::new(&idx);
+        let cell = Cell::new(&id);
         row.push(cell);
        
         let mut i = 1;
-        let chars: String = idx.chars().rev().collect();
+        let chars: String = id.chars().rev().collect();
         let mut add_a = false;
         let mut inc_next = false;
-        let new_idx: String = chars
+        let new_id: String = chars
             .chars()
             .map(|c|
                 if c == 'Z' {
-                    if i == idx.len() {
+                    if i == id.len() {
                         add_a = true;
                     } else {
                         inc_next = true;
                     }
                     i += 1;
-                     'A'
+                    'A'
                 } else {
                     let mut cc = c;
                     if i == 1 || inc_next {
@@ -110,11 +110,11 @@ fn make_col_idx(num_cols: usize) -> Vec<Cell> {
                 }
             ).collect();
 
-        let new_idx: String = new_idx.chars().rev().collect();
+        let new_id: String = new_id.chars().rev().collect();
         if add_a {
-            idx = format!("{}A", new_idx);
+            id = format!("{}A", new_id);
         } else {
-            idx = new_idx;
+            id = new_id;
         }
     }
 
@@ -142,18 +142,16 @@ fn parse_csv_into_cells(csv: String, delim: char) -> Result<Cells, io::Error> {
 
     let mut header: Vec<Cell> = parse_by_delim(&lines.remove(0), delim);
     let col_len = header.len();
-    let col_idx: Vec<Cell> = make_col_idx(col_len);
+    let col_ids: Vec<Cell> = make_col_ids(col_len);
     
     let row_idx: Column = make_row_idx(lines.len());
-    let mut cells = Cells::new(&header, &col_idx, row_idx, col_len);
+    let mut cells = Cells::new(&header, &col_ids, row_idx, col_len);
 
     for i in 0..lines.len() {
         let row: Vec<Cell> = parse_by_delim(&lines[i], delim);
         for j in 0..col_len {
             if i == 0 {
                 let mut column = Column::new();
-                column.set_col_id(&col_idx[j].content);
-                column.set_header(&header[j].content);
                 cells.push_column(column);
             }
             let cell = row.get(j).unwrap().clone();
