@@ -236,7 +236,15 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 [27] => { //escape 
                     // causes issues; ignore
                 }
-                [17] => { // q (quit)
+                [17] => { // ctrl + q (quit)
+                    w_info.push_str_to_frame(
+                        &format!(
+                            "\x1b[{};1H\x1b[2K\x1b[0m",
+                            w_info.height
+                        )
+                    );
+                    w_info.draw_focused_content();
+                    w_info.flush();
                     w_info.set_command_mode(false);
                 }
                 [27, 91, 90] => { // shift-tab
