@@ -326,11 +326,12 @@ pub fn save_backup(file: String) -> Result<(), io::Error> {
 // TODO: reintroduce escape sequences
 pub fn write_to_file(mut cells: Cells, filename: String, delim: char) {
     let mut sheet = String::new();
-    
+  
     { 
         let header = &cells.header;
         for i in 0..header.len() {
             let cell = header.get(i).unwrap();
+            eprintln!("{}", cell.content);
             if cell.content.contains(delim) {
                 sheet.push_str(&format!("\"{}\"", cell.content));
             } else {
@@ -347,8 +348,8 @@ pub fn write_to_file(mut cells: Cells, filename: String, delim: char) {
     for i in 0..cells.num_rows() {
         let mut row = String::new();
         for j in 0..cells.num_cols() {
-            let column = cells.get_column(i);
-            let cell = column.get_cell(j);
+            let column = cells.get_column(j);
+            let cell = column.get_cell(i);
             if cell.content.contains(delim) {
                 row.push_str(&format!("\"{}\"", cell.content));
             } else {
