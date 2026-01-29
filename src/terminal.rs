@@ -824,7 +824,6 @@ impl WinInfo {
         }
         
         let mut out = std::io::stdout();
-        eprintln!("{}", self.frame);
         write!(out, "{}", self.frame);
         out.flush().unwrap();
 
@@ -1031,7 +1030,14 @@ impl WinInfo {
                                         Some(name) => self.new_column(cells, &name),
                                     }
                                 }
-                                "rm" | "remove"  => (),
+                                "rm" | "remove"  => {
+                                    match tokens.next() {
+                                        Some(_) => cmd_err::print(
+                                                     CmdErr::TooManyArgs,
+                                                     subcmd, self.height),
+                                        None => self.remove_column(cells),
+                                    }
+                                }
                                 "uq" | "unique"  => (),
                                 "i"  | "isolate" => (),
                                 _ => (),
@@ -1244,21 +1250,22 @@ impl WinInfo {
         for i in 0..self.num_rows {
             new_col.push_cell(Cell::new(""));
         }
-        cells.insert_column(self.w_pointer, new_col);
+        cells.insert_column(self.w_pointer + 1, new_col);
         
         let col_name = Cell::new(name);
-        cells.insert_col_name(self.w_pointer, col_name);
+        cells.insert_col_name(self.w_pointer + 1, col_name);
         
         cells.increment_col_ids();
         // make sure each col_id's width
         // matches the width of the column below
-        for i in self.w_pointer..cells.col_ids.len() {
+        for i in self.w_pointer + 1..cells.col_ids.len() {
             cells.col_ids[i].width = cells.header[i].width;
         }
 
         cells.written = true;
         // MAKE SURE TO INCREASE SELF.NUM_COLS
         self.num_cols += 1;
+        self.set_w_pointer(self.w_pointer + 1);
         self.draw_screen(cells);
         self.push_str_to_frame(
             &format!(
@@ -1267,6 +1274,54 @@ impl WinInfo {
             )
         );
         self.flush();
+    }
+
+    fn remove_column(&mut self, cells: &mut Cells) {
+        // confirm remove
+        let col_name = &cells.header[self.w_pointer].content;
+        self.push_str_to_frame(
+            &format!(
+                "\x1b[{};1H\x1b[2K\x1b[0m\x1b[?25lConfirm remove column '{}' with 'y': ",
+                self.height, col_name
+            )
+        );
+        self.flush();
+        let mut buffer = [0u8; 1];
+        loop {
+            match std::io::stdin().read(&mut buffer) {
+                Ok(0) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                Ok(n) => {
+                    match &buffer[..n] {
+                        [b'y'] | [b'Y']  => {
+                            // logic goes here
+                            //
+                            self.push_str_to_frame(
+                                &format!(
+                                    "\x1b[{};1H\x1b[2K\x1b[0mRemoved column '{}'",
+                                    self.height, col_name
+                                )
+                            );
+                            self.flush();
+                            break;
+                        }
+                        _ => {
+                            self.push_str_to_frame(
+                                &format!(
+                                    "\x1b[{};1H\x1b[2K\x1b[0mColumn '{}' was not removed.",
+                                    self.height, col_name
+                                )
+                            );
+                            self.flush();
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    cmd_err::print(CmdErr::StdinErr, "rm", self.height);
+                    break;
+                }
+            }
+        }
     }
 }
 
