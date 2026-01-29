@@ -75,47 +75,44 @@ fn parse_by_delim(line: &str, delim: char) -> Vec<Cell> {
     parsed
 }
 
+const POWERS_OF_26: [u32; 7] = [
+    0, 
+    26, 
+    702, 
+    18278, 
+    475254, 
+    12356630, 
+    321272406
+];
+
+fn get_range_branchless(x: u32) -> usize {
+    (x >= POWERS_OF_26[1]) as usize +
+    (x >= POWERS_OF_26[2]) as usize +
+    (x >= POWERS_OF_26[3]) as usize +
+    (x >= POWERS_OF_26[4]) as usize +
+    (x >= POWERS_OF_26[5]) as usize +
+    (x >= POWERS_OF_26[6]) as usize
+}
+
+pub fn int_to_base_26(mut x: u32) -> String {
+    let range: usize = get_range_branchless(x);
+
+    let mut bytes = vec![0u8; range + 1];
+
+    for i in (0..=range).rev() {
+        bytes[i] = ((x % 26) as u8) + 65;
+        x = (x / 26).wrapping_sub(1);
+    }
+
+    String::from_utf8(bytes).unwrap()
+}
+
 fn make_col_ids(num_cols: usize) -> Vec<Cell> {
     let mut row = Vec::<Cell>::new();
 
-    let mut id = "A".to_string();
-    for _ in 0..num_cols {
-        let cell = Cell::new(&id);
+    for i in 0..num_cols as u32 {
+        let cell = Cell::new(&int_to_base_26(i));
         row.push(cell);
-       
-        let mut i = 1;
-        let chars: String = id.chars().rev().collect();
-        let mut add_a = false;
-        let mut inc_next = false;
-        let new_id: String = chars
-            .chars()
-            .map(|c|
-                if c == 'Z' {
-                    if i == id.len() {
-                        add_a = true;
-                    } else {
-                        inc_next = true;
-                    }
-                    i += 1;
-                    'A'
-                } else {
-                    let mut cc = c;
-                    if i == 1 || inc_next {
-                        let num = c as u32 + 1;
-                        cc = char::from_u32(num).unwrap();
-                        inc_next = false;
-                    }
-                    i += 1;
-                    cc
-                }
-            ).collect();
-
-        let new_id: String = new_id.chars().rev().collect();
-        if add_a {
-            id = format!("{}A", new_id);
-        } else {
-            id = new_id;
-        }
     }
 
     row
