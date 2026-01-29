@@ -220,6 +220,8 @@ impl Column {
 }
 
 pub struct Cells {
+    pub filename: String,
+    pub delim: char,
     pub header: Vec<Cell>,
     pub col_ids: Vec<Cell>,
     pub row_idx: Column,
@@ -230,15 +232,17 @@ pub struct Cells {
 }
 
 impl Cells {
-    pub fn new(header: &Vec<Cell>, col_ids: &Vec<Cell>, row_idx: Column, num_cols: usize) -> Self {
+    pub fn new(filename: String, delim: char, header: Vec<Cell>, col_ids: Vec<Cell>, row_idx: Column, num_cols: usize) -> Self {
         let columns = Vec::<Column>::with_capacity(num_cols);
         let w_cell = (0usize, 0usize);
         let changed = false;
         let written = false;
 
         Self { 
-            header: Self::clone_cell_row(header), 
-            col_ids: Self::clone_cell_row(col_ids), 
+            filename,
+            delim,
+            header, 
+            col_ids, 
             row_idx, 
             columns, 
             w_cell, 
