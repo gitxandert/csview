@@ -54,7 +54,7 @@ csview also has a command mode, accessed through ':':
         - control occurrence search by:
             - 'n': next
             - 'b': back
-            - ctrl + Q: quit
+            - any other key returns to normal scrolling
     - `col n '{name}'` | `col new '{name}'`
         - creates a new column with the provided column name at the focused location
     - `col rm '{name}'` | `col remove '{name}'`
