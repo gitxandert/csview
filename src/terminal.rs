@@ -1263,7 +1263,6 @@ impl WinInfo {
         }
 
         cells.written = true;
-        // MAKE SURE TO INCREASE SELF.NUM_COLS
         self.num_cols += 1;
         self.set_w_pointer(self.w_pointer + 1);
         self.draw_screen(cells);
@@ -1278,7 +1277,7 @@ impl WinInfo {
 
     fn remove_column(&mut self, cells: &mut Cells) {
         // confirm remove
-        let col_name = &cells.header[self.w_pointer].content;
+        let col_name = cells.header[self.w_pointer].content.clone();
         self.push_str_to_frame(
             &format!(
                 "\x1b[{};1H\x1b[2K\x1b[0m\x1b[?25lConfirm remove column '{}' with 'y': ",
@@ -1293,8 +1292,17 @@ impl WinInfo {
                 Ok(n) => {
                     match &buffer[..n] {
                         [b'y'] | [b'Y']  => {
-                            // logic goes here
-                            //
+                            cells.columns.remove(self.w_pointer);
+                            cells.header.remove(self.w_pointer);
+                            cells.col_ids.pop();
+                            for i in self.w_pointer..cells.col_ids.len() {
+                                cells.col_ids[i].width = cells.header[i].width;
+                            }
+
+                            cells.written = true;
+                            self.num_cols -= 1;
+                            self.draw_screen(cells);
+                            
                             self.push_str_to_frame(
                                 &format!(
                                     "\x1b[{};1H\x1b[2K\x1b[0mRemoved column '{}'",
@@ -1302,6 +1310,7 @@ impl WinInfo {
                                 )
                             );
                             self.flush();
+
                             break;
                         }
                         _ => {
