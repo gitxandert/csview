@@ -38,16 +38,17 @@ csview currently admits the following key bindings:
     - adjust column width
 
 csview also has a command mode, accessed through ':':    
-- **cn**
+- **cn**: column name functions
     - by itself: displays the current column's name
-    - `cn find {name}`
+    - `cn f {name}` | `cn find {name}`
         - moves the focus to the column by that name
     - `cn to {name}`
         - changes the focused column's name to a new name
-- **col**
+
+- **col**: column functions
     - `col mv {loc}` | `col move {loc}`
         - moves the focused column to a new location
-        - loc is either the target column name (in quotes) or the target column ID (i.e. A, B, C) (without quotes)
+        - loc is either the target column name in quotes or the target column ID (i.e. A, B, C) without quotes
     - `col f {value}` | `col find {value}`
         - finds all occurrences of the provided value within the focused column
         - control occurrence search by:
@@ -56,5 +57,8 @@ csview also has a command mode, accessed through ':':
             - ctrl + Q: quit
     - `col n '{name}'` | `col new '{name}'`
         - creates a new column with the provided column name at the focused location
+    - `col rm '{name}'` | `col remove '{name}'`
+        - removes the focused column after confirmation
+
 - **ctrl + Q**
     - quits command mode
