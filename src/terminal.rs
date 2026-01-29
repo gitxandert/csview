@@ -1224,12 +1224,11 @@ impl WinInfo {
                             self.draw_col_find(cells, idx, &indices);
                             buf[0] = 0u8;
                         }
-                        [17]   => { // ctrl + q (quit)
+                        _   => {
                             self.draw_focused_content();
                             self.flush();
                             break;
                         }
-                        _     => (),
                     }
                 }
                 _ => {
