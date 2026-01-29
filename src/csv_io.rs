@@ -133,16 +133,16 @@ fn make_row_idx(len: usize) -> Column {
     row_idx
 }
 
-fn parse_csv_into_cells(csv: String, delim: char) -> Result<Cells, io::Error> {
+fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Cells, io::Error> {
     // extract lines, but parse into columns
     let mut lines: Vec<String> = parse_by_newline(&csv);
 
-    let mut header: Vec<Cell> = parse_by_delim(&lines.remove(0), delim);
+    let mut header: Vec<Cell> = parse_by_delim(&lines.remove(0), delim.clone());
     let col_len = header.len();
     let col_ids: Vec<Cell> = make_col_ids(col_len);
     
     let row_idx: Column = make_row_idx(lines.len());
-    let mut cells = Cells::new(&header, &col_ids, row_idx, col_len);
+    let mut cells = Cells::new(filename, delim.clone(), header, col_ids, row_idx, col_len);
 
     for i in 0..lines.len() {
         let row: Vec<Cell> = parse_by_delim(&lines[i], delim);
@@ -164,13 +164,13 @@ pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
     // don't parse carriage returns
     file = file.replace("\r", " ");
 
-    let cells = parse_csv_into_cells(file, delim)?;
+    let cells = parse_csv_into_cells(filename, file, delim)?;
 
     Ok(cells)
 }
 
-pub fn save_backup(file: String) -> Result<(), io::Error> {
-    let content = fs::read_to_string(&file)?;
+pub fn save_backup(file: &String) -> Result<String, io::Error> {
+    let content = fs::read_to_string(file)?;
     // find home dir or current dir; propagate error if neither
     let home_dir = match env::home_dir() {
         Some(path) => path,
@@ -180,7 +180,7 @@ pub fn save_backup(file: String) -> Result<(), io::Error> {
         }
     };
 
-    let file = Path::new(&file);
+    let file = Path::new(file);
     let abs = if file.is_absolute() {
         file.to_path_buf()
     } else {
@@ -304,29 +304,26 @@ pub fn save_backup(file: String) -> Result<(), io::Error> {
     // remove old backups only if write succeeds
     match fs::write(&backup, content) {
         Ok(()) => {
-            println!("Wrote backup to {:?}", backup);
             for path in stage_for_removal {
                 match fs::remove_file(path) {
                     Ok(()) => (),
-                    Err(e) => eprintln!("{e}"),
+                    Err(e) => return Err(e),
                 }
             }
+            Ok(format!("Wrote backup to {:?}", backup))
         }
-        Err(e) => return Err(e),
+        Err(e) => Err(e),
     }
-
-    Ok(())
 }
 
 // TODO: reintroduce escape sequences
-pub fn write_to_file(mut cells: Cells, filename: String, delim: char) {
+pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
     let mut sheet = String::new();
-  
+    let delim = cells.delim; 
     { 
         let header = &cells.header;
         for i in 0..header.len() {
             let cell = header.get(i).unwrap();
-            eprintln!("{}", cell.content);
             if cell.content.contains(delim) {
                 sheet.push_str(&format!("\"{}\"", cell.content));
             } else {
@@ -362,9 +359,11 @@ pub fn write_to_file(mut cells: Cells, filename: String, delim: char) {
         sheet.push_str(&row);
     }
     
-    match fs::write(&filename, sheet) {
-        Ok(()) => println!("Wrote {} to file", filename),
-        Err(e) => eprintln!("{e}"),
+    match fs::write(&cells.filename, sheet) {
+        Ok(()) => {
+            Ok(format!("Wrote {} to file", cells.filename))
+        }
+        Err(e) => Err(e),
     }
 }
 
