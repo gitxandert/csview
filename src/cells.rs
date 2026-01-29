@@ -1,6 +1,9 @@
 use std::io::{self, Error, ErrorKind, Read, Write, stdout};
 
-use crate::terminal::{WinChange, WinInfo};
+use crate::{
+    csv_io::int_to_base_26,
+    terminal::{WinChange, WinInfo}
+};
 
 #[derive(Debug)]
 pub struct EscSeq {
@@ -317,42 +320,9 @@ impl Cells {
         col.get_cell(self.w_cell.1)
     }
 
-    // try to improve this... I hate it.
     pub fn increment_col_ids(&mut self) {
-        let mut i = 1;
-        let mut add_a = false;
-        let mut inc_next = false;
-        let last = &self.col_ids[self.col_ids.len() - 1].content;
-        let mut new_id: String = last
-            .chars()
-            .rev()
-            .map(|c|
-                if c == 'Z' {
-                    if i == last.len() {
-                        add_a = true;
-                    } else {
-                        inc_next = true;
-                    }
-                    i += 1;
-                    'A'
-                } else {
-                    let mut cc = c;
-                    if i == 1 || inc_next {
-                        let num = c as u32 + 1;
-                        cc = char::from_u32(num).unwrap();
-                        inc_next = false;
-                    }
-                    i += 1;
-                    cc
-                }
-            )
-            .rev()
-            .collect();
-
-        if add_a {
-            new_id = format!("{}A", new_id);
-        }
-
-        self.col_ids.push(Cell::new(&new_id));
+        let len = self.col_ids.len() as u32; 
+        
+        self.col_ids.push(Cell::new(&int_to_base_26(len)));
     }
 }
