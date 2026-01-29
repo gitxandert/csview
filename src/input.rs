@@ -1,5 +1,8 @@
 use crate::cells::Cells;
-use crate::terminal::{InputMode, ScrollMode, WinChange, WinInfo};
+use crate::{
+    csv_io::{save_backup, write_to_file},
+    terminal::{InputMode, ScrollMode, WinChange, WinInfo},
+};
 
 pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
     match w_info.input_mode {
@@ -125,6 +128,45 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                             }
                         }
                         _ => (),
+                    }
+                }
+                // ctrl + s (save)
+                [19] => {
+                    match save_backup(&cells.filename) {
+                        Ok(b) => {
+                            match write_to_file(cells) {
+                                Ok(s) => {
+                                    cells.written = false;
+                                    w_info.push_str_to_frame(
+                                        &format!(
+                                            "\x1b[{};1H\x1b[2K\x1b[0m{}", 
+                                            w_info.height, s.chars().take(w_info.width).collect::<String>()
+                                        )
+                                    );
+                                    w_info.flush();
+                                }
+                                Err(e) => {
+                                    let es = e.to_string();
+                                    w_info.push_str_to_frame(
+                                        &format!(
+                                            "\x1b[{};1H\x1b[2K\x1b[0m{}",
+                                            w_info.height, es.chars().take(w_info.width).collect::<String>()
+                                        )
+                                    );
+                                    w_info.flush();
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let es = e.to_string();
+                            w_info.push_str_to_frame(
+                                &format!(
+                                    "\x1b[{};1H\x1b[2K\x1b[0m{}",
+                                    w_info.height, es.chars().take(w_info.width).collect::<String>()
+                                )
+                            );
+                            w_info.flush();
+                        }
                     }
                 }
                 // ctrl + w (write)
