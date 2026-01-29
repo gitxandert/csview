@@ -8,6 +8,8 @@ pub enum CmdErr {
     MissingSubCmd,
     NoId,
     NoName,
+    StdinErr,
+    TooManyArgs,
     UnknownSpec,
     UnmatchedQuote
 }
@@ -51,6 +53,17 @@ pub fn print(err: CmdErr, token: &str, line: usize) {
                     "\x1b[{};1H\x1b[2KERR: no column called '{}'",
                     line, token
                 ),
+
+            CmdErr::StdinErr => format!(
+                    "x1b[{};1H\x1b[2KERR: stdin error while processing '{}'",
+                    line, token
+                ),
+
+            CmdErr::TooManyArgs => format!(
+                    "x1b[{};1H\x1b[2KERR: too many argumentss for '{}'",
+                    line, token
+                ),
+
 
             CmdErr::UnknownSpec => format!(
                     "\x1b[{};1H\x1b[2KERR: unknown specifier '{}'",
