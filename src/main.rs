@@ -1,5 +1,6 @@
 use std::{
     env,
+    ptr,
     io::{self, Read, Write, stdin},
 };
 
@@ -13,7 +14,7 @@ use crate::{
     cells::Cells,
     input::process_input,
     terminal::{check_flags, WinInfo},
-    csv_io::{load_csv, save_backup, write_to_file},
+    csv_io::{load_csv, poll_stdin, save_backup, write_to_file},
 };
 
 fn main() {
@@ -67,28 +68,34 @@ fn main() {
     terminal::install_sig_handlers();
     terminal::raw_mode(true);
 
-    let mut buffer = [0u8; 16];
+    w_info.show_csv(&mut cells);
 
     // main loop
+    let mut buffer = [0u8; 16];
     loop {
         if check_flags(&mut w_info) {
             break;
         }
-        match std::io::stdin().read(&mut buffer) {
+
+        match poll_stdin(&mut buffer) {
             Ok(n) => {
                 let input = &buffer[..n];
                 if !input.is_empty() {
                     process_input(input, &mut w_info, &mut cells);
-                } else {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    w_info.show_csv(&mut cells);
                 }
             }
-            _ => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+            Ok(0) => continue,
+            Err(e) => {
+                w_info.push_str_to_frame(
+                    &format!(
+                        "\x1b[{};1H\x1b[2K\x1b[0mERR: {}",
+                        w_info.height, e
+                    )
+                );
+                w_info.flush();
             }
         }
-
-        w_info.show_csv(&mut cells);
     }
 
     // restore terminal
