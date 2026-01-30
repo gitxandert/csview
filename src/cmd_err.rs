@@ -2,6 +2,7 @@ use std::io::{self, Read, Write};
 
 pub enum CmdErr {
     InvalidCommand,
+    MissingList,
     MissingLocation,
     MissingName,
     MissingValue,
@@ -21,6 +22,11 @@ pub fn print(err: CmdErr, token: &str, line: usize) {
         match err {
             CmdErr::InvalidCommand => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid command '{}'",
+                    line, token
+                ),
+
+            CmdErr::MissingList => format!(
+                    "\x1b[{};1H\x1b[2KERR: missing list for '{}'",
                     line, token
                 ),
 
