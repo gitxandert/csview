@@ -10,6 +10,7 @@ use libc::{
 };
 
 use crate::{
+    csv_io::poll_stdin,
     cmd_err::{self, CmdErr},
     cells::{Cell, Cells, Column},
 };
@@ -602,11 +603,14 @@ impl WinInfo {
     pub fn draw_screen(&mut self, cells: &mut Cells) {
         // reset focused cell
         cells.set_w_cell(self.w_pointer, self.h_pointer);
-
+        
+        // wipe screen once
+        self.push_str_to_frame("\x1b[1;1H\x1b[2J");
+        
         let mut id = self.w_offset;
         for i in 1..self.height {
-            let beg = format!("\x1b[{i};1H\x1b[2K");
-            self.push_str_to_frame(&beg);
+            // move cursor to beginning of line
+            self.push_str_to_frame(&format!("\x1b[{i};1H"));
 
             if i == 1 {
                 self.push_str_to_frame("\x1b[4m    |");
@@ -1207,8 +1211,8 @@ impl WinInfo {
         let mut stdin = std::io::stdin();
         let mut buf = [0u8; 1];
         loop {
-            match stdin.read_exact(&mut buf) {
-                Ok(_) => {
+            match poll_stdin(&mut buf) {
+                Ok(n) => {
                     match buf {
                         [b'n'] => {
                             idx = (idx + 1) % indices.len();
@@ -1231,8 +1235,15 @@ impl WinInfo {
                         }
                     }
                 }
-                _ => {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+                Ok(0) => continue,
+                Err(e) => {
+                    self.push_str_to_frame(
+                        &format!(
+                            "\x1b[{};1H\x1b[2K\x1b[0mERR: {}",
+                            self.height, e
+                        )
+                    );
+                    self.flush();
                 }
             }
         }
