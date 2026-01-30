@@ -59,6 +59,7 @@ csview also has a command mode, accessed through ':':
         - creates a new column with the provided column name at the focused location
     - `col rm '{name}'` | `col remove '{name}'`
         - removes the focused column after confirmation
-
+    - `col g '{list}'` | `col group '{list}'`  
+        - groups together a comma-separated list of columns (specified by quoted column names) 
 - **ctrl + Q**
     - quits command mode
