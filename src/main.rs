@@ -13,8 +13,12 @@ mod terminal;
 use crate::{
     cells::Cells,
     input::process_input,
-    terminal::{check_flags, WinInfo},
-    csv_io::{load_csv, poll_stdin, save_backup, write_to_file},
+    terminal::{check_flags, SigFlag, WinInfo},
+    csv_io::{
+        load_csv, 
+        poll_stdin, PollEvent, 
+        save_backup, write_to_file
+    },
 };
 
 fn main() {
@@ -73,19 +77,22 @@ fn main() {
     // main loop
     let mut buffer = [0u8; 16];
     loop {
-        if check_flags(&mut w_info) {
-            break;
-        }
-
         match poll_stdin(&mut buffer) {
-            Ok(n) => {
+            Ok(PollEvent::Data(0)) => continue,
+            Ok(PollEvent::Data(n)) => {
                 let input = &buffer[..n];
                 if !input.is_empty() {
                     process_input(input, &mut w_info, &mut cells);
                     w_info.show_csv(&mut cells);
                 }
             }
-            Ok(0) => continue,
+            Ok(PollEvent::Sig) => {
+                match check_flags() {
+                    SigFlag::Winch => w_info.set_w_h(&mut cells),
+                    SigFlag::Int | SigFlag::Quit => break,
+                    SigFlag::Non => continue,
+                }
+            }
             Err(e) => {
                 w_info.push_str_to_frame(
                     &format!(
