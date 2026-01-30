@@ -369,33 +369,39 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
     }
 }
 
+pub enum PollEvent {
+    Data(usize),
+    Sig,
+}
+
 // can use randomly for reading from stdin
-pub fn poll_stdin(buf: &mut [u8]) -> Result<usize, io::Error> {
+pub fn poll_stdin(buf: &mut [u8]) -> Result<PollEvent, io::Error> {
     let mut fds = [pollfd {
         fd: STDIN_FILENO,
         events: POLLIN,
         revents: 0,
     }];
 
-    unsafe {
-        let ret = poll(
-                    fds.as_mut_ptr(), 
-                    fds.len() as libc::nfds_t, 
-                    -1
-                );
+    let ret = unsafe {
+        poll(
+            fds.as_mut_ptr(), 
+            fds.len() as libc::nfds_t, 
+            -1
+        )
+    };
 
-        if ret < 0 {
-            let err = io::Error::last_os_error();
-            if err.kind() == io::ErrorKind::Interrupted { 
-                return Ok(0); 
-            }
-            return Err(err);
+    if ret < 0 {
+        let err = io::Error::last_os_error();
+        if err.kind() == io::ErrorKind::Interrupted { 
+            return Ok(PollEvent::Sig); 
         }
-
-        if fds[0].revents & POLLIN != 0 {
-            return stdin().read(buf);
-        }
-
-        return Ok(0);
+        return Err(err);
     }
+
+    if fds[0].revents & POLLIN != 0 {
+        let n = stdin().read(buf)?;
+        return Ok(PollEvent::Data(n));
+    }
+
+    return Ok(PollEvent::Data(0));
 }
