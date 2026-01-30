@@ -10,9 +10,9 @@ use libc::{
 };
 
 use crate::{
-    csv_io::poll_stdin,
     cmd_err::{self, CmdErr},
     cells::{Cell, Cells, Column},
+    csv_io::{poll_stdin, PollEvent},
 };
 
 #[derive(Debug, PartialEq)]
@@ -176,8 +176,6 @@ impl WriteBuf {
 pub struct WinInfo {
     pub width: usize,
     pub height: usize,
-    pub old_width: usize,
-    pub old_height: usize,
     pub w_offset: usize,
     pub h_offset: usize,
     pub w_pointer: usize,
@@ -213,8 +211,6 @@ impl WinInfo {
         Self {
             width: width,
             height: height,
-            old_width: 0usize,
-            old_height: 0usize,
             w_offset: 0usize,
             h_offset: 0usize,
             num_cols: num_cols,
@@ -357,16 +353,16 @@ impl WinInfo {
         (self.cursor.line, self.cursor.col + self.cursor.offset)
     }
 
-    pub fn set_w_h(&mut self) {
+    pub fn set_w_h(&mut self, cells: &mut Cells) {
         unsafe {
             let mut ws: winsize = mem::zeroed();
             if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
-                self.old_width = self.width;
-                self.old_height = self.height;
                 self.width = ws.ws_col as usize;
                 self.height = ws.ws_row as usize;
             }
-            self.changed = WinChange::Screen;
+            self.draw_screen(cells);
+            self.draw_focused_content();
+            self.flush();
         }
     }
     
@@ -649,7 +645,7 @@ impl WinInfo {
     }
 
     pub fn draw_from_column(&mut self, cells: &mut Cells) {
-        let (col_id, _) = cells.w_cell;
+        let col_id = self.w_pointer;
         let start = cells.columns[col_id].start;
 
         let mut c = col_id;
@@ -918,15 +914,15 @@ impl WinInfo {
         }
     }
 
-    fn tokenize(input: &str) -> Vec<&str> {
+    fn tokenize(input: &str, delim: char) -> Vec<&str> {
         let mut tokens = Vec::<&str>::new();
         let mut start = 0usize;
         let mut end = 0usize;
         let mut quote: Option<char> = None;
-        // "safe warm babies"
+        
         for c in input.chars() {
             match c {
-                ' ' => {
+                ch if ch == delim => {
                     // only push if not quoting
                     match quote {
                         None => {
@@ -964,7 +960,7 @@ impl WinInfo {
 
     pub fn process_command(&mut self, cells: &mut Cells) {
         let input = self.write_buffer.as_string();
-        let mut tokens = Self::tokenize(&input).into_iter();
+        let mut tokens = Self::tokenize(&input, ' ').into_iter();
         while let Some(tok) = tokens.next() {
             match tok {
                 // column name
@@ -1042,6 +1038,14 @@ impl WinInfo {
                                         None => self.remove_column(cells),
                                     }
                                 }
+                                "g"  | "group"   => {
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingList,
+                                                  subcmd, self.height),
+                                        Some(list) => self.group_columns(cells, &list),
+                                    }
+                                }
                                 "uq" | "unique"  => (),
                                 "i"  | "isolate" => (),
                                 _ => (),
@@ -1064,9 +1068,13 @@ impl WinInfo {
         self.flush();
     }
 
+    fn trim_quotes(q: &str) -> &str {
+        let q = q.trim_start_matches(['\'', '"']);
+        q.trim_end_matches(['\'', '"'])
+    }
+
     fn change_col_name(&mut self, cells: &mut Cells, new_name: &str) {
-        let new_name = new_name.trim_start_matches(['\'', '"']);
-        let new_name = new_name.trim_end_matches(['\'', '"']);
+        let new_name = Self::trim_quotes(new_name);
         cells.header[self.w_pointer].content = new_name.to_string();
         cells.written = true;
 
@@ -1083,8 +1091,7 @@ impl WinInfo {
     }
 
     fn find_column(&mut self, cells: &mut Cells, name: &str) {
-        let name = name.trim_start_matches(['\'', '"']);
-        let name = name.trim_end_matches(['\'', '"']);
+        let name = Self::trim_quotes(name);
         let header = &cells.header;
         for i in 0..header.len() {
             if &header[i].content == name {
@@ -1164,8 +1171,7 @@ impl WinInfo {
     }
 
     fn find_value_in_col(&mut self, cells: &mut Cells, val: &str) {
-        let val = val.trim_start_matches(['\'', '"']);
-        let val = val.trim_end_matches(['\'', '"']);
+        let val = Self::trim_quotes(val);
         let rows = &cells.columns[self.w_pointer].cells;
         let indices: Vec<usize> = rows.iter()
             .enumerate()
@@ -1212,7 +1218,15 @@ impl WinInfo {
         let mut buf = [0u8; 1];
         loop {
             match poll_stdin(&mut buf) {
-                Ok(n) => {
+                Ok(PollEvent::Sig) => {
+                    match check_flags() {
+                        SigFlag::Winch => self.set_w_h(cells),
+                        SigFlag::Int | SigFlag::Quit => break,
+                        SigFlag::Non => continue,
+                    }
+                }
+                Ok(PollEvent::Data(0)) => continue,
+                Ok(PollEvent::Data(n)) => {
                     match buf {
                         [b'n'] => {
                             idx = (idx + 1) % indices.len();
@@ -1235,7 +1249,6 @@ impl WinInfo {
                         }
                     }
                 }
-                Ok(0) => continue,
                 Err(e) => {
                     self.push_str_to_frame(
                         &format!(
@@ -1250,8 +1263,7 @@ impl WinInfo {
     }
 
     fn new_column(&mut self, cells: &mut Cells, name: &str) {
-        let name = name.trim_start_matches(['\'', '"']);
-        let name = name.trim_end_matches(['\'', '"']);
+        let name = Self::trim_quotes(name);;
        
         let mut w_cell = cells.w_cell();
         w_cell.is_focused = false;
@@ -1342,6 +1354,67 @@ impl WinInfo {
             }
         }
     }
+
+    fn group_columns(&mut self, cells: &mut Cells, list: &str) {
+        let mut columns = Self::tokenize(list, ',').into_iter();
+        // columns.next() for sure has a value here
+        let p_col_name = columns.next().unwrap();
+        let p_col_name = Self::trim_quotes(p_col_name);
+
+        let p_col_idx = match cells.get_col_idx(p_col_name) {
+            Some(idx) => idx,
+            None      => {
+                cmd_err::print(
+                    CmdErr::NoName, p_col_name, self.height
+                );
+                return;
+            }
+        };
+
+        // collect ids before removing the columns,
+        // in case of an error
+        let mut ids = Vec::<usize>::with_capacity(columns.len());
+
+        while let Some(name) = columns.next() {
+            let name = Self::trim_quotes(name);
+            match cells.get_col_idx(name) {
+                Some(idx) => ids.push(idx),
+                None => {
+                    cmd_err::print(
+                        CmdErr::NoName, name, self.height
+                    );
+                    return;
+                }
+            }
+        }
+
+        cells.set_w_cell(p_col_idx, cells.w_cell.1);
+
+        let mut i = 1usize;
+        for idx in ids {
+            let mut col = cells.columns.remove(idx);
+            let col_name = cells.header.remove(idx);
+
+            cells.col_ids[p_col_idx + i].width = col.width;
+            cells.columns.insert(p_col_idx + i, col);
+            cells.header.insert(p_col_idx + i, col_name);
+            cells.col_ids[idx].width = cells.columns[i].width;
+            i += 1;
+        }
+
+        if self.w_pointer != p_col_idx {
+            self.set_w_pointer(p_col_idx);
+            self.draw_screen(cells);
+            self.flush();
+            self.changed = WinChange::Non;
+        } else {
+            self.draw_from_column(cells);
+            self.flush();
+            self.changed = WinChange::Non;
+        }
+
+        cells.written = true;
+    }
 }
 
 // Terminal takeover + signal handling + globals for WIDTH and HEIGHT
@@ -1413,13 +1486,27 @@ extern "C" fn sig_quit(_sig: c_int) {
     }
 }
 
-pub fn check_flags(w_info: &mut WinInfo) -> bool {
+pub enum SigFlag {
+    Winch,
+    Int,
+    Quit,
+    Non,
+}
+
+pub fn check_flags() -> SigFlag {
     if GOT_WINCH.swap(false, Ordering::SeqCst) {
-        w_info.set_w_h();
+        return SigFlag::Winch;
     }
 
-    return GOT_INT.swap(false, Ordering::SeqCst) || 
-           GOT_QUIT.swap(false, Ordering::SeqCst);
+    if GOT_INT.swap(false, Ordering::SeqCst) {
+        return SigFlag::Int;
+    }
+
+    if GOT_QUIT.swap(false, Ordering::SeqCst) {
+        return SigFlag::Quit;
+    }
+
+    SigFlag::Non
 }
 
 pub fn install_sig_handlers() {
