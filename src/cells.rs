@@ -281,14 +281,12 @@ impl Cells {
 
     pub fn set_w_cell(&mut self, col: usize, row: usize) {
         // first unfocus the previous w_cell
-        if col < self.num_cols() && row < self.num_rows() {
-            let mut w_cell = self.w_cell();
-            w_cell.set_focused(false);
+        let mut w_cell = self.w_cell();
+        w_cell.set_focused(false);
         
-            self.w_cell = (col, row);
-            w_cell = self.w_cell();
-            w_cell.set_focused(true);
-        }
+        self.w_cell = (col, row);
+        w_cell = self.w_cell();
+        w_cell.set_focused(true);
     }
 
     pub fn push_column(&mut self, col: Column) {
@@ -328,5 +326,14 @@ impl Cells {
         let len = self.col_ids.len() as u32; 
         
         self.col_ids.push(Cell::new(&int_to_base_26(len)));
+    }
+
+    pub fn get_col_idx(&self, name: &str) -> Option<usize> {
+        for i in 0..self.header.len() {
+            if &self.header[i].content == name {
+                return Some(i);
+            }
+        }
+        None
     }
 }
