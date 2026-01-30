@@ -1,10 +1,12 @@
 use std::{
     env,
+    ptr,
     fs::{self, File},
     time::{SystemTime, UNIX_EPOCH},
-    io::{self, Error, ErrorKind, Read, Write, stdout},
+    io::{self, Error, ErrorKind, Read, Write, stdin, stdout},
     path::{Component, Path, PathBuf}
 };
+use libc::{poll, pollfd, POLLIN, STDIN_FILENO};
 
 use crate::cells::{Cell, Cells, Column, EscSeq};
 
@@ -367,3 +369,33 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
     }
 }
 
+// can use randomly for reading from stdin
+pub fn poll_stdin(buf: &mut [u8]) -> Result<usize, io::Error> {
+    let mut fds = [pollfd {
+        fd: STDIN_FILENO,
+        events: POLLIN,
+        revents: 0,
+    }];
+
+    unsafe {
+        let ret = poll(
+                    fds.as_mut_ptr(), 
+                    fds.len() as libc::nfds_t, 
+                    -1
+                );
+
+        if ret < 0 {
+            let err = io::Error::last_os_error();
+            if err.kind() == io::ErrorKind::Interrupted { 
+                return Ok(0); 
+            }
+            return Err(err);
+        }
+
+        if fds[0].revents & POLLIN != 0 {
+            return stdin().read(buf);
+        }
+
+        return Ok(0);
+    }
+}
