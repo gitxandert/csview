@@ -37,14 +37,13 @@ csview currently admits the following key bindings:
 - **ctrl + shift + arrow key (left or right)**  
     - adjust column width
 
-csview also has a command mode, accessed through ':':    
+csview also has a command mode, accessed through ':':
 - **cn**: column name functions
     - by itself: displays the current column's name
     - `cn f {name}` | `cn find {name}`
         - moves the focus to the column by that name
     - `cn to {name}`
         - changes the focused column's name to a new name
-
 - **col**: column functions
     - `col mv {loc}` | `col move {loc}`
         - moves the focused column to a new location
@@ -64,6 +63,5 @@ csview also has a command mode, accessed through ':':
     - `col uq` | `col unique`
         - reformats the focused column to show all unique values
         - scroll up and down, return to normal functionality with `ctrl + q`, `ctrl + c`, or `ctrl + forward-slash`
-
 - **ctrl + Q**
     - quits command mode
