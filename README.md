@@ -37,7 +37,7 @@ csview currently admits the following key bindings:
 - **ctrl + shift + arrow key (left or right)**  
     - adjust column width
 
-csview also has a command mode, accessed through ':':
+csview also has a command mode, accessed through ':' :
 - **cn**: column name functions
     - by itself: displays the current column's name
     - `cn f {name}` | `cn find {name}`
