@@ -194,6 +194,10 @@ impl Column {
         self.cells.push(cell);
     }
 
+    pub fn insert_cell(&mut self, idx: usize, cell: Cell) {
+        self.cells.insert(idx, cell);
+    }
+
     pub fn set_start(&mut self, st: usize) {
         self.start = st;
     }
