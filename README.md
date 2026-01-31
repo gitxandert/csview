@@ -61,5 +61,9 @@ csview also has a command mode, accessed through ':':
         - removes the focused column after confirmation
     - `col g '{list}'` | `col group '{list}'`  
         - groups together a comma-separated list of columns (specified by quoted column names) 
+    - `col uq` | `col unique`
+        - reformats the focused column to show all unique values
+        - scroll up and down, return to normal functionality with `ctrl + q`, `ctrl + c`, or `ctrl + forward-slash`
+
 - **ctrl + Q**
     - quits command mode
