@@ -1425,29 +1425,36 @@ impl WinInfo {
             }
         }
             
-        cells.set_w_cell(p_col_idx, cells.w_cell.1);
-
         let mut i = 1usize;
+        let mut dec = 0usize;
         for idx in ids {
-            let col = cells.columns.remove(idx);
+            let idx = {
+                if idx < p_col_idx {
+                    dec += 1;
+                    idx - (dec - 1)
+                } else {
+                    idx
+                }
+            };
+            let mut col = cells.columns.remove(idx);
+            col.get_cell(self.h_pointer).set_focused(false);
             let col_name = cells.header.remove(idx);
             let col_width = col.width;
-            cells.columns.insert(p_col_idx + i, col);
-            cells.header.insert(p_col_idx + i, col_name);
-            cells.col_ids[p_col_idx + i].width = col_width;
+            cells.columns.insert(p_col_idx - dec + i, col);
+            cells.header.insert(p_col_idx - dec + i, col_name);
+            cells.col_ids[p_col_idx - dec + i].width = col_width;
             cells.col_ids[idx].width = cells.columns[idx].width;
             i += 1;
         }
 
-        cells.set_w_cell(p_col_idx, cells.w_cell.1);
-        
         if self.w_pointer != p_col_idx {
-            self.set_w_pointer(p_col_idx);
+            self.set_w_pointer(p_col_idx - dec);
             self.draw_screen(cells);
         } else {
             self.draw_from_column(cells);
         }
 
+        self.draw_focused_content();
         self.flush();
         cells.written = true;
     }
