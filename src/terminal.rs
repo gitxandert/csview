@@ -1709,7 +1709,9 @@ impl WinInfo {
         cells.written = true;
         self.num_rows += 1;
         self.set_h_pointer(self.h_pointer + 1);
-        self.changed = WinChange::Rows;
+        if self.changed == WinChange::Focus {
+            self.changed = WinChange::Rows;
+        }
         self.show_csv(cells);
     }
 
