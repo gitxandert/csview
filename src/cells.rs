@@ -226,9 +226,9 @@ impl Column {
         for i in 0..idx {
             self.indices[i] -= (self.indices[i] >= real_idx) as usize;
         }
-        for i in idx..self.indices.len() - 1 {
-            self.indices[i] = self.indices[i + 1];
-            self.indices[i] -= (self.indices[i] >= real_idx) as usize;
+        for i in ((idx + 1)..self.indices.len()).rev() {
+            self.indices[i - 1] = self.indices[i];
+            self.indices[i - 1] -= (self.indices[i - 1] >= real_idx) as usize;
         }
         self.indices.pop();
     }
