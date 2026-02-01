@@ -1078,6 +1078,15 @@ impl WinInfo {
                                         }
                                     }
                                 }
+                                "fn" | "fillna" => {
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingValue,
+                                                  subcmd, self.height
+                                                ),
+                                        Some(val) => self.col_fillna(cells, &val),
+                                    }
+                                }
                                 _ => (),
                             }
                         }
@@ -1592,6 +1601,20 @@ impl WinInfo {
         }
 
         cells.set_w_cell(self.w_pointer, self.h_pointer);
+        cells.written = true;
+        self.draw_from_column(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    fn col_fillna(&mut self, cells: &mut Cells, val: &str) {
+        let val = Self::trim_quotes(val);
+        let mut col = &mut cells.columns[self.w_pointer];
+        for cell in &mut col.cells {
+            if &cell.content == "" {
+                cell.content.push_str(val);
+            }
+        }
         cells.written = true;
         self.draw_from_column(cells);
         self.draw_focused_content();
