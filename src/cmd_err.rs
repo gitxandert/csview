@@ -1,6 +1,7 @@
 use std::io::{self, Read, Write};
 
 pub enum CmdErr {
+    InvalidArg,
     InvalidCommand,
     InvalidSubCmd,
     MissingList,
@@ -21,6 +22,11 @@ pub fn print(err: CmdErr, token: &str, line: usize) {
     let mut outstring = String::new();
     let outstring = {
         match err {
+            CmdErr::InvalidArg => format!(
+                    "\x1b[{};1H\x1b[2KERR: invalid argument '{}'",
+                    line, token
+                ),
+
             CmdErr::InvalidCommand => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid command '{}'",
                     line, token
