@@ -78,5 +78,10 @@ csview also has a command mode, accessed through ':' :
         - fill empty cells with the provided value (use quotes for sentences)
     - `col r {target} {new}` | `col replace {target} {new}`
         - replaces the target value with the new one
+- **row**: row functions
+    - `row i` | `row insert`
+        - inserts a row below the focused row
+    - `row d` | `row delete`
+        - deletes the focused row after confirmation
 - **ctrl + Q**
     - quits command mode
