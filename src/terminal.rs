@@ -639,7 +639,7 @@ impl WinInfo {
                 self.push_str_to_frame(&row_num);
 
                 let start = 6usize;
-                let mut id = self.w_offset;
+                id = self.w_offset;
                 self.print_row(cells, &mut id, row_id, start);
             }
         }
@@ -683,14 +683,20 @@ impl WinInfo {
 
     pub fn draw_rows(&mut self, cells: &mut Cells) {
         let (_, st_row) = cells.w_cell;
+        eprintln!("st_row = {}", st_row);
         cells.set_w_cell(self.w_pointer, self.h_pointer);
 
+        self.push_str_to_frame(
+            &format!("\x1b[{};1H\x1b[4m", 3 + st_row - self.h_offset)
+        );
         for row_id in st_row..self.height {
             let row_idx = &cells.row_idx.get_cell(row_id).content;
-            let row_num = format!(
-                "\x1b[30;47m{row_idx} \x1b[39;49m"
+            self.push_str_to_frame(
+                &format!(
+                    "\x1b[{};1H\x1b[2K\x1b[30;47m{} \x1b[39;49m",
+                    3 + row_id - self.h_offset, row_idx
+                )
             );
-            self.push_str_to_frame(&row_num);
 
             let start = 6usize;
             let mut id = self.w_offset;
@@ -887,7 +893,7 @@ impl WinInfo {
                 self.flush();
             }
             WinChange::Rows => {
-                // redraw rows from (previous) w_cell.1
+                // draw rows from (previous) w_cell.1
                 self.draw_rows(cells);
                 self.draw_focused_content();
                 self.flush();
