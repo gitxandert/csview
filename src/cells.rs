@@ -198,6 +198,10 @@ impl Column {
         self.cells.insert(idx, cell);
     }
 
+    pub fn remove_cell(&mut self, idx: usize) {
+        self.cells.remove(idx);
+    }
+
     pub fn set_start(&mut self, st: usize) {
         self.start = st;
     }
