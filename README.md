@@ -60,12 +60,12 @@ csview also has a command mode, accessed through ':' :
         - removes the focused column after confirmation
     - `col g '{list}'` | `col group '{list}'`  
         - groups together a comma-separated list of columns (specified by quoted column names) 
-    - `col uq` | `col unique`
+    - `col u` | `col unique`
         - reformats the focused column to show all unique values
         - scroll up and down, return to normal functionality with `ctrl + q`, `ctrl + c`, or `ctrl + forward-slash`
     - `col s {arg}` | `col sort {arg}`
         - sort the focused column alphanumerically-ascending
-        - an additional argument control the sort:
+        - an additional argument controls the sort:
             - `a`: default sort
             - `r` | `ar`: alphanumerically-descending
             - `n`: numerically-ascending
