@@ -63,5 +63,15 @@ csview also has a command mode, accessed through ':' :
     - `col uq` | `col unique`
         - reformats the focused column to show all unique values
         - scroll up and down, return to normal functionality with `ctrl + q`, `ctrl + c`, or `ctrl + forward-slash`
+    - `col s {arg}` | `col sort {arg}`
+        - sort the focused column alphanumerically-ascending
+        - an additional argument control the sort:
+            - `a`: default sort
+            - `r` | `ar`: alphanumerically-descending
+            - `n`: numerically-ascending
+            - `nr`: numerically-descending
+        - when sorting numerically, non-numerical values are pushed to the bottom of the column
+    - `col fn {value}` | `col fillna {value}`
+        - fill empty cells with the provided value (use quotes for sentences)
 - **ctrl + Q**
     - quits command mode
