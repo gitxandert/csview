@@ -120,21 +120,6 @@ fn make_col_ids(num_cols: usize) -> Vec<Cell> {
     row
 }
 
-fn make_row_idx(len: usize) -> Column {
-    let mut row_idx = Column::new();
-    // row_idx always start at the first column
-    // and are four characters long
-    row_idx.set_start(0usize);
-    row_idx.set_width(4usize);
-
-    for i in 1..=len {
-        let index: String = format!("\x1b[30;47m{:04X}\x1b[39;49m", i);
-        row_idx.push_cell(Cell::new(&index));
-    }
-
-    row_idx
-}
-
 fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Cells, io::Error> {
     // extract lines, but parse into columns
     let mut lines: Vec<String> = parse_by_newline(&csv);
@@ -143,8 +128,7 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
     let col_len = header.len();
     let col_ids: Vec<Cell> = make_col_ids(col_len);
     
-    let row_idx: Column = make_row_idx(lines.len());
-    let mut cells = Cells::new(filename, delim.clone(), header, col_ids, row_idx, col_len);
+    let mut cells = Cells::new(filename, delim.clone(), header, col_ids, col_len);
 
     for i in 0..lines.len() {
         let row: Vec<Cell> = parse_by_delim(&lines[i], delim);
@@ -322,7 +306,7 @@ pub fn save_backup(file: &String) -> Result<String, io::Error> {
 pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
     let mut sheet = String::new();
     let delim = cells.delim; 
-    { 
+    {
         let header = &cells.header;
         for i in 0..header.len() {
             let cell = header.get(i).unwrap();
