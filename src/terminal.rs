@@ -682,13 +682,14 @@ impl WinInfo {
     }
 
     pub fn draw_rows(&mut self, cells: &mut Cells) {
-        let (_, st_row) = cells.w_cell;
-        eprintln!("st_row = {}", st_row);
+        let (_, prev_row) = cells.w_cell;
         cells.set_w_cell(self.w_pointer, self.h_pointer);
 
+        let st_row = prev_row.min(self.h_pointer);
         self.push_str_to_frame(
             &format!("\x1b[{};1H\x1b[4m", 3 + st_row - self.h_offset)
         );
+
         for row_id in st_row..self.height {
             let row_idx = &cells.row_idx.get_cell(row_id).content;
             self.push_str_to_frame(
@@ -1136,6 +1137,7 @@ impl WinInfo {
                             match subcmd {
 
                                 "i" | "insert" => self.insert_row(cells),
+                                "d" | "delete" => self.delete_row(cells),
                                 _ =>  cmd_err::print(
                                         CmdErr::InvalidSubCmd,
                                         tok, self.height
@@ -1440,7 +1442,7 @@ impl WinInfo {
                     }
                 }
                 _ => {
-                    cmd_err::print(CmdErr::StdinErr, "rm", self.height);
+                    cmd_err::print(CmdErr::StdinErr, "col remove", self.height);
                     break;
                 }
             }
@@ -1705,9 +1707,64 @@ impl WinInfo {
            col.insert_cell(self.h_pointer + 1, Cell::new(""));
         }
         cells.written = true;
+        self.num_rows += 1;
         self.set_h_pointer(self.h_pointer + 1);
         self.changed = WinChange::Rows;
         self.show_csv(cells);
+    }
+
+    fn delete_row(&mut self, cells: &mut Cells) {
+        let row_num = cells.row_idx.cells[self.h_pointer].content.clone();
+        self.push_str_to_frame(
+            &format!(
+                "\x1b[{};1H\x1b[2K\x1b[0m\x1b[?25lConfirm remove row {} with 'y': ",
+                self.height, row_num
+            )
+        );
+        self.flush();
+        let mut buffer = [0u8; 1];
+        loop {
+            match std::io::stdin().read(&mut buffer) {
+                Ok(0) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                Ok(n) => {
+                    match &buffer[..n] {
+                        [b'y'] | [b'Y']  => {
+                            for col in &mut cells.columns {
+                                col.remove_cell(self.h_pointer);
+                            }
+
+                            cells.written = true;
+                            self.num_rows -= 1;
+                            self.draw_rows(cells);
+                            
+                            self.push_str_to_frame(
+                                &format!(
+                                    "\x1b[{};1H\x1b[2K\x1b[0mRemoved row {}",
+                                    self.height, row_num
+                                )
+                            );
+                            self.flush();
+
+                            break;
+                        }
+                        _ => {
+                            self.push_str_to_frame(
+                                &format!(
+                                    "\x1b[{};1H\x1b[2K\x1b[0mRow {} was not deleted.",
+                                    self.height, row_num
+                                )
+                            );
+                            self.flush();
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    cmd_err::print(CmdErr::StdinErr, "row delete", self.height);
+                    break;
+                }
+            }
+        }
     }
 }
 
