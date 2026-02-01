@@ -215,7 +215,6 @@ impl Column {
 
     pub fn col_width(&self) -> usize {
         return self.width + 3 // + 3 for formatting
-                              // (not for use with row_idx)
     }
 
     pub fn get_cell(&mut self, idx: usize) -> &mut Cell {
@@ -232,7 +231,6 @@ pub struct Cells {
     pub delim: char,
     pub header: Vec<Cell>,
     pub col_ids: Vec<Cell>,
-    pub row_idx: Column,
     pub columns: Vec<Column>,
     pub w_cell: (usize, usize),
     pub changed: bool,
@@ -240,7 +238,7 @@ pub struct Cells {
 }
 
 impl Cells {
-    pub fn new(filename: String, delim: char, header: Vec<Cell>, col_ids: Vec<Cell>, row_idx: Column, num_cols: usize) -> Self {
+    pub fn new(filename: String, delim: char, header: Vec<Cell>, col_ids: Vec<Cell>, num_cols: usize) -> Self {
         let columns = Vec::<Column>::with_capacity(num_cols);
         let w_cell = (0usize, 0usize);
         let changed = false;
@@ -251,7 +249,6 @@ impl Cells {
             delim,
             header, 
             col_ids, 
-            row_idx, 
             columns, 
             w_cell, 
             changed, 
@@ -322,7 +319,7 @@ impl Cells {
     }
 
     pub fn num_rows(&self) -> usize {
-        self.row_idx.len()
+        self.columns[0].len()
     }
 
     pub fn w_cell(&mut self) -> &mut Cell {
