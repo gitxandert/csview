@@ -22,10 +22,13 @@ There is an argument -d/--delimiter that is default set to ',', but can take any
     csview -d : some_colon_separated_file
 
 csview currently admits the following key bindings:
-- **ctrl + c | ctrl + forward-slash**
+- **ctrl + C | ctrl + forward-slash**
     - closes the program
-- **ctrl + w**
-    - toggle write mode, allowing writes to a cell (writes are saved to file on program exit)
+- **ctrl + W**
+    - toggle write mode, allowing editing of the focused cell
+- **ctrl + S**
+    - saves file as is, with a pre-save backup
+    - (on exit, the program will prompt the user to save any unsaved edits)
 - **arrow keys**
     - highlight individual cells; if in write mode, these scroll through text
 - **ctrl + arrow key**
