@@ -83,5 +83,9 @@ csview also has a command mode, accessed through ':' :
         - inserts a row below the focused row
     - `row d` | `row delete`
         - deletes the focused row after confirmation
+- **sh/sheet**: sheet functions
+    - `sh sb {column} {direction}` | `sheet sortby {column} {direction}`
+        - reindexes all columns according to the sorted column's indices
+        - direction arguments are the same as for `col sort`
 - **ctrl + Q**
     - quits command mode
