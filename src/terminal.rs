@@ -1,5 +1,6 @@
 use std::{
-    mem, 
+    cmp,
+    mem,
     fs::{File, OpenOptions},
     io::{self, Read, Write},
     sync::atomic::{AtomicBool, AtomicUsize, Ordering}
@@ -43,6 +44,14 @@ pub enum InputMode {
     Scroll,     // input translates to scrolling
     Write,      // input affects write buffer
     Command,    // input is processed as commands
+}
+
+#[derive(Debug, PartialEq)]
+enum Sort {
+    AscAlph,
+    DescAlph,
+    AscNum,
+    DescNum,
 }
 
 pub struct Cursor {
@@ -1047,6 +1056,28 @@ impl WinInfo {
                                     }
                                 }
                                 "uq" | "unique"  => self.show_unique_column_values(cells),
+                                "s"  | "sort"    => {
+                                    let mut s_dir = Sort::AscAlph;
+                                    match tokens.next() {
+                                        None => self.sort_focused_column(cells, s_dir),
+                                        Some(spec) => {
+                                            match spec {
+                                                "a" => (),
+                                                "r" | "ar" => s_dir = Sort::DescAlph,
+                                                "n" => s_dir = Sort::AscNum,
+                                                "nr" => s_dir = Sort::DescNum,
+                                                _ => {
+                                                    cmd_err::print(
+                                                        CmdErr::UnknownSpec,
+                                                       spec, self.height
+                                                    );
+                                                    break;
+                                                }
+                                            }
+                                            self.sort_focused_column(cells, s_dir);
+                                        }
+                                    }
+                                }
                                 _ => (),
                             }
                         }
@@ -1515,6 +1546,53 @@ impl WinInfo {
         cells.columns.remove(self.w_pointer);
         cells.insert_column(self.w_pointer, orig);
         cells.set_w_cell(cells.w_cell.0, cells.w_cell.1);
+        self.draw_from_column(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    fn sort_focused_column(&mut self, cells: &mut Cells, dir: Sort) {
+        let mut col = &mut cells.columns[self.w_pointer];
+        col.cells[self.h_pointer].is_focused = false;
+        match dir {
+            Sort::AscAlph =>
+                col.cells.sort_unstable_by(|a, b|
+                    a.content.cmp(&b.content)
+                ),
+            Sort::DescAlph =>
+                col.cells.sort_unstable_by(|a, b|
+                    b.content.cmp(&a.content)
+                ),
+            Sort::AscNum => {
+                col.cells.sort_unstable_by(|a, b| {
+                    let a = match a.content.parse::<f32>() {
+                        Ok(num) => num,
+                        Err(_)  => f32::MAX,
+                    };
+                    let b = match b.content.parse::<f32>() {
+                        Ok(num) => num,
+                        Err(_)  => f32::MAX,
+                    };
+                    a.total_cmp(&b)
+                })
+            }
+            Sort::DescNum => {
+                col.cells.sort_unstable_by(|a, b| {
+                    let a = match a.content.parse::<f32>() {
+                        Ok(num) => num,
+                        Err(_)  => f32::MIN,
+                    };
+                    let b = match b.content.parse::<f32>() {
+                        Ok(num) => num,
+                        Err(_)  => f32::MIN,
+                    };
+                    b.total_cmp(&a)
+                })
+            }
+        }
+
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
+        cells.written = true;
         self.draw_from_column(cells);
         self.draw_focused_content();
         self.flush();
