@@ -73,5 +73,7 @@ csview also has a command mode, accessed through ':' :
         - when sorting numerically, non-numerical values are pushed to the bottom of the column
     - `col fn {value}` | `col fillna {value}`
         - fill empty cells with the provided value (use quotes for sentences)
+    - `col r {target} {new}` | `col replace {target} {new}`
+        - replaces the target value with the new one
 - **ctrl + Q**
     - quits command mode
