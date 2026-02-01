@@ -582,7 +582,7 @@ impl WinInfo {
                 if cell.is_focused {
                     self.set_focused(&content);
                     self.set_cursor(
-                        row + 3, start + 1, cell.width
+                        row - self.h_offset + 3, start + 1, cell.width
                     );
                     format!("\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
                         visible, width = width - 3
@@ -685,15 +685,17 @@ impl WinInfo {
         cells.set_w_cell(self.w_pointer, self.h_pointer);
 
         let st_row = prev_row.min(self.h_pointer);
+        let term_row = st_row - self.h_offset + 3;
         self.push_str_to_frame(
-            &format!("\x1b[{};1H\x1b[4m", 3 + st_row - self.h_offset)
+            &format!("\x1b[{};1H\x1b[4m", term_row)
         );
 
-        for row_id in st_row..self.height {
+        for row in term_row..self.height {
+            let row_id = row - 3 + self.h_offset;
             self.push_str_to_frame(
                 &format!(
                     "\x1b[{};1H\x1b[2K\x1b[30;47m{:04X} \x1b[39;49m",
-                    3 + row_id - self.h_offset, row_id
+                    row, row_id
                 )
             );
 
@@ -1089,6 +1091,7 @@ impl WinInfo {
                                         }
                                     }
                                 }
+                                "us" | "unsort" => self.unsort_focused_column(cells),
                                 "fn" | "fillna" => {
                                     match tokens.next() {
                                         None => cmd_err::print(
@@ -1141,6 +1144,36 @@ impl WinInfo {
                                         tok, self.height
                                     ),
                             }
+                        }
+                    }
+                }
+                // sort whole sheet
+                "s" | "sort" => {
+                    match tokens.next() {
+                        None => cmd_err::print(
+                                  CmdErr::MissingName,
+                                  tok, self.height
+                                ),
+                        Some(col) => {
+                            let s_dir = match tokens.next() {
+                                None => Sort::AscAlph,
+                                Some(dir) => {
+                                    match dir {
+                                        "a" => Sort::AscAlph,
+                                        "r" | "ar" => Sort::DescAlph,
+                                        "n" => Sort::AscNum,
+                                        "nr" => Sort::DescNum,
+                                        _ => {
+                                            cmd_err::print(
+                                              CmdErr::InvalidArg,
+                                              dir, self.height
+                                            );
+                                            return;
+                                        }
+                                    }
+                                }
+                            };
+                            //self.sort_by(cells, &col, s_dir);
                         }
                     }
                 }
@@ -1624,24 +1657,39 @@ impl WinInfo {
     }
 
     fn sort_focused_column(&mut self, cells: &mut Cells, dir: Sort) {
+        cells.w_cell().is_focused = false;
         let mut col = &mut cells.columns[self.w_pointer];
-        col.cells[self.h_pointer].is_focused = false;
+        let mut indices = col.indices.clone();
         match dir {
-            Sort::AscAlph =>
-                col.cells.sort_unstable_by(|a, b|
-                    a.content.cmp(&b.content)
-                ),
-            Sort::DescAlph =>
-                col.cells.sort_unstable_by(|a, b|
-                    b.content.cmp(&a.content)
-                ),
+            Sort::AscAlph => 
+                indices.sort_unstable_by(|&i, &j| {
+                    let a = {
+                        match col.view_cell(i) {
+                            "" => &format!("{}a", col.view_cell(j)),
+                            _ => col.view_cell(i),
+                        }
+                    };
+                    let b = {
+                        match col.view_cell(j) {
+                            "" => &format!("{}a", col.view_cell(i)),
+                            _ => col.view_cell(j),
+                        }
+                    };
+                    a.cmp(&b)
+                }),
+            Sort::DescAlph => 
+                indices.sort_unstable_by(|&i, &j| {
+                    let a = col.view_cell(i);
+                    let b = col.view_cell(j);
+                    b.cmp(&a)
+                }),
             Sort::AscNum => {
-                col.cells.sort_unstable_by(|a, b| {
-                    let a = match a.content.parse::<f32>() {
+                indices.sort_unstable_by(|&i, &j| {
+                    let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MAX,
                     };
-                    let b = match b.content.parse::<f32>() {
+                    let b = match col.cells[j].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MAX,
                     };
@@ -1649,12 +1697,12 @@ impl WinInfo {
                 })
             }
             Sort::DescNum => {
-                col.cells.sort_unstable_by(|a, b| {
-                    let a = match a.content.parse::<f32>() {
+                indices.sort_unstable_by(|&i, &j| {
+                    let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MIN,
                     };
-                    let b = match b.content.parse::<f32>() {
+                    let b = match col.cells[j].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MIN,
                     };
@@ -1663,6 +1711,18 @@ impl WinInfo {
             }
         }
 
+        col.indices = indices;
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
+        cells.written = true;
+        self.draw_from_column(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    fn unsort_focused_column(&mut self, cells: &mut Cells) {
+        cells.w_cell().is_focused = false;
+        let mut col = &mut cells.columns[self.w_pointer];
+        col.indices = (0..col.len()).collect();
         cells.set_w_cell(self.w_pointer, self.h_pointer);
         cells.written = true;
         self.draw_from_column(cells);
@@ -1702,7 +1762,7 @@ impl WinInfo {
 
     fn insert_row(&mut self, cells: &mut Cells) {
         for col in &mut cells.columns {
-           col.insert_cell(self.h_pointer + 1, Cell::new(""));
+            col.insert_cell(self.h_pointer + 1, Cell::new(""));
         }
         cells.written = true;
         self.num_rows += 1;
@@ -1733,7 +1793,9 @@ impl WinInfo {
                             }
 
                             cells.written = true;
+                            
                             self.num_rows -= 1;
+
                             self.draw_rows(cells);
                             
                             self.push_str_to_frame(
@@ -1765,6 +1827,18 @@ impl WinInfo {
             }
         }
     }
+/*
+    fn sort_by(&mut self, cells: &mut Cells, col_name: &str, sort_idr: Sort) {
+        match cells.get_col_idx(col_name) {
+            None => {
+                cmd_err::print(
+                      CmdErr::NoName,
+                      col_name, self.height
+                    );
+                return;
+            }
+            Some(col_idx) {
+*/              
 }
 
 // Terminal takeover + signal handling + globals for WIDTH and HEIGHT
