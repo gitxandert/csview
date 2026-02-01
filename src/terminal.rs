@@ -1108,8 +1108,7 @@ impl WinInfo {
     }
 
     fn trim_quotes(q: &str) -> &str {
-        let q = q.trim_start_matches(['\'', '"']);
-        q.trim_end_matches(['\'', '"'])
+        &q[1..q.len() - 1]
     }
 
     fn change_col_name(&mut self, cells: &mut Cells, new_name: &str) {
@@ -1399,7 +1398,7 @@ impl WinInfo {
         let p_col_name = columns.next().unwrap();
         let p_col_name = Self::trim_quotes(p_col_name);
 
-        let p_col_idx = match cells.get_col_idx(p_col_name) {
+        let mut p_col_idx = match cells.get_col_idx(p_col_name) {
             Some(idx) => idx,
             None      => {
                 cmd_err::print(
@@ -1425,21 +1424,23 @@ impl WinInfo {
                 }
             }
         }
-
+            
         cells.set_w_cell(p_col_idx, cells.w_cell.1);
 
         let mut i = 1usize;
         for idx in ids {
-            let mut col = cells.columns.remove(idx);
+            let col = cells.columns.remove(idx);
             let col_name = cells.header.remove(idx);
-
-            cells.col_ids[p_col_idx + i].width = col.width;
+            let col_width = col.width;
             cells.columns.insert(p_col_idx + i, col);
             cells.header.insert(p_col_idx + i, col_name);
-            cells.col_ids[idx].width = cells.columns[i].width;
+            cells.col_ids[p_col_idx + i].width = col_width;
+            cells.col_ids[idx].width = cells.columns[idx].width;
             i += 1;
         }
 
+        cells.set_w_cell(p_col_idx, cells.w_cell.1);
+        
         if self.w_pointer != p_col_idx {
             self.set_w_pointer(p_col_idx);
             self.draw_screen(cells);
