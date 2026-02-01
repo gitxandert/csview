@@ -431,19 +431,19 @@ impl WinInfo {
                 self.h_offset = self.h_offset.saturating_sub(
                     old_h.saturating_sub(self.h_pointer)
                 );
-                self.changed = WinChange::Rows;
+                self.changed = WinChange::Screen;
             } else if self.h_pointer >= self.h_offset + self.h_page {
                 let diff = self.h_pointer.saturating_sub(old_h);
                 self.h_offset = (self.h_offset + diff).min(
                     self.num_rows.saturating_sub(self.h_page)
                 );
-                self.changed = WinChange::Rows;
+                self.changed = WinChange::Screen;
             }
         } else {
             if self.h_pointer != self.num_rows.saturating_sub(1) {
                 self.h_pointer = self.num_rows.saturating_sub(1);
                 self.h_offset = self.num_rows.saturating_sub(self.h_page);
-                self.changed = WinChange::Rows;
+                self.changed = WinChange::Screen;
             }
         }
     }
@@ -639,7 +639,7 @@ impl WinInfo {
                 self.push_str_to_frame(&row_num);
 
                 let start = 6usize;
-                id = self.w_offset;
+                let mut id = self.w_offset;
                 self.print_row(cells, &mut id, row_id, start);
             }
         }
@@ -679,6 +679,23 @@ impl WinInfo {
             }
         }
         self.set_w_page(c, self.w_offset);
+    }
+
+    pub fn draw_rows(&mut self, cells: &mut Cells) {
+        let (_, st_row) = cells.w_cell;
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
+
+        for row_id in st_row..self.height {
+            let row_idx = &cells.row_idx.get_cell(row_id).content;
+            let row_num = format!(
+                "\x1b[30;47m{row_idx} \x1b[39;49m"
+            );
+            self.push_str_to_frame(&row_num);
+
+            let start = 6usize;
+            let mut id = self.w_offset;
+            self.print_row(cells, &mut id, row_id, start);
+        }
     }
 
     pub fn draw_focus(&mut self, cells: &mut Cells) {
@@ -858,9 +875,6 @@ impl WinInfo {
                 // and the new focused cell, 
                 // w/ highlighting,
                 // plus the rest of its line
-                //
-                // 1 or 2 lines
-                //
                 self.draw_focus(cells);
                 self.draw_focused_content();
                 self.flush();
@@ -868,31 +882,23 @@ impl WinInfo {
             WinChange::ColWidth => {
                 // redraw the column whose width has changed,
                 // plus all columns after
-                //
-                // all lines
                 self.draw_from_column(cells);
                 self.draw_focused_content();
                 self.flush();
             }
             WinChange::Rows => {
-                // shift rows and row_idx,
-                // but no need to redraw header and col_ids
-                //
-                // all lines, except for header and col_ids
-                self.draw_screen(cells);
+                // redraw rows from (previous) w_cell.1
+                self.draw_rows(cells);
                 self.draw_focused_content();
                 self.flush();
             }
             WinChange::Columns => {
-                // shift columns and col_ids,
-                // but no need to redraw row_idx
-                //
-                // all lines, but not the row_idx column
+                // currently, same as WinChange::Screen
                 self.draw_screen(cells);
                 self.draw_focused_content();
                 self.flush();
             }
-            WinChange::Screen => { // redraw everything on resize (unavoidable)
+            WinChange::Screen => { // redraw everything on resize
                 self.draw_screen(cells);
                 self.draw_focused_content();
                 self.flush();
@@ -1104,12 +1110,35 @@ impl WinInfo {
                                         }
                                     }
                                 }
-                                _ => (),
+                                _ => cmd_err::print(
+                                       CmdErr::InvalidSubCmd,
+                                       subcmd, self.height
+                                    ),
                             }
                         }
                     }
                 }
+                // row
+                // row operations
+                "row" => {
+                    match tokens.next() {
+                        None => cmd_err::print(
+                                  CmdErr::MissingSubCmd,
+                                  tok, self.height
+                                ),
+                        Some(subcmd) => {
+                            match subcmd {
 
+                                "i" | "insert" => self.insert_row(cells),
+                                _ =>  cmd_err::print(
+                                        CmdErr::InvalidSubCmd,
+                                        tok, self.height
+                                    ),
+                            }
+                        }
+                    }
+                }
+                // invalid
                 _ => cmd_err::print(CmdErr::InvalidCommand, tok, self.height),
             }
         }
@@ -1663,6 +1692,16 @@ impl WinInfo {
         self.draw_from_column(cells);
         self.draw_focused_content();
         self.flush();
+    }
+
+    fn insert_row(&mut self, cells: &mut Cells) {
+        for col in &mut cells.columns {
+           col.insert_cell(self.h_pointer + 1, Cell::new(""));
+        }
+        cells.written = true;
+        self.set_h_pointer(self.h_pointer + 1);
+        self.changed = WinChange::Rows;
+        self.show_csv(cells);
     }
 }
 
