@@ -1087,6 +1087,23 @@ impl WinInfo {
                                         Some(val) => self.col_fillna(cells, &val),
                                     }
                                 }
+                                "r"  | "replace" => {
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingValue,
+                                                  subcmd, self.height
+                                                ),
+                                        Some(targ) => {
+                                            match tokens.next() {
+                                                None => cmd_err::print(
+                                                          CmdErr::MissingValue,
+                                                          subcmd, self.height
+                                                        ),
+                                                Some(new) => self.replace_in_col(cells, &targ, &new),
+                                            }
+                                        }
+                                    }
+                                }
                                 _ => (),
                             }
                         }
@@ -1108,7 +1125,10 @@ impl WinInfo {
     }
 
     fn trim_quotes(q: &str) -> &str {
-        &q[1..q.len() - 1]
+        if &q[..1] == "'" || &q[..1] == "\"" {
+            return &q[1..q.len() - 1];
+        }
+        q
     }
 
     fn change_col_name(&mut self, cells: &mut Cells, new_name: &str) {
@@ -1621,6 +1641,22 @@ impl WinInfo {
         for cell in &mut col.cells {
             if &cell.content == "" {
                 cell.content.push_str(val);
+            }
+        }
+        cells.written = true;
+        self.draw_from_column(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    fn replace_in_col(&mut self, cells: &mut Cells, targ: &str, new: &str) {
+        let t = Self::trim_quotes(targ);
+        let n = Self::trim_quotes(new);
+
+        let mut col = &mut cells.columns[self.w_pointer];
+        for cell in &mut col.cells {
+            if &cell.content == t {
+                cell.content = n.to_string();
             }
         }
         cells.written = true;
