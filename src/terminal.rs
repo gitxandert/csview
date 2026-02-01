@@ -632,9 +632,8 @@ impl WinInfo {
                     break;
                 }
 
-                let row_idx = &cells.row_idx.get_cell(row_id).content;
                 let row_num = format!(
-                    "\x1b[30;47m{row_idx} \x1b[39;49m"
+                    "\x1b[30;47m{:04X} \x1b[39;49m", row_id
                 );
                 self.push_str_to_frame(&row_num);
 
@@ -691,11 +690,10 @@ impl WinInfo {
         );
 
         for row_id in st_row..self.height {
-            let row_idx = &cells.row_idx.get_cell(row_id).content;
             self.push_str_to_frame(
                 &format!(
-                    "\x1b[{};1H\x1b[2K\x1b[30;47m{} \x1b[39;49m",
-                    3 + row_id - self.h_offset, row_idx
+                    "\x1b[{};1H\x1b[2K\x1b[30;47m{:04X} \x1b[39;49m",
+                    3 + row_id - self.h_offset, row_id
                 )
             );
 
@@ -1716,11 +1714,10 @@ impl WinInfo {
     }
 
     fn delete_row(&mut self, cells: &mut Cells) {
-        let row_num = cells.row_idx.cells[self.h_pointer].content.clone();
         self.push_str_to_frame(
             &format!(
-                "\x1b[{};1H\x1b[2K\x1b[0m\x1b[?25lConfirm remove row {} with 'y': ",
-                self.height, row_num
+                "\x1b[{};1H\x1b[2K\x1b[0m\x1b[?25lConfirm remove row {:04X} with 'y': ",
+                self.height, self.h_pointer
             )
         );
         self.flush();
@@ -1741,8 +1738,8 @@ impl WinInfo {
                             
                             self.push_str_to_frame(
                                 &format!(
-                                    "\x1b[{};1H\x1b[2K\x1b[0mRemoved row {}",
-                                    self.height, row_num
+                                    "\x1b[{};1H\x1b[2K\x1b[0mRemoved row {:04X}",
+                                    self.height, self.h_pointer
                                 )
                             );
                             self.flush();
@@ -1752,8 +1749,8 @@ impl WinInfo {
                         _ => {
                             self.push_str_to_frame(
                                 &format!(
-                                    "\x1b[{};1H\x1b[2K\x1b[0mRow {} was not deleted.",
-                                    self.height, row_num
+                                    "\x1b[{};1H\x1b[2K\x1b[0mRow {:04X} was not deleted.",
+                                    self.height, self.h_pointer
                                 )
                             );
                             self.flush();
@@ -1893,11 +1890,11 @@ pub fn install_panic_hook() {
         let panic_info = format!("Panic: {info}");
         if let Ok(mut log) = OpenOptions::new()
             .create(true)
-            .append(true)
-            .open("/tmp/csview.log") 
+            .write(true)
+            .open("/tmp/csview_panic.log") 
         {
             log.write_all(panic_info.as_bytes());
-        } else { eprintln!("couldn't open /tmp/csview.log"); }
+        } else { eprintln!("couldn't open /tmp/csview_panic.log"); }
         std::process::exit(130);
     }));
 }
