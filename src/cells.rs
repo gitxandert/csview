@@ -130,6 +130,10 @@ impl Cell {
         copy
     }
 
+    pub fn view(&self) -> &str {
+        &self.content[..]
+    }
+
     pub fn clone(&self) -> Self {
         Self { 
             content: self.content.clone(),
@@ -179,6 +183,7 @@ pub struct Column {
     pub cells: Vec<Cell>,
     pub start: usize, // terminal col where this begins
     pub width: usize,
+    pub indices: Vec<usize>,
 }
 
 impl Column {
@@ -187,19 +192,45 @@ impl Column {
             cells: Vec::<Cell>::new(),
             start: 0usize,
             width: 12usize,
+            indices: Vec::<usize>::new(),
         }
     }
 
     pub fn push_cell(&mut self, cell: Cell) {
         self.cells.push(cell);
+        self.indices.push(self.indices.len());
     }
 
     pub fn insert_cell(&mut self, idx: usize, cell: Cell) {
-        self.cells.insert(idx, cell);
+        let mut real_idx = idx;
+        if idx < self.indices.len() {
+            real_idx = self.indices[idx];
+            self.cells.insert(real_idx, cell);
+            self.indices.push(0usize);
+            for i in ((idx + 1)..self.indices.len()).rev() {
+                self.indices[i] = self.indices[i - (i > idx) as usize];
+                self.indices[i] += (self.indices[i] >= real_idx) as usize;
+            }
+            for i in 0..idx {
+                self.indices[i] += (self.indices[i] >= real_idx) as usize;
+            }
+        } else {
+            self.cells.push(cell);
+            self.indices.insert(idx, self.indices.len());
+        }
     }
 
     pub fn remove_cell(&mut self, idx: usize) {
-        self.cells.remove(idx);
+        let real_idx = self.indices[idx];
+        self.cells.remove(real_idx);
+        for i in 0..idx {
+            self.indices[i] -= (self.indices[i] >= real_idx) as usize;
+        }
+        for i in idx..self.indices.len() - 1 {
+            self.indices[i] = self.indices[i + 1];
+            self.indices[i] -= (self.indices[i] >= real_idx) as usize;
+        }
+        self.indices.pop();
     }
 
     pub fn set_start(&mut self, st: usize) {
@@ -217,8 +248,13 @@ impl Column {
         return self.width + 3 // + 3 for formatting
     }
 
+    pub fn view_cell(&self, idx: usize) -> &str {
+        self.cells.get(idx).unwrap().view()
+    }
+
     pub fn get_cell(&mut self, idx: usize) -> &mut Cell {
-        self.cells.get_mut(idx).unwrap()
+        let real_idx = self.indices[idx];
+        self.cells.get_mut(real_idx).unwrap()
     }
 
     pub fn len(&self) -> usize {
@@ -288,7 +324,6 @@ impl Cells {
         // first unfocus the previous w_cell
         let mut w_cell = self.w_cell();
         w_cell.set_focused(false);
-        
         self.w_cell = (col, row);
         w_cell = self.w_cell();
         w_cell.set_focused(true);
