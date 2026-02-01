@@ -607,8 +607,11 @@ impl WinInfo {
 
     pub fn draw_screen(&mut self, cells: &mut Cells) {
         // reset focused cell
-        cells.set_w_cell(self.w_pointer, self.h_pointer);
-        
+        if self.h_pointer < cells.columns[0].len() {
+            cells.set_w_cell(self.w_pointer, self.h_pointer);
+        } else {
+            self.h_pointer = cells.columns[0].len() - 1;
+        }
         // wipe screen once
         self.push_str_to_frame("\x1b[1;1H\x1b[2J");
         
@@ -1147,33 +1150,50 @@ impl WinInfo {
                         }
                     }
                 }
-                // sort whole sheet
-                "s" | "sort" => {
+                // sheet
+                // whole-sheet operations
+                "sh" | "sheet" => {
                     match tokens.next() {
                         None => cmd_err::print(
-                                  CmdErr::MissingName,
+                                  CmdErr::MissingSubCmd,
                                   tok, self.height
                                 ),
-                        Some(col) => {
-                            let s_dir = match tokens.next() {
-                                None => Sort::AscAlph,
-                                Some(dir) => {
-                                    match dir {
-                                        "a" => Sort::AscAlph,
-                                        "r" | "ar" => Sort::DescAlph,
-                                        "n" => Sort::AscNum,
-                                        "nr" => Sort::DescNum,
-                                        _ => {
-                                            cmd_err::print(
-                                              CmdErr::InvalidArg,
-                                              dir, self.height
-                                            );
-                                            return;
+                        Some(subcmd) => {
+                            match subcmd {
+                                "sb" | "sortby" => {
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingName,
+                                                  tok, self.height
+                                                ),
+                                        Some(col) => {
+                                            let s_dir = match tokens.next() {
+                                                None => Sort::AscAlph,
+                                                Some(dir) => {
+                                                    match dir {
+                                                        "a" => Sort::AscAlph,
+                                                        "r" | "ar" => Sort::DescAlph,
+                                                        "n" => Sort::AscNum,
+                                                        "nr" => Sort::DescNum,
+                                                        _ => {
+                                                            cmd_err::print(
+                                                              CmdErr::InvalidArg,
+                                                              dir, self.height
+                                                            );
+                                                            return;
+                                                        }
+                                                    }
+                                                }
+                                            };
+                                            self.sort_by(cells, &col, s_dir);
                                         }
                                     }
                                 }
-                            };
-                            //self.sort_by(cells, &col, s_dir);
+                                _ => cmd_err::print(
+                                       CmdErr::InvalidSubCmd,
+                                       subcmd, self.height
+                                     ),
+                            }
                         }
                     }
                 }
@@ -1656,9 +1676,7 @@ impl WinInfo {
         self.flush();
     }
 
-    fn sort_focused_column(&mut self, cells: &mut Cells, dir: Sort) {
-        cells.w_cell().is_focused = false;
-        let mut col = &mut cells.columns[self.w_pointer];
+    fn sort_indices(col: &mut Column, dir: Sort) {
         let mut indices = col.indices.clone();
         match dir {
             Sort::AscAlph => 
@@ -1712,6 +1730,14 @@ impl WinInfo {
         }
 
         col.indices = indices;
+    }
+
+    fn sort_focused_column(&mut self, cells: &mut Cells, dir: Sort) {
+        cells.w_cell().is_focused = false;
+        let mut col = &mut cells.columns[self.w_pointer];
+        
+        Self::sort_indices(&mut col, dir);
+    
         cells.set_w_cell(self.w_pointer, self.h_pointer);
         cells.written = true;
         self.draw_from_column(cells);
@@ -1788,15 +1814,20 @@ impl WinInfo {
                 Ok(n) => {
                     match &buffer[..n] {
                         [b'y'] | [b'Y']  => {
+                            cells.set_w_cell(self.w_pointer, self.h_pointer.saturating_sub(1));
                             for col in &mut cells.columns {
                                 col.remove_cell(self.h_pointer);
                             }
-
                             cells.written = true;
-                            
+                           
                             self.num_rows -= 1;
-
-                            self.draw_rows(cells);
+                           
+                            if self.h_offset < self.num_rows.saturating_sub(self.h_page) {
+                                self.draw_rows(cells);
+                            } else {
+                                self.h_offset -= 1;
+                                self.draw_screen(cells);
+                            }
                             
                             self.push_str_to_frame(
                                 &format!(
@@ -1827,8 +1858,9 @@ impl WinInfo {
             }
         }
     }
-/*
-    fn sort_by(&mut self, cells: &mut Cells, col_name: &str, sort_idr: Sort) {
+
+    fn sort_by(&mut self, cells: &mut Cells, col_name: &str, sort_dir: Sort) {
+        let col_name = Self::trim_quotes(col_name);
         match cells.get_col_idx(col_name) {
             None => {
                 cmd_err::print(
@@ -1837,8 +1869,27 @@ impl WinInfo {
                     );
                 return;
             }
-            Some(col_idx) {
-*/              
+            Some(col_idx) => {
+                cells.w_cell().is_focused = false;
+                {
+                    let mut col = &mut cells.columns[col_idx];
+                    Self::sort_indices(&mut col, sort_dir);
+                }
+
+                for i in 0..col_idx {
+                    cells.columns[i].indices = cells.columns[col_idx].indices.clone();
+                }
+                for i in col_idx + 1..cells.columns.len() {
+                    cells.columns[i].indices = cells.columns[col_idx].indices.clone();
+                }
+                cells.written = true;
+                cells.set_w_cell(self.w_pointer, self.h_pointer);
+                self.draw_screen(cells);
+                self.draw_focused_content();
+                self.flush();
+            }
+        }
+    }
 }
 
 // Terminal takeover + signal handling + globals for WIDTH and HEIGHT
@@ -1962,13 +2013,10 @@ pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         raw_mode(false);
         let panic_info = format!("Panic: {info}");
-        if let Ok(mut log) = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open("/tmp/csview_panic.log") 
-        {
-            log.write_all(panic_info.as_bytes());
-        } else { eprintln!("couldn't open /tmp/csview_panic.log"); }
+        match std::fs::write("/tmp/csview_panic.log", panic_info) {
+            Ok(()) => (),
+            Err(_) => println!("csview panicked; couldn't open /tmp/csview_panic.log"),
+        }
         std::process::exit(130);
     }));
 }
