@@ -1055,7 +1055,7 @@ impl WinInfo {
                                         Some(list) => self.group_columns(cells, &list),
                                     }
                                 }
-                                "uq" | "unique"  => self.show_unique_column_values(cells),
+                                "u"  | "unique"  => self.show_unique_column_values(cells),
                                 "s"  | "sort"    => {
                                     let mut s_dir = Sort::AscAlph;
                                     match tokens.next() {
