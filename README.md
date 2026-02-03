@@ -83,6 +83,12 @@ csview also has a command mode, accessed through ':' :
         - inserts a row below the focused row
     - `row d` | `row delete`
         - deletes the focused row after confirmation
+    - `row mv {range} {index}` | `row move {range} {index}`
+        - moves a given range of rows to the target index
+        - ranges can be expressed as:
+            - either a single quoted row index or unquoted integer (e.g. '000F' or 15)
+            - a hyphenated range of quoted indices or unquoted integers (e.g. '000F'-'00B3' or 15-35)
+            - a quoted index or unquoted integer, a '+', and the number of rows to include in the move (e.g. '000F'+20 or 15+20)
 - **sh/sheet**: sheet functions
     - `sh sb {column} {direction}` | `sheet sortby {column} {direction}`
         - reindexes all columns according to the sorted column's indices
