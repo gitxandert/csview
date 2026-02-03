@@ -233,6 +233,24 @@ impl Column {
         self.indices.pop();
     }
 
+    pub fn swap_cells(&mut self, a: usize, b: usize) {
+        let int = self.indices[a];
+        self.indices[a] = self.indices[b];
+        self.indices[b] = int;
+    }
+
+    pub fn bubble_down(&mut self, start: usize, end: usize) {
+        for i in ((end + 1)..=start).rev() {
+            self.swap_cells(i, i - 1);
+        }
+    }
+
+    pub fn bubble_up(&mut self, start: usize, end: usize) {
+        for i in start..(end - 1) {
+            self.swap_cells(i, i + 1);
+        }
+    }
+
     pub fn set_start(&mut self, st: usize) {
         self.start = st;
     }
