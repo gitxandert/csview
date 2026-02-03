@@ -3,12 +3,17 @@ use std::io::{self, Read, Write};
 pub enum CmdErr {
     InvalidArg,
     InvalidCommand,
+    InvalidDec,
+    InvalidHex,
+    InvalidIndex,
     InvalidSubCmd,
     MissingList,
     MissingLocation,
     MissingName,
+    MissingRange,
     MissingValue,
     MissingSubCmd,
+    MissingTarget,
     NoId,
     NoName,
     StdinErr,
@@ -32,6 +37,21 @@ pub fn print(err: CmdErr, token: &str, line: usize) {
                     line, token
                 ),
 
+            CmdErr::InvalidDec => format!(
+                    "\x1b[{};1H\x1b[2KERR: '{}' cannot be coerced to decimal",
+                    line, token
+                ),
+
+            CmdErr::InvalidHex => format!(
+                    "\x1b[{};1H\x1b[2KERR: '{}' is not valid hexadecimal",
+                    line, token
+                ),
+
+            CmdErr::InvalidIndex => format!(
+                    "\x1b[{};1H\x1b[2KERR: index '{}' is out of bounds",
+                    line, token
+                ),
+
             CmdErr::InvalidSubCmd => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid sub-command '{}'",
                     line, token
@@ -49,6 +69,16 @@ pub fn print(err: CmdErr, token: &str, line: usize) {
 
             CmdErr::MissingName => format!(
                     "\x1b[{};1H\x1b[2KERR: missing name for '{}'",
+                    line, token
+                ),
+
+            CmdErr::MissingRange => format!(
+                    "\x1b[{};1H\x1b[2KERR: missing range for '{}'",
+                    line, token
+                ),
+
+            CmdErr::MissingTarget => format!(
+                    "\x1b[{};1H\x1b[2KERR: missing target index for '{}'",
                     line, token
                 ),
 
