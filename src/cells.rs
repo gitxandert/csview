@@ -245,6 +245,12 @@ impl Column {
         }
     }
 
+    pub fn bubble_down(&mut self, start: usize, end: usize) {
+        for i in (end + 1..=start).rev() {
+            self.swap_cells(i, i - 1);
+        }
+    }
+
     pub fn set_start(&mut self, st: usize) {
         self.start = st;
     }
