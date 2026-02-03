@@ -1139,9 +1139,25 @@ impl WinInfo {
                                 ),
                         Some(subcmd) => {
                             match subcmd {
-
-                                "i" | "insert" => self.insert_row(cells),
-                                "d" | "delete" => self.delete_row(cells),
+                                "i"  | "insert" => self.insert_row(cells),
+                                "d"  | "delete" => self.delete_row(cells),
+                                "mv" | "move"   => {
+                                    match tokens.next() {
+                                        None => cmd_err::print(
+                                                  CmdErr::MissingRange,
+                                                  subcmd, self.height
+                                                ),
+                                        Some(range) => {
+                                            match tokens.next() {
+                                                None => cmd_err::print(
+                                                          CmdErr::MissingTarget,
+                                                          subcmd, self.height
+                                                        ),
+                                                Some(target) => self.move_rows(cells, &range, &target),
+                                            }
+                                        }
+                                    }
+                                }
                                 _ =>  cmd_err::print(
                                         CmdErr::InvalidSubCmd,
                                         tok, self.height
@@ -1203,6 +1219,15 @@ impl WinInfo {
         }
     }
 
+    fn trim_quotes(q: &str) -> &str {
+        if &q[..1] == "'" || &q[..1] == "\"" {
+            return &q[1..q.len() - 1];
+        }
+        q
+    }
+
+    // cn functions
+    //
     fn show_column_name(&mut self, cells: &mut Cells) {
         let col = &cells.header[self.w_pointer];
         self.push_str_to_frame(
@@ -1210,13 +1235,6 @@ impl WinInfo {
                 self.height, col.content)
             );
         self.flush();
-    }
-
-    fn trim_quotes(q: &str) -> &str {
-        if &q[..1] == "'" || &q[..1] == "\"" {
-            return &q[1..q.len() - 1];
-        }
-        q
     }
 
     fn change_col_name(&mut self, cells: &mut Cells, new_name: &str) {
@@ -1250,6 +1268,8 @@ impl WinInfo {
         cmd_err::print(CmdErr::NoName, name, self.height);
     }
 
+    // column functions
+    //
     fn move_focused_column(&mut self, cells: &mut Cells, loc: &str) {
         let mut idx = match loc.chars().nth(0).unwrap() {
             // column names must be quoted
@@ -1786,6 +1806,8 @@ impl WinInfo {
         self.flush();
     }
 
+    // row functions
+    //
     fn insert_row(&mut self, cells: &mut Cells) {
         for col in &mut cells.columns {
             col.insert_cell(self.h_pointer + 1, Cell::new(""));
@@ -1859,6 +1881,184 @@ impl WinInfo {
         }
     }
 
+    const VALID_HEX: [char; 22] = [
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'A', 'B', 'C', 'D', 'E', 'F',
+        'a', 'b', 'c', 'd', 'e', 'f',
+    ];
+
+    fn compute_valid_hex(c: char) -> Result<usize, CmdErr> {
+        let n = (c == Self::VALID_HEX[0]) as usize +
+                2 * (c == Self::VALID_HEX[1]) as usize +
+                3 * (c == Self::VALID_HEX[2]) as usize +
+                4 * (c == Self::VALID_HEX[3]) as usize +
+                5 * (c == Self::VALID_HEX[4]) as usize +
+                6 * (c == Self::VALID_HEX[5]) as usize +
+                7 * (c == Self::VALID_HEX[6]) as usize +
+                8 * (c == Self::VALID_HEX[7]) as usize +
+                9 * (c == Self::VALID_HEX[8]) as usize +
+                10 * (c == Self::VALID_HEX[9]) as usize +
+                11 * (c == Self::VALID_HEX[10]) as usize +
+                12 * (c == Self::VALID_HEX[11]) as usize +
+                13 * (c == Self::VALID_HEX[12]) as usize +
+                14 * (c == Self::VALID_HEX[13]) as usize +
+                15 * (c == Self::VALID_HEX[14]) as usize +
+                16 * (c == Self::VALID_HEX[15]) as usize +
+                11 * (c == Self::VALID_HEX[16]) as usize +
+                12 * (c == Self::VALID_HEX[17]) as usize +
+                13 * (c == Self::VALID_HEX[18]) as usize +
+                14 * (c == Self::VALID_HEX[19]) as usize +
+                15 * (c == Self::VALID_HEX[20]) as usize +
+                16 * (c == Self::VALID_HEX[21]) as usize;
+
+        if n > 0 { return Ok(n - 1); }
+        Err(CmdErr::InvalidHex)
+    }
+
+    fn hex_to_dec(hex: &str) -> Result<usize, CmdErr> {
+        let hex = Self::trim_quotes(hex);
+        let len = hex.len();
+        let mut hex = hex.chars();
+        let mut num = 0usize;
+        for i in (0..len).rev() {
+            match Self::compute_valid_hex(hex.nth(0).unwrap()) {
+                Ok(d) => num += (d * (16usize.pow(i as u32))),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(num)
+    }
+
+    fn str_to_dec(s: &str) -> Result<usize, CmdErr> {
+        match s.chars().nth(0).unwrap() {
+            '\'' | '"' => Self::hex_to_dec(s),
+            _       => {
+                match s.parse::<usize>() {
+                    Ok(val) => Ok(val),
+                    Err(_)  => return Err(CmdErr::InvalidDec),
+                }
+            }
+        }
+    }
+
+    fn parse_range(&mut self, range: &str) -> Result<(usize, usize), CmdErr> {
+        // range can be expressed as:
+        // - a single index (e.g. '63' or 99)
+        // - two indices separated by a hyphen (e.g. '104D'-'105F')
+        // - an index, a '+', and how many rows to include (e.g. 'A7'+10)
+        // quotes refer to printed indices
+        let mut tokens: Vec<&str> = Vec::new();
+        tokens.push(range);
+        for c in range.chars() {
+            match c {
+                ch if ch == '-' || ch == '+' => {
+                    tokens = Self::tokenize(range, ch);
+                    break;
+                }
+                _   => continue,
+            };
+        }
+
+        // if token is empty str, start at first row
+        let lo = match tokens[0] {
+            "" => 0usize,
+            _ => Self::str_to_dec(tokens[0])?,
+        };
+
+        // if token is empty str, end at last row
+        let hi = match tokens.get(1) {
+            Some(val) => {
+                match *val {
+                    "" => self.num_rows - 1,
+                    _ => Self::str_to_dec(val)?,
+                }
+            }
+            None => lo,
+        };
+        
+        Ok((lo, hi))
+    }
+
+    fn move_rows(&mut self, cells: &mut Cells, range: &str, target: &str) {
+        let (t_lo, t_hi) = match self.parse_range(range) {
+            Ok((l, h)) => (l, h),
+            Err(e) => {
+                cmd_err::print(e, "rows mv", self.height);
+                return;
+            }
+        };
+
+        let lo = t_lo.min(t_hi);
+        let hi = t_hi.max(t_lo);
+
+        if lo < 0 || lo >= self.num_rows {
+            cmd_err::print(CmdErr::InvalidIndex, &format!("{lo}"), self.height);
+            return;
+        }
+
+        if hi >= self.num_rows {
+            cmd_err::print(CmdErr::InvalidIndex, &format!("{hi}"), self.height);
+            return;
+        }
+
+        let target = match Self::str_to_dec(target) {
+            Ok(d) => d,
+            Err(e) => {
+                cmd_err::print(e, "rows mv", self.height);
+                return;
+            }
+        };
+
+        cells.w_cell().is_focused = false;
+
+        let new_rows = (target + 1 + hi - lo).saturating_sub(self.num_rows);
+        self.num_rows += new_rows;
+
+        let range = hi + 1 - lo;
+        let t_l = target;
+        let t_h = t_l + range - 1;
+
+        let no_overlap = ((lo > t_h) || (t_l > hi)) as usize;
+
+        if target > lo {
+            for col in &mut cells.columns {
+                // if moving beyond col.len(), reserve space
+                for _ in 0..new_rows {
+                    col.push_cell(Cell::new(""));
+                }
+
+                for i in 0..range {
+                    col.swap_cells(hi - i, t_h - i);
+                }
+
+                for _ in 0..(range * no_overlap) {
+                    col.bubble_up(lo, t_l.saturating_sub(1));
+                }
+            }
+        } else {
+            for col in &mut cells.columns {
+                for _ in 0..new_rows {
+                    col.push_cell(Cell::new(""));
+                }
+
+                for i in 0..range {
+                    col.swap_cells(lo + i, t_l + i);
+                }
+
+                for _ in 0..(range * no_overlap) {
+                    col.bubble_down(hi, t_h + 1);
+                }
+            }
+        }
+        
+        cells.written = true;
+        self.draw_screen(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    // sheet functions
+    //
     fn sort_by(&mut self, cells: &mut Cells, col_name: &str, sort_dir: Sort) {
         let col_name = Self::trim_quotes(col_name);
         match cells.get_col_idx(col_name) {
