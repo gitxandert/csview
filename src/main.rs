@@ -11,7 +11,7 @@ mod input;
 mod terminal;
 
 use crate::{
-    cells::Cells,
+    cells::{Cells, Context},
     input::process_input,
     terminal::{check_flags, SigFlag, WinInfo},
     csv_io::{
@@ -28,10 +28,13 @@ fn main() {
         return;
     }
 
-    let mut filename = String::new();
+    let _ = args.next();
+
+    let mut filenames = Vec::<String>::new();
     let mut delimiter: char = ',';
 
     while let Some(arg) = args.next() {
+        println!("Received {arg}");
         match arg.as_str() {
             "-d" | "--delimiter" => {
                 match args.next() {
@@ -52,26 +55,29 @@ fn main() {
                     }
                 }
             }
-            _ => filename = arg,
+            _ => filenames.push(arg),
         }
     }
 
-    let mut cells: Cells = match load_csv(filename.clone(), delimiter.clone()) {
-        Ok(file) => file,
-        Err(e) => {
-            println!("{e}");
-            return;
-        }
-    };
-
-    let max_w = cells.num_cols();
-    let max_h = cells.num_rows();
-    let mut w_info = WinInfo::new(max_w, max_h);
+    let mut contexts = Vec::<Context>::new();
+    for f in filenames {
+        match load_csv(f.clone(), delimiter.clone()) {
+            Ok(csv) => contexts.push(Context::new(csv)),
+            Err(e) => {
+                println!("Error loading csv: {e}");
+                return;
+            }
+        };
+    }
 
     terminal::install_panic_hook();
     terminal::install_sig_handlers();
     terminal::raw_mode(true);
 
+    let mut context = &mut contexts[0];
+    let mut w_info = WinInfo::new();
+    w_info.set_context(context);
+    let mut cells = &mut context.cells;
     w_info.show_csv(&mut cells);
 
     // main loop
@@ -107,14 +113,16 @@ fn main() {
 
     // restore terminal
     terminal::raw_mode(false);
-    if cells.written {
-        println!("Write to file? [y/N]: ");
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Failed to read line");
-        match input.trim_end() {
-            "y" | "yes" | "Y" | "Yes" | "YES" => {
+    for con in contexts {
+        let mut cells = con.cells;
+        if cells.written {
+            println!("Write to file? [y/N]: ");
+            let mut input = String::new();
+            io::stdin()
+                .read_line(&mut input)
+                .expect("Failed to read line");
+            match input.trim_end() {
+                "y" | "yes" | "Y" | "Yes" | "YES" => {
                     // save backup to 
                     // /home/user/.csview/backups/;
                     // if fails, don't write
@@ -129,11 +137,11 @@ fn main() {
                         Err(e) => {
                             println!("WARNING -- could not create back up due to the following:");
                             println!("\n\t{e}");
-                            println!("Exiting without writing");
+                        }
                     }
                 }
+                _ => (),
             }
-            _ => println!("Exiting without writing"),
         }
     }
 }
