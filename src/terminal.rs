@@ -238,7 +238,7 @@ impl WinInfo {
         }
     }
 
-    pub fn set_context(&mut self, con: &mut Context) {
+    pub fn set_context(&mut self, con: &Context) {
         self.num_cols = con.cells.num_cols();
         self.num_rows = con.cells.num_rows();
         self.w_pointer = con.w_pointer;
@@ -601,7 +601,6 @@ impl WinInfo {
                 }
             };
             self.push_str_to_frame(&formatted);
-
             col.set_start(start);
             start += width;
             *i += 1;
@@ -922,10 +921,7 @@ impl WinInfo {
                 self.draw_focused_content();
                 self.flush();
             }
-            WinChange::Init => { // first draw sets w_cell
-                let mut w_cell = cells.get_column(0).get_cell(0);
-                w_cell.set_focused(true);
-
+            WinChange::Init => { // same as screenfirst draw sets w_cei
                 self.draw_screen(cells);
                 self.draw_focused_content();
                 self.flush();
