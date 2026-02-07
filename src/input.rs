@@ -1,13 +1,33 @@
-use crate::cells::Cells;
 use crate::{
+    cells::{Cells, Context},
     csv_io::{save_backup, write_to_file},
     terminal::{InputMode, ScrollMode, WinChange, WinInfo},
 };
 
-pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
+pub fn process_input(
+    input: &[u8], 
+    w_info: &mut WinInfo, 
+    contexts: &mut Vec<Context>, 
+    con_handle: &mut usize
+) {
     match w_info.input_mode {
         InputMode::Scroll => {
             match input {
+                [48..=57] => {
+                    let id = input[0] as usize - 48;
+                    if *con_handle != id
+                    && id < contexts.len() {
+                        contexts[*con_handle].save(w_info);
+                        *con_handle = id;
+                        w_info.set_context(
+                            &contexts[*con_handle]
+                        );
+                        w_info.changed = WinChange::Screen;
+                        w_info.show_csv(
+                            &mut contexts[*con_handle].cells
+                        );
+                    }
+                }
                 // normal arrows
                 [27, 91, 65] => { // up
                     w_info.set_h_pointer(w_info.h_pointer.saturating_sub(1));
@@ -64,6 +84,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                         }
                         67 => { // right
                             if winch {
+                                let cells = &mut contexts[*con_handle].cells;
                                 let col = cells.get_column(
                                     cells.w_cell.0
                                 );
@@ -76,6 +97,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                             } else {
                                 match w_info.scroll_mode {
                                     ScrollMode::Text => {
+                                        let cells = &mut contexts[*con_handle].cells;
                                         let mut w_cell = cells.w_cell();
                                         w_cell.set_text_offset(
                                             w_cell.text_offset + 1
@@ -98,6 +120,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                         }
                         68 => { // left
                             if winch {
+                                let cells = &mut contexts[*con_handle].cells;
                                 let col = cells.get_column(
                                     cells.w_cell.0
                                 );
@@ -107,6 +130,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                             } else {
                                 match w_info.scroll_mode {
                                     ScrollMode::Text => {
+                                        let cells = &mut contexts[*con_handle].cells;
                                         let mut w_cell = cells.w_cell();
                                         w_cell.set_text_offset(
                                             w_cell.text_offset.saturating_sub(1)
@@ -132,6 +156,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 }
                 // ctrl + s (save)
                 [19] => {
+                    let cells = &mut contexts[*con_handle].cells;
                     match save_backup(&cells.filename) {
                         Ok(b) => {
                             match write_to_file(cells) {
@@ -171,6 +196,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 }
                 // ctrl + w (write)
                 [23] => {
+                    let cells = &mut contexts[*con_handle].cells;
                     w_info.set_write_buffer_w_cell(&cells.w_cell());
                     w_info.set_write_mode(true);
                     w_info.changed = WinChange::Write;
@@ -224,6 +250,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                 }
                 // ctrl + w (write)
                 [23] => {
+                    let cells = &mut contexts[*con_handle].cells;
                     w_info.set_write_mode(false);
                     let mut w_cell = cells.w_cell();
                     w_info.write_to_cell(w_cell);
@@ -232,6 +259,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                     // ignore other control characters
                 }
                 [8] | [127] => { /* backspace */ 
+                    let cells = &mut contexts[*con_handle].cells;
                     w_info.delete_from_write_buffer();
                     w_info.changed = WinChange::Write;
                     cells.written = true;
@@ -254,7 +282,7 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                     };
                     w_info.add_to_write_buffer(c);
                     w_info.changed = WinChange::Write;
-                    cells.written = true;
+                    contexts[*con_handle].cells.written = true;
                 }
             }
         }
@@ -314,10 +342,12 @@ pub fn process_input(input: &[u8], w_info: &mut WinInfo, cells: &mut Cells) {
                     w_info.changed = WinChange::Command;
                 }
                 [10] | [13] => { /* enter (\n, \r) */
+                    let cells = &mut contexts[*con_handle].cells;
                     w_info.process_command(cells);
                     w_info.set_command_mode(false);
                 }
                 [13, 10] => { /* enter (\r\n) */
+                    let cells = &mut contexts[*con_handle].cells;
                     w_info.process_command(cells);
                     w_info.set_command_mode(false);
                 }
