@@ -280,6 +280,7 @@ impl Column {
     }
 }
 
+#[derive(Debug)]
 pub struct Cells {
     pub filename: String,
     pub delim: char,
@@ -397,6 +398,7 @@ impl Cells {
 }
 
 pub struct Context {
+    pub id: usize,
     pub cells: Cells,
     pub w_pointer: usize,
     pub h_pointer: usize,
@@ -405,8 +407,9 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new(cells: Cells) -> Self {
+    pub fn new(id: usize, cells: Cells) -> Self {
         Self {
+            id,
             cells,
             w_pointer: 0usize,
             h_pointer: 0usize,
