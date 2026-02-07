@@ -12,7 +12,7 @@ use libc::{
 
 use crate::{
     cmd_err::{self, CmdErr},
-    cells::{Cell, Cells, Column},
+    cells::*,
     csv_io::{poll_stdin, PollEvent},
 };
 
@@ -203,7 +203,7 @@ pub struct WinInfo {
 }
 
 impl WinInfo {
-    pub fn new(num_cols: usize, num_rows: usize) -> Self {
+    pub fn new() -> Self {
         let (width, height) = {
             unsafe {
                 let mut w = 0usize;
@@ -218,12 +218,12 @@ impl WinInfo {
         };
 
         Self {
-            width: width,
-            height: height,
+            width,
+            height,
             w_offset: 0usize,
             h_offset: 0usize,
-            num_cols: num_cols,
-            num_rows: num_rows,
+            num_cols: 0usize,
+            num_rows: 0usize,
             focused_content: String::new(),
             frame: String::new(),
             changed: WinChange::Init,
@@ -236,6 +236,15 @@ impl WinInfo {
             cursor: Cursor::new(),
             write_buffer: WriteBuf::new(1024),
         }
+    }
+
+    pub fn set_context(&mut self, con: &mut Context) {
+        self.num_cols = con.cells.num_cols();
+        self.num_rows = con.cells.num_rows();
+        self.w_pointer = con.w_pointer;
+        self.h_pointer = con.h_pointer;
+        self.w_offset = con.w_offset;
+        self.h_offset = con.h_offset;
     }
 
     // set w_page and h_page whenever screen is redrawn
