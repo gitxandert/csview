@@ -141,6 +141,8 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
             cells.push_to_col(j, cell);
         }
     }
+    // set w_cell now, since there will be multiple contexts
+    cells.set_w_cell(0, 0);
 
     Ok(cells)
 }
