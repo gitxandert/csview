@@ -395,3 +395,30 @@ impl Cells {
         None
     }
 }
+
+pub struct Context {
+    pub cells: Cells,
+    pub w_pointer: usize,
+    pub h_pointer: usize,
+    pub w_offset: usize,
+    pub h_offset: usize,
+}
+
+impl Context {
+    pub fn new(cells: Cells) -> Self {
+        Self {
+            cells,
+            w_pointer: 0usize,
+            h_pointer: 0usize,
+            w_offset: 0usize,
+            h_offset: 0usize,
+        }
+    }
+
+    pub fn save(&mut self, wi: &WinInfo) {
+        self.w_pointer = wi.w_pointer;
+        self.h_pointer = wi.h_pointer;
+        self.w_offset = wi.w_offset;
+        self.h_offset = wi.h_offset;
+    }
+}
