@@ -28,13 +28,13 @@ fn main() {
         return;
     }
 
+    // skip the program name
     let _ = args.next();
 
     let mut filenames = Vec::<String>::new();
     let mut delimiter: char = ',';
 
     while let Some(arg) = args.next() {
-        println!("Received {arg}");
         match arg.as_str() {
             "-d" | "--delimiter" => {
                 match args.next() {
@@ -60,9 +60,13 @@ fn main() {
     }
 
     let mut contexts = Vec::<Context>::new();
+    let mut id = 0usize;
     for f in filenames {
         match load_csv(f.clone(), delimiter.clone()) {
-            Ok(csv) => contexts.push(Context::new(csv)),
+            Ok(csv) => {
+                contexts.push(Context::new(id, csv));
+                id += 1;
+            }
             Err(e) => {
                 println!("Error loading csv: {e}");
                 return;
@@ -74,12 +78,11 @@ fn main() {
     terminal::install_sig_handlers();
     terminal::raw_mode(true);
 
-    let mut context = &mut contexts[0];
+    let mut con_handle = 0usize;
     let mut w_info = WinInfo::new();
-    w_info.set_context(context);
-    let mut cells = &mut context.cells;
-    w_info.show_csv(&mut cells);
-
+    w_info.set_context(&contexts[con_handle]);
+    w_info.show_csv(&mut contexts[con_handle].cells);
+    
     // main loop
     let mut buffer = [0u8; 16];
     loop {
@@ -88,13 +91,16 @@ fn main() {
             Ok(PollEvent::Data(n)) => {
                 let input = &buffer[..n];
                 if !input.is_empty() {
-                    process_input(input, &mut w_info, &mut cells);
-                    w_info.show_csv(&mut cells);
+
+                    process_input(input, &mut w_info, &mut contexts, &mut con_handle);
+                    w_info.show_csv(&mut contexts[con_handle].cells);
                 }
             }
             Ok(PollEvent::Sig) => {
                 match check_flags() {
-                    SigFlag::Winch => w_info.set_w_h(&mut cells),
+                    SigFlag::Winch => {
+                        w_info.set_w_h(&mut contexts[con_handle].cells);
+                    }
                     SigFlag::Int | SigFlag::Quit => break,
                     SigFlag::Non => continue,
                 }
@@ -116,7 +122,7 @@ fn main() {
     for con in contexts {
         let mut cells = con.cells;
         if cells.written {
-            println!("Write to file? [y/N]: ");
+            println!("Write {} to file? [y/N]: ", cells.filename);
             let mut input = String::new();
             io::stdin()
                 .read_line(&mut input)
@@ -128,15 +134,15 @@ fn main() {
                     // if fails, don't write
                     match save_backup(&cells.filename) {
                         Ok(b) => {
-                            println!("{b}");
+                            println!("\t{b}");
                             match write_to_file(&mut cells) {
-                                Ok(s) => println!("{s}"),
-                                Err(e) => println!("{e}"),
+                                Ok(s) => println!("\t{s}"),
+                                Err(e) => println!("\t{e}"),
                             }
                         }
                         Err(e) => {
-                            println!("WARNING -- could not create back up due to the following:");
-                            println!("\n\t{e}");
+                            println!("\tWARNING -- could not create back up due to the following:");
+                            println!("\t{e}");
                         }
                     }
                 }
