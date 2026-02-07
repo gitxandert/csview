@@ -990,237 +990,318 @@ impl WinInfo {
 
     pub fn process_command(&mut self, cells: &mut Cells) {
         let input = self.write_buffer.as_string();
-        let mut tokens = Self::tokenize(&input, ' ').into_iter();
-        while let Some(tok) = tokens.next() {
-            match tok {
-                // column name
-                // can show, edit, and find column names
-                "cn" => {
-                    match tokens.next() {
-                        // `cn` by itself shows the focused column's name
-                        None => self.show_column_name(cells),
-                        Some(spec) => {
-                            match spec {
-                                "to" => {
-                                    // `cn to` changes the focused column's name
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingName,
-                                                  spec, self.height),
-                                        Some(name) => self.change_col_name(cells, &name),
-                                    }
-                                }
-                                "f" | "find" => {
-                                    // `cn find` moves the focus to the
-                                    // column to find
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingName,
-                                                  spec, self.height),
-                                        Some(name) => self.find_column(cells, &name),
-                                    }
-                                }
-                                _ => cmd_err::print(
-                                       CmdErr::UnknownSpec,
-                                       spec, self.height),
-                            }
-                        }
-                    }
-                }
-                // column
-                // whole-column functions
-                "col" => {
-                    match tokens.next() {
-                        None => cmd_err::print(
-                                  CmdErr::MissingSubCmd,
-                                  tok, self.height),
-                        Some(subcmd) => {
-                            match subcmd {
-                                "mv" | "move"    => {
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingLocation,
-                                                  subcmd, self.height),
-                                        Some(loc) => self.move_focused_column(cells, &loc),
-                                    }
-                                }
-                                "f"  | "find"    => {
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingValue,
-                                                  subcmd, self.height),
-                                        Some(val) => self.find_value_in_col(cells, &val),
-                                    }
-                                }
-                                "n"  | "new"     => {
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingName,
-                                                  subcmd, self.height),
-                                        Some(name) => self.new_column(cells, &name),
-                                    }
-                                }
-                                "rm" | "remove"  => {
-                                    match tokens.next() {
-                                        Some(_) => cmd_err::print(
-                                                     CmdErr::TooManyArgs,
-                                                     subcmd, self.height),
-                                        None => self.remove_column(cells),
-                                    }
-                                }
-                                "g"  | "group"   => {
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingList,
-                                                  subcmd, self.height),
-                                        Some(list) => self.group_columns(cells, &list),
-                                    }
-                                }
-                                "u"  | "unique"  => self.show_unique_column_values(cells),
-                                "s"  | "sort"    => {
-                                    let mut s_dir = Sort::AscAlph;
-                                    match tokens.next() {
-                                        None => self.sort_focused_column(cells, s_dir),
-                                        Some(spec) => {
-                                            match spec {
-                                                "a" => (),
-                                                "r" | "ar" => s_dir = Sort::DescAlph,
-                                                "n" => s_dir = Sort::AscNum,
-                                                "nr" => s_dir = Sort::DescNum,
-                                                _ => {
-                                                    cmd_err::print(
-                                                        CmdErr::UnknownSpec,
-                                                       spec, self.height
-                                                    );
-                                                    break;
-                                                }
-                                            }
-                                            self.sort_focused_column(cells, s_dir);
-                                        }
-                                    }
-                                }
-                                "us" | "unsort" => self.unsort_focused_column(cells),
-                                "fn" | "fillna" => {
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingValue,
-                                                  subcmd, self.height
-                                                ),
-                                        Some(val) => self.col_fillna(cells, &val),
-                                    }
-                                }
-                                "r"  | "replace" => {
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingValue,
-                                                  subcmd, self.height
-                                                ),
-                                        Some(targ) => {
-                                            match tokens.next() {
-                                                None => cmd_err::print(
-                                                          CmdErr::MissingValue,
-                                                          subcmd, self.height
-                                                        ),
-                                                Some(new) => self.replace_in_col(cells, &targ, &new),
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => cmd_err::print(
-                                       CmdErr::InvalidSubCmd,
-                                       subcmd, self.height
+        let mut tokens = Self::tokenize(&input, ' ');
+        match tokens[0] {
+            // column name
+            // can show, edit, and find column names
+            "cn" => self.cn_cmd(
+                        tokens,
+                        cells
+                    ),
+            // column
+            // whole-column functions
+            "col" => self.col_cmd(
+                        tokens,
+                        cells
+                    ),
+            // row
+            // row operations
+            "row" => self.row_cmd(
+                        tokens,
+                        cells
+                    ),
+            // sheet
+            // whole-sheet operations
+            "sh" | "sheet" => self.sheet_cmd(
+                                    tokens,
+                                    cells
+                                  ),
+            // invalid
+            _ => cmd_err::print(
+                    CmdErr::InvalidCommand, 
+                    tokens[0], 
+                    self.height
+                ),
+        }
+    }
+
+    fn cn_cmd(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+        let mut tokens = tokens.into_iter();
+        let _ = tokens.next();
+        match tokens.next() {
+            // `cn` by itself shows the focused column's name
+            None => self.show_column_name(cells),
+            Some(spec) => {
+                match spec {
+                    "to" => {
+                        // `cn to` changes the focused column's name
+                        match tokens.next() {
+                            None => cmd_err::print(
+                                        CmdErr::MissingName,
+                                        spec, 
+                                        self.height
                                     ),
-                            }
+                            Some(name) => self.change_col_name(cells, &name),
                         }
                     }
-                }
-                // row
-                // row operations
-                "row" => {
-                    match tokens.next() {
-                        None => cmd_err::print(
-                                  CmdErr::MissingSubCmd,
-                                  tok, self.height
-                                ),
-                        Some(subcmd) => {
-                            match subcmd {
-                                "i"  | "insert" => self.insert_row(cells),
-                                "d"  | "delete" => self.delete_row(cells),
-                                "mv" | "move"   => {
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingRange,
-                                                  subcmd, self.height
-                                                ),
-                                        Some(range) => {
-                                            match tokens.next() {
-                                                None => cmd_err::print(
-                                                          CmdErr::MissingTarget,
-                                                          subcmd, self.height
-                                                        ),
-                                                Some(target) => self.move_rows(cells, &range, &target),
-                                            }
-                                        }
-                                    }
-                                }
-                                _ =>  cmd_err::print(
-                                        CmdErr::InvalidSubCmd,
-                                        tok, self.height
+                    "f" | "find" => {
+                        // `cn find` moves the focus to the
+                        // column to find
+                        match tokens.next() {
+                            None => cmd_err::print(
+                                        CmdErr::MissingName,
+                                        spec, 
+                                        self.height
                                     ),
-                            }
+                            Some(name) => self.find_column(cells, &name),
                         }
                     }
+                    _ => cmd_err::print(
+                            CmdErr::UnknownSpec,
+                            spec, 
+                            self.height
+                        ),
                 }
-                // sheet
-                // whole-sheet operations
-                "sh" | "sheet" => {
-                    match tokens.next() {
-                        None => cmd_err::print(
-                                  CmdErr::MissingSubCmd,
-                                  tok, self.height
-                                ),
-                        Some(subcmd) => {
-                            match subcmd {
-                                "sb" | "sortby" => {
-                                    match tokens.next() {
-                                        None => cmd_err::print(
-                                                  CmdErr::MissingName,
-                                                  tok, self.height
-                                                ),
-                                        Some(col) => {
-                                            let s_dir = match tokens.next() {
-                                                None => Sort::AscAlph,
-                                                Some(dir) => {
-                                                    match dir {
-                                                        "a" => Sort::AscAlph,
-                                                        "r" | "ar" => Sort::DescAlph,
-                                                        "n" => Sort::AscNum,
-                                                        "nr" => Sort::DescNum,
-                                                        _ => {
-                                                            cmd_err::print(
-                                                              CmdErr::InvalidArg,
-                                                              dir, self.height
-                                                            );
-                                                            return;
-                                                        }
-                                                    }
-                                                }
-                                            };
-                                            self.sort_by(cells, &col, s_dir);
-                                        }
-                                    }
-                                }
-                                _ => cmd_err::print(
-                                       CmdErr::InvalidSubCmd,
-                                       subcmd, self.height
-                                     ),
-                            }
-                        }
-                    }
-                }
-                // invalid
-                _ => cmd_err::print(CmdErr::InvalidCommand, tok, self.height),
             }
+        }
+    }
+    
+    fn col_cmd(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+        let mut tokens = tokens.into_iter();
+        let tok = tokens.next().unwrap();
+        let subcmd = match tokens.next() {
+            None => {
+                cmd_err::print(
+                    CmdErr::MissingSubCmd,
+                    tok, 
+                    self.height
+                );
+                return;
+            }
+            Some(sc) => sc,
+        };
+
+        match subcmd {
+            "mv" | "move"    => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingLocation,
+                                subcmd, 
+                                self.height
+                            ),
+                    Some(loc) => self.move_focused_column(cells, &loc),
+                }
+            }
+            "f"  | "find"    => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingValue,
+                                subcmd, 
+                                self.height
+                            ),
+                    Some(val) => self.find_value_in_col(cells, &val),
+                }
+            }
+            "n"  | "new"     => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingName,
+                                subcmd, 
+                                self.height
+                            ),
+                    Some(name) => self.new_column(cells, &name),
+                }
+            }
+            "rm" | "remove"  => {
+                match tokens.next() {
+                    Some(_) => cmd_err::print(
+                                    CmdErr::TooManyArgs,
+                                    subcmd, 
+                                    self.height
+                                ),
+                    None => self.remove_column(cells),
+                }
+            }
+            "g"  | "group"   => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingList,
+                                subcmd, 
+                                self.height
+                            ),
+                    Some(list) => self.group_columns(cells, &list),
+                }
+            }
+            "u"  | "unique"  => self.show_unique_column_values(cells),
+            "s"  | "sort"    => {
+                let mut s_dir = Sort::AscAlph;
+                match tokens.next() {
+                    None => self.sort_focused_column(cells, s_dir),
+                    Some(spec) => {
+                        match spec {
+                            "a" => (),
+                            "r" | "ar" => s_dir = Sort::DescAlph,
+                            "n" => s_dir = Sort::AscNum,
+                            "nr" => s_dir = Sort::DescNum,
+                            _ => {
+                                cmd_err::print(
+                                    CmdErr::UnknownSpec,
+                                    spec, 
+                                    self.height
+                                );
+                                return;
+                            }
+                        }
+                        self.sort_focused_column(cells, s_dir);
+                    }
+                }
+            }
+            "rv" | "revert" => self.revert_focused_column(cells),
+            "fn" | "fillna" => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingValue,
+                                subcmd, 
+                                self.height
+                            ),
+                    Some(val) => self.col_fillna(cells, &val),
+                }
+            }
+            "r"  | "replace" => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingValue,
+                                subcmd, 
+                                self.height
+                            ),
+                    Some(targ) => {
+                        match tokens.next() {
+                            None => cmd_err::print(
+                                        CmdErr::MissingValue,
+                                        subcmd, 
+                                        self.height
+                                    ),
+                            Some(new) => self.replace_in_col(cells, &targ, &new),
+                        }
+                    }
+                }
+            }
+            _ => cmd_err::print(
+                    CmdErr::InvalidSubCmd,
+                    subcmd, 
+                    self.height
+                ),
+        }
+    }
+
+    fn row_cmd(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+        let mut tokens = tokens.into_iter();
+        let tok = tokens.next().unwrap();
+        let subcmd = match tokens.next() {
+            None => {
+                cmd_err::print(
+                    CmdErr::MissingSubCmd,
+                    tok, 
+                    self.height
+                );
+                return;
+            }
+            Some(sc) => sc,
+        };
+        
+        match subcmd {
+            "i"  | "insert" => self.insert_row(cells),
+            "d"  | "delete" => self.delete_row(cells),
+            "mv" | "move"   => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingRange,
+                                subcmd, 
+                                self.height
+                            ),
+                    Some(range) => {
+                        match tokens.next() {
+                            None => cmd_err::print(
+                                        CmdErr::MissingTarget,
+                                        subcmd, 
+                                        self.height
+                                    ),
+                            Some(target) => self.move_rows(
+                                            cells, 
+                                            &range, 
+                                            &target
+                                        ),
+                        }
+                    }
+                }
+            }
+            _ =>  cmd_err::print(
+                    CmdErr::InvalidSubCmd,
+                    tok, 
+                    self.height
+                ),
+        }
+    }
+        
+    fn sheet_cmd(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+        let mut tokens = tokens.into_iter();
+        let tok = tokens.next().unwrap();
+        let subcmd = match tokens.next() {
+            None =>{
+                cmd_err::print(
+                    CmdErr::MissingSubCmd,
+                    tok, 
+                    self.height
+                );
+                return;
+            }
+            Some(sc) => sc,
+        };
+        
+        match subcmd {
+            "sb" | "sortby" => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingName,
+                                tok,
+                                self.height
+                            ),
+                    Some(col) => {
+                        let s_dir = match tokens.next() {
+                            None => Sort::AscAlph,
+                            Some(dir) => {
+                                match dir {
+                                    "a" => Sort::AscAlph,
+                                    "r" | "ar" => Sort::DescAlph,
+                                    "n" => Sort::AscNum,
+                                    "nr" => Sort::DescNum,
+                                    _ => {
+                                        cmd_err::print(
+                                            CmdErr::InvalidArg,
+                                            dir, 
+                                            self.height
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
+                        };
+                        self.sort_by(cells, &col, s_dir);
+                    }
+                }
+            }
+            /*
+            "sl" | "slice" => {
+                match tokens.next() {
+                    Some(or) => {
+                        match or {
+                            match tokens.next() {
+            */
+            _ => cmd_err::print(
+                    CmdErr::InvalidSubCmd,
+                    subcmd, 
+                    self.height
+                ),
         }
     }
 
@@ -1770,7 +1851,7 @@ impl WinInfo {
         self.flush();
     }
 
-    fn unsort_focused_column(&mut self, cells: &mut Cells) {
+    fn revert_focused_column(&mut self, cells: &mut Cells) {
         cells.w_cell().is_focused = false;
         let mut col = &mut cells.columns[self.w_pointer];
         col.indices = (0..col.len()).collect();
