@@ -261,8 +261,6 @@ impl WinInfo {
         self.h_pointer = con.h_pointer;
         self.w_offset = con.w_offset;
         self.h_offset = con.h_offset;
-        
-        self.print_context(con);
     }
 
     // set w_page and h_page whenever screen is redrawn
@@ -376,11 +374,11 @@ impl WinInfo {
 
         if cursor.offset == 0 {
             if buf.offset > 0 {
-                buf.offset = buf.offset - 1;
+                buf.offset = buf.offset.saturating_sub(1);
                 buf.move_gap(buf.gap_start.saturating_sub(1));
             }
         } else {
-            cursor.offset = cursor.offset - 1;
+            cursor.offset = cursor.offset.saturating_sub(1);
             buf.move_gap(buf.gap_start.saturating_sub(1));
         }
     }
@@ -396,8 +394,8 @@ impl WinInfo {
                 self.width = ws.ws_col as usize;
                 self.height = ws.ws_row as usize;
             }
-            self.print_context(csvs.get_context());
             self.draw_screen(csvs.get_cells());
+            self.print_context(csvs);
             self.draw_focused_content();
             self.flush();
         }
@@ -629,21 +627,64 @@ impl WinInfo {
         }
     }
 
-    pub fn print_context(&mut self, con: &mut Context) {
+    fn printed_context_width(con: &mut Context) -> usize {
+        let mut pad_num = 1usize;
+        let mut num = con.id;
+        while num > 10 {
+            pad_num += 1;
+            num /= 10;
+        }
+        pad_num + con.cells().filename.len()
+    }
+
+
+    pub fn print_context(&mut self, csvs: &mut Csvs) {
         self.push_str_to_frame(
             &format!(
-                "\x1b[{};1H\x1b[2K\x1b[0m",
+                "\x1b[{};1H\x1b[2K\x1b[0m\x1b[30;47m",
                 self.height.saturating_sub(1)
             )
         );
-        self.push_str_to_frame(
-            &format!(
-                "\x1b[30;47m{}: {:<width$}\x1b[39;49m",
-                con.id.clone(),
-                con.cells().filename,
-                width = self.width
-            )
+
+        let mut width = 0usize;
+        let mut i = 0usize;
+        while width < self.width && i < csvs.num_contexts() { 
+            let con = &mut csvs.contexts[i];
+            let con_width = Self::printed_context_width(con);
+            width += con_width.min(self.width);
+            let formatted = {
+                let con_string = format!(
+                                    "{}: {} ",
+                                    con.id.clone(),
+                                    con.cells().filename
+                                );
+                if i == csvs.handle {
+                    format!(
+                        "\x1b[7;36m{:<width$}\x1b[27;39m\x1b[30m",
+                        con_string,
+                        width = con_width
+                    )
+                } else {
+                    format!(
+                        "{:<width$}",
+                        con_string,
+                        width = con_width
+                    )
+                }
+            };
+
+            self.push_str_to_frame(
+                &formatted
+            );
+            i += 1;
+        }
+        width = self.width.saturating_sub(width);
+        let padding = format!(
+            "{:<width$}\x1b[39;49m", 
+            "",
+            width = width
         );
+        self.push_str_to_frame(&padding);
     }
 
     pub fn draw_screen(&mut self, cells: &mut Cells) {
@@ -671,7 +712,7 @@ impl WinInfo {
             } else {
                 let row_id = i.saturating_sub(3) + self.h_offset;
                 if row_id >= self.num_rows {
-                    break;
+                    continue;
                 }
 
                 let row_num = format!(
@@ -769,7 +810,7 @@ impl WinInfo {
             let cur_l = 3 + self.h_pointer.saturating_sub(self.h_offset); 
             let beg = format!(
                 "\x1b[{};{}H\x1b[K\x1b[4m", cur_l, start
-            );
+                 );
             self.push_str_to_frame(&beg);
             
             let mut col = self.w_pointer;
@@ -1349,6 +1390,7 @@ impl WinInfo {
                 }
             }
             "sl" | "slice" => self.slice(tokens, csvs),
+            "sp" | "splice" => self.splice(tokens, csvs),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd), 
                     self.height
@@ -2369,10 +2411,10 @@ impl WinInfo {
         csvs.push_context(new_context);
         csvs.set_handle(new_id);
 
-        let context = csvs.get_context();
-        self.set_context(context);
+        self.set_context(csvs.get_context());
+        self.print_context(csvs);
         self.changed = WinChange::Screen;
-        self.show_csv(context.cells());
+        self.show_csv(csvs.get_cells());
     }
 
     fn slice_rows(&mut self, range: &str, csvs: &mut Csvs) {
@@ -2435,10 +2477,140 @@ impl WinInfo {
         csvs.push_context(new_context);
         csvs.set_handle(new_id);
 
-        let context = csvs.get_context();
-        self.set_context(context);
+        self.set_context(csvs.get_context());
+        self.print_context(csvs);
         self.changed = WinChange::Screen;
-        self.show_csv(context.cells());
+        self.show_csv(csvs.get_cells());
+    }
+
+    fn splice(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
+        let mut tokens = tokens.into_iter();
+        for i in 0..2 {
+            let _ = tokens.next();
+        }
+        let or = match tokens.next() {
+            Some(o) => o,
+            None => {
+                cmd_err::print(
+                    CmdErr::MissingValue("splice {'col' or 'row'}"),
+                    self.height
+                );
+                return;
+            }
+        };
+
+        let con_id = match tokens.next() {
+            Some(r) => {
+                match Self::str_to_dec(r) {
+                    Ok(num) => {
+                        if csvs.handle == num {
+                            cmd_err::print(
+                                CmdErr::SameCon,
+                                self.height
+                            );
+                            return;
+                        }
+                        if num > csvs.num_contexts() {
+
+                            cmd_err::print(
+                                CmdErr::InvalidConId(r),
+                                self.height
+                            );
+                            return;
+                        }
+                        num
+                    }
+                    Err(e) => {
+                        cmd_err::print(
+                            e, self.height
+                        );
+                        return;
+                    }
+                }
+            }
+            None => {
+                cmd_err::print(
+                    CmdErr::MissingConId("splice"),
+                    self.height
+                );
+                return;
+            }
+        };
+    
+        // insert at focus
+        let at = self.w_pointer;
+
+        match or {
+            "c" | "cols" => self.splice_cols(
+                                con_id, 
+                                at, 
+                                csvs
+                            ),
+            "r" | "rows" => self.splice_rows(
+                                con_id, 
+                                at,
+                                csvs
+                            ),
+            _ => cmd_err::print(
+                    CmdErr::InvalidArg(or),
+                    self.height
+                ),
+        }
+    }
+
+    fn splice_cols(&mut self, con_id: usize, at_col: usize, csvs: &mut Csvs) {
+        // insert columns from csvs.context[at_col]
+        // after the focused column
+        let mut src_con = csvs.remove_context(con_id);
+        let mut src_cells = src_con.cells();
+        src_cells.w_cell().is_focused = false;
+        let mut dest_cells = csvs.get_cells();
+        
+        let num_cols = src_cells.num_cols();
+        let max_rows = dest_cells
+            .num_rows()
+            .max(src_cells.num_rows()) - 1;
+        
+        let st = at_col + 1;
+        let end = st + num_cols;
+        for i in st..end {
+            let col = src_cells
+                .columns
+                .remove(0);
+            let col_name = src_cells
+                .header
+                .remove(0);
+
+            dest_cells.insert_column(i, col);
+            dest_cells.insert_col_name(i, col_name);
+            dest_cells.increment_col_ids();
+        }
+        // realign cell widths
+        for i in st..dest_cells.num_cols() {
+            dest_cells.col_ids[i].width = dest_cells.header[i].width;
+        }
+
+        for col in &mut dest_cells.columns {
+            while col.len() < max_rows {
+                col.push_cell(Cell::new(""));
+            }
+        }
+        
+        dest_cells.written = true;
+        
+        self.num_cols += num_cols;
+        self.draw_from_column(dest_cells);
+
+        drop(dest_cells);
+        
+        self.print_context(csvs);
+        self.draw_focused_content();
+        self.flush();
+    }
+
+
+    fn splice_rows(&mut self, con_id: usize, at_col: usize, csvs: &mut Csvs) {
+        todo!()
     }
 }
 
