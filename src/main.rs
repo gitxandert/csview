@@ -11,7 +11,7 @@ mod input;
 mod terminal;
 
 use crate::{
-    cells::{Cells, Context},
+    cells::{Cells, Context, Csvs},
     input::process_input,
     terminal::{check_flags, SigFlag, WinInfo},
     csv_io::{
@@ -78,10 +78,10 @@ fn main() {
     terminal::install_sig_handlers();
     terminal::raw_mode(true);
 
-    let mut con_handle = 0usize;
+    let mut csvs = Csvs::new(contexts);
     let mut w_info = WinInfo::new();
-    w_info.set_context(&contexts[con_handle]);
-    w_info.show_csv(&mut contexts[con_handle].cells);
+    w_info.set_context(csvs.get_context());
+    w_info.show_csv(csvs.get_cells());
     
     // main loop
     let mut buffer = [0u8; 16];
@@ -92,14 +92,14 @@ fn main() {
                 let input = &buffer[..n];
                 if !input.is_empty() {
 
-                    process_input(input, &mut w_info, &mut contexts, &mut con_handle);
-                    w_info.show_csv(&mut contexts[con_handle].cells);
+                    process_input(input, &mut w_info, &mut csvs);
+                    w_info.show_csv(csvs.get_cells());
                 }
             }
             Ok(PollEvent::Sig) => {
                 match check_flags() {
                     SigFlag::Winch => {
-                        w_info.set_w_h(&mut contexts[con_handle].cells);
+                        w_info.set_w_h(csvs.get_cells());
                     }
                     SigFlag::Int | SigFlag::Quit => break,
                     SigFlag::Non => continue,
@@ -119,7 +119,7 @@ fn main() {
 
     // restore terminal
     terminal::raw_mode(false);
-    for con in contexts {
+    for con in csvs.contexts {
         let mut cells = con.cells;
         if cells.written {
             println!("Write {} to file? [y/N]: ", cells.filename);
