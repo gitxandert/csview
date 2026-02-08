@@ -1,5 +1,5 @@
 # csview - command-line spreadsheet TUI
-This program takes a single file argument and renders it as a series of cells across the entire width and height of the terminal. Horizontal and vertical offsets are controlled via the arrow, ctrl, and shift keys. Every time the window is resized, correspondingly more or less cells are shown.
+This program takes multiple file arguments and renders them as series of cells across the entire width and height of the terminal. Horizontal and vertical offsets are controlled via the arrow, ctrl, and shift keys. Every time the window is resized, correspondingly more or less cells are shown.
 
 It is also possible to write to cells (see **Use** below). To preserve data on write, a mini versioning system has been instigated, preserving the last ten iterations of a file to a .csview/backups directory in the user's home directory.
 
@@ -21,6 +21,8 @@ There is an argument -d/--delimiter that is default set to ',', but can take any
     
     csview -d : some_colon_separated_file
 
+You can feed multiple files as arguments to csview, but they currently need to all have the same delimiter.
+
 csview currently admits the following key bindings:
 - **ctrl + C | ctrl + forward-slash**
     - closes the program
@@ -39,6 +41,8 @@ csview currently admits the following key bindings:
     - scroll through text within a cell when not in write mode
 - **ctrl + shift + arrow key (left or right)**  
     - adjust column width
+- **number keys**
+    - switch between different files
 
 csview also has a command mode, accessed through ':' :
 - **cn**: column name functions
@@ -93,5 +97,22 @@ csview also has a command mode, accessed through ':' :
     - `sh sb {column} {direction}` | `sheet sortby {column} {direction}`
         - reindexes all columns according to the sorted column's indices
         - direction arguments are the same as for `col sort`
+    - `sh sl {orientation} {range}` | `sheet slice {orientation} {range}`
+        - slices out the specified columns or rows into a separate sheet
+            - switch between sheets with the number keys
+        - orientation can be:
+            - 'c' | 'cols'
+            - 'r' | 'rows'
+        - range can be expressed as:
+            - a single column name/id or row index/id
+            - two column names/ids or row indices/ids separated by a '-'
+            - a column name/id or row index/id, a '+', and the number of columns or row afterward to include
+    - `sh sp {orientation} {sheet id} {loc}` | `sheet splice {sheet id} {orientation} {loc}`
+        - adds one sheet's content to the focused sheet by orientation and at the location specified
+        - sheet id is a number key associated with a sheet apart from the focused sheet's
+        - orientation can be:
+            - 'c' | 'cols'
+            - 'r' | 'rows'
+        - loc is the column name/id or row index/id of the focused sheet to splice at
 - **ctrl + Q**
     - quits command mode
