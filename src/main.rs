@@ -81,6 +81,7 @@ fn main() {
     let mut csvs = Csvs::new(contexts);
     let mut w_info = WinInfo::new();
     w_info.set_context(csvs.get_context());
+    w_info.print_context(&mut csvs);
     w_info.show_csv(csvs.get_cells());
     
     // main loop
