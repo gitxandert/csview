@@ -52,8 +52,15 @@ csview also has a command mode, accessed through ':' :
     - `cn to {name}`
         - changes the focused column's name to a new name
 - **col**: column functions
-    - `col mv {loc}` | `col move {loc}`
-        - moves the focused column to a new location
+    - `col mv {range} {loc}` | `col move {range} {loc}`
+        - moves the range of colummns provided to a new location
+        - range can be expressed as:
+            - a single column name/id
+            - two column names/ids separated by a hyphen
+            - a column name/id, a '+', and the number of additional columns to include in the move
+            - additionally:
+                - _ indicates the focused column
+                - an empty value for either part of a range indicate respectively the first or last columns
         - loc is either the target column name in quotes or the target column ID (i.e. A, B, C) without quotes
     - `col f {value}` | `col find {value}`
         - finds all occurrences of the provided value within the focused column
