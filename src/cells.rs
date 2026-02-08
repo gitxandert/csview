@@ -203,9 +203,8 @@ impl Column {
     }
 
     pub fn insert_cell(&mut self, idx: usize, cell: Cell) {
-        let mut real_idx = idx;
         if idx < self.indices.len() {
-            real_idx = self.indices[idx];
+            let real_idx = self.indices[idx];
             self.cells.insert(real_idx, cell);
             self.indices.push(0usize);
             for i in ((idx + 1)..self.indices.len()).rev() {
