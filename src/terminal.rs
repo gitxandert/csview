@@ -202,6 +202,22 @@ pub struct WinInfo {
     write_buffer: WriteBuf,
 }
 
+// helper macro to print to bottom of screen
+// (only works with WinInfo)
+macro_rules! print_bottom {
+    ($self:expr, $fmt:expr $(, $args:expr)*) => {
+        // Here, 'self' and 'self.height' are assumed to be in scope
+        // where the macro is called.
+        let formatted_string = format!(
+            concat!("\x1b[{};1H", "\x1b[2K", "\x1b[0m", $fmt),
+            $self.height,
+            $($args),*
+        );
+        
+        $self.push_str_to_frame(&formatted_string);
+    };
+}
+
 impl WinInfo {
     pub fn new() -> Self {
         let (width, height) = {
@@ -520,11 +536,8 @@ impl WinInfo {
     }
 
     pub fn draw_focused_content(&mut self) {
-        self.push_str_to_frame(
-            &format!(
-                "\x1b[{};1H\x1b[2K\x1b[0m{}",
-                self.height, self.focused_content
-            )
+        print_bottom!(
+            self, "{}", self.focused_content
         );
     }
     
@@ -1244,9 +1257,8 @@ impl WinInfo {
     }
         
     fn sheet_cmd(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
-        let mut tokens = tokens.into_iter();
-        let tok = tokens.next().unwrap();
-        let subcmd = match tokens.next() {
+        let tok = tokens[0];
+        let subcmd = match tokens.get(1) {
             None =>{
                 cmd_err::print(
                     CmdErr::MissingSubCmd,
@@ -1255,11 +1267,15 @@ impl WinInfo {
                 );
                 return;
             }
-            Some(sc) => sc,
+            Some(sc) => *sc,
         };
         
         match subcmd {
             "sb" | "sortby" => {
+                let mut tokens = tokens.into_iter();
+                for i in 0..2 {
+                    let _ = tokens.next();
+                }
                 match tokens.next() {
                     None => cmd_err::print(
                                 CmdErr::MissingName,
@@ -1290,13 +1306,7 @@ impl WinInfo {
                     }
                 }
             }
-            /*
-            "sl" | "slice" => {
-                match tokens.next() {
-                    Some(or) => {
-                        match or {
-                            match tokens.next() {
-            */
+            "sl" | "slice" => self.slice(tokens, cells),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd,
                     subcmd, 
@@ -1316,10 +1326,9 @@ impl WinInfo {
     //
     fn show_column_name(&mut self, cells: &mut Cells) {
         let col = &cells.header[self.w_pointer];
-        self.push_str_to_frame(
-            &format!("\x1b[{};1H\x1b[2K\x1b[0m{}",
-                self.height, col.content)
-            );
+        print_bottom!(
+            self, "{}", col.content
+        );
         self.flush();
     }
 
@@ -1413,11 +1422,10 @@ impl WinInfo {
     fn draw_col_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<usize>) {
         self.set_h_pointer(indices[idx]);
         self.show_csv(cells);
-        self.push_str_to_frame(
-            &format!(
-                "\x1b[{};1H\x1b[2K\x1b[0m{}/{}",
-                self.height, idx + 1, indices.len()
-            )
+        print_bottom!(
+            self, 
+            "{}/{}",
+            idx + 1, indices.len()
         );
         self.flush();
     }
@@ -1432,10 +1440,10 @@ impl WinInfo {
             .collect();
         
         if indices.len() == 0 {
-            self.push_str_to_frame(
-                &format!(
-                    "\x1b[{};1H\x1b[2KNo instance of '{}' in '{}'",
-                    self.height, val, cells.header[self.w_pointer].content)
+            print_bottom!(
+                self,
+                "No instance of '{}' in '{}'",
+                val, cells.header[self.w_pointer].content
             );
             self.flush();
             return;
@@ -1501,11 +1509,10 @@ impl WinInfo {
                     }
                 }
                 Err(e) => {
-                    self.push_str_to_frame(
-                        &format!(
-                            "\x1b[{};1H\x1b[2K\x1b[0mERR: {}",
-                            self.height, e
-                        )
+                    print_bottom!(
+                        self,
+                        "ERR: {}",
+                        e
                     );
                     self.flush();
                 }
@@ -1539,23 +1546,18 @@ impl WinInfo {
         self.num_cols += 1;
         self.set_w_pointer(self.w_pointer + 1);
         self.draw_screen(cells);
-        self.push_str_to_frame(
-            &format!(
-                "\x1b[{};1H\x1b[2K\x1b[0m",
-                self.height
-            )
-        );
+        self.set_focused("");
+        self.draw_focused_content();
         self.flush();
     }
 
     fn remove_column(&mut self, cells: &mut Cells) {
         // confirm remove
         let col_name = cells.header[self.w_pointer].content.clone();
-        self.push_str_to_frame(
-            &format!(
-                "\x1b[{};1H\x1b[2K\x1b[0m\x1b[?25lConfirm remove column '{}' with 'y': ",
-                self.height, col_name
-            )
+        print_bottom!(
+            self,
+            "\x1b[?25lConfirm remove column '{}' with 'y': ",
+            col_name
         );
         self.flush();
         let mut buffer = [0u8; 1];
@@ -1576,22 +1578,20 @@ impl WinInfo {
                             self.num_cols -= 1;
                             self.draw_screen(cells);
                             
-                            self.push_str_to_frame(
-                                &format!(
-                                    "\x1b[{};1H\x1b[2K\x1b[0mRemoved column '{}'",
-                                    self.height, col_name
-                                )
+                            print_bottom!(
+                                self,
+                                "Removed column '{}'",
+                                col_name
                             );
                             self.flush();
 
                             break;
                         }
                         _ => {
-                            self.push_str_to_frame(
-                                &format!(
-                                    "\x1b[{};1H\x1b[2K\x1b[0mColumn '{}' was not removed.",
-                                    self.height, col_name
-                                )
+                            print_bottom!(
+                                self,
+                                "Column '{}' was not removed.",
+                                col_name
                             );
                             self.flush();
                             break;
@@ -1681,6 +1681,9 @@ impl WinInfo {
         uq.width = orig.width;
 
         for o_cell in &orig.cells {
+            if o_cell.content == "" {
+                continue;
+            }
             let mut seen = false;
             for u_cell in &uq.cells {
                 if u_cell.content == o_cell.content {
@@ -1696,10 +1699,10 @@ impl WinInfo {
         }
 
         if uq.len() == 0 {
-            self.push_str_to_frame(
-                &format!("\x1b[{};1H\x1b[2K\x1b[0mNo values in '{}'",
-                    self.height, cells.header[self.w_pointer].content
-                )
+            print_bottom!(
+                self,
+                "No values in '{}'",
+                cells.header[self.w_pointer].content
             );
             self.flush();
             return;
@@ -1724,13 +1727,12 @@ impl WinInfo {
         cells.set_w_cell(cells.w_cell.0, cells.w_cell.1);
         self.draw_from_column(cells);
         let values = "values";
-        self.push_str_to_frame(
-            &format!("\x1b[?25l\x1b[{};1H\x1b[2K\x1b[0m{} unique {} in '{}'",
-                self.height, 
-                uq_len, 
-                &values[0..6-2usize.saturating_sub(uq_len)], 
-                cells.header[self.w_pointer].content,
-            )
+        print_bottom!(
+            self,
+            "\x1b[?25l{} unique {} in '{}'",
+            uq_len, 
+            &values[0..6-2usize.saturating_sub(uq_len)], 
+            cells.header[self.w_pointer].content
         );
         self.flush();
         let mut buf = [0u8; 8];
@@ -1763,11 +1765,10 @@ impl WinInfo {
                     }
                 }
                 Err(e) => {
-                    self.push_str_to_frame(
-                        &format!(
-                            "\x1b[{};1H\x1b[2K\x1b[0mERR: {}",
-                            self.height, e
-                        )
+                    print_bottom!(
+                        self,
+                        "ERR: {}",
+                        e
                     );
                     self.flush();
                 }
@@ -1908,11 +1909,10 @@ impl WinInfo {
     }
 
     fn delete_row(&mut self, cells: &mut Cells) {
-        self.push_str_to_frame(
-            &format!(
-                "\x1b[{};1H\x1b[2K\x1b[0m\x1b[?25lConfirm remove row {:04X} with 'y': ",
-                self.height, self.h_pointer
-            )
+        print_bottom!(
+            self,
+            "\x1b[?25lConfirm remove row {:04X} with 'y': ",
+            self.h_pointer
         );
         self.flush();
         let mut buffer = [0u8; 1];
@@ -1937,22 +1937,20 @@ impl WinInfo {
                                 self.draw_screen(cells);
                             }
                             
-                            self.push_str_to_frame(
-                                &format!(
-                                    "\x1b[{};1H\x1b[2K\x1b[0mRemoved row {:04X}",
-                                    self.height, self.h_pointer
-                                )
+                            print_bottom!(
+                                self,
+                                "Removed row {:04X}",
+                                self.h_pointer
                             );
                             self.flush();
 
                             break;
                         }
                         _ => {
-                            self.push_str_to_frame(
-                                &format!(
-                                    "\x1b[{};1H\x1b[2K\x1b[0mRow {:04X} was not deleted.",
-                                    self.height, self.h_pointer
-                                )
+                            print_bottom!(
+                                self,
+                                "Row {:04X} was not deleted.",
+                                self.h_pointer
                             );
                             self.flush();
                             break;
@@ -2176,7 +2174,58 @@ impl WinInfo {
             }
         }
     }
+
+    fn slice(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+        let mut tokens = tokens.into_iter();
+        for i in 0..2 {
+            let _ = tokens.next();
+        }
+        let or = match tokens.next() {
+            Some(o) => o,
+            None => {
+                cmd_err::print(
+                    CmdErr::MissingValue,
+                    "slice {'col' or 'row'}",
+                    self.height
+                );
+                return;
+            }
+        };
+
+       let range = match tokens.next() {
+           Some(r) => r,
+           None => {
+               cmd_err::print(
+                   CmdErr::MissingRange,
+                   "slice",
+                   self.height
+                );
+               return;
+            }
+        };
+
+        match or {
+            "col" => self.slice_cols(&range, cells),
+            "row" => self.slice_rows(&range, cells),
+            _ => cmd_err::print(
+                    CmdErr::InvalidArg,
+                    or,
+                    self.height
+                ),
+        }
+    }
+
+    fn slice_cols(&mut self, range: &str, cells: &mut Cells) {
+        print_bottom!(self, "slicing cols in range {}", range); 
+    }
+
+    fn slice_rows(&mut self, range: &str, cells: &mut Cells) {
+        print_bottom!(self, "slicing rows in range {}", range);
+    }
+
 }
+
+
 
 // Terminal takeover + signal handling + globals for WIDTH and HEIGHT
 
