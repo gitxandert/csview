@@ -3,11 +3,13 @@ use std::io::{self, Read, Write};
 pub enum CmdErr<'a> {
     InvalidArg(&'a str),
     InvalidCommand(&'a str),
+    InvalidConId(&'a str),
     InvalidDec(&'a str),
     InvalidHex(char),
     InvalidIndex(usize),
     InvalidRange(&'a str),
     InvalidSubCmd(&'a str),
+    MissingConId(&'a str),
     MissingList(&'a str),
     MissingLocation(&'a str),
     MissingName(&'a str),
@@ -17,6 +19,7 @@ pub enum CmdErr<'a> {
     MissingTarget(&'a str),
     NoId(&'a str),
     NoName(&'a str),
+    SameCon,
     StdinErr(&'a str),
     TooManyArgs(&'a str),
     UnknownSpec(&'a str),
@@ -35,6 +38,11 @@ pub fn print(err: CmdErr, line: usize) {
 
             CmdErr::InvalidCommand(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid command '{}'",
+                    line, t
+                ),
+
+            CmdErr::InvalidConId(t) => format!(
+                    "\x1b[{};1H\x1b[2KERR: invalid context id '{}'",
                     line, t
                 ),
 
@@ -60,6 +68,11 @@ pub fn print(err: CmdErr, line: usize) {
 
             CmdErr::InvalidSubCmd(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid sub-command '{}'",
+                    line, t
+                ),
+
+            CmdErr::MissingConId(t) => format!(
+                    "\x1b[{};1H\x1b[2KERR: missing context id for '{}'",
                     line, t
                 ),
 
@@ -106,6 +119,11 @@ pub fn print(err: CmdErr, line: usize) {
             CmdErr::NoName(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: no column called '{}'",
                     line, t
+                ),
+
+            CmdErr::SameCon => format!(
+                    "\x1b[{};1H\x1b[2KERR: can't splice the active context to itself",
+                    line
                 ),
 
             CmdErr::StdinErr(t) => format!(
