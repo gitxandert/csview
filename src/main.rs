@@ -99,7 +99,7 @@ fn main() {
             Ok(PollEvent::Sig) => {
                 match check_flags() {
                     SigFlag::Winch => {
-                        w_info.set_w_h(csvs.get_cells());
+                        w_info.set_w_h(&mut csvs);
                     }
                     SigFlag::Int | SigFlag::Quit => break,
                     SigFlag::Non => continue,
