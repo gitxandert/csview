@@ -1601,13 +1601,12 @@ impl WinInfo {
         let mut columns = Self::tokenize(list, ',').into_iter();
         // columns.next() for sure has a value here
         let p_col_name = columns.next().unwrap();
-        let p_col_name = Self::trim_quotes(p_col_name);
 
         let mut p_col_idx = match cells.get_col_idx(p_col_name) {
-            Some(idx) => idx,
-            None      => {
+            Ok(idx) => idx,
+            Err(e)      => {
                 cmd_err::print(
-                    CmdErr::NoName(p_col_name), self.height
+                    e, self.height
                 );
                 return;
             }
@@ -1618,12 +1617,11 @@ impl WinInfo {
         let mut ids = Vec::<usize>::with_capacity(columns.len());
 
         while let Some(name) = columns.next() {
-            let name = Self::trim_quotes(name);
             match cells.get_col_idx(name) {
-                Some(idx) => ids.push(idx),
-                None => {
+                Ok(idx) => ids.push(idx),
+                Err(e) => {
                     cmd_err::print(
-                        CmdErr::NoName(name), self.height
+                        e, self.height
                     );
                     return;
                 }
@@ -2016,7 +2014,7 @@ impl WinInfo {
         }
     }
 
-    fn parse_range<'a>(&mut self, range: &'a str) -> Result<(usize, usize), CmdErr<'a>> {
+    fn parse_row_range<'a>(&mut self, range: &'a str) -> Result<(usize, usize), CmdErr<'a>> {
         // range can be expressed as:
         // - a single index (e.g. '63' or 99)
         // - two indices separated by a hyphen (e.g. '104D'-'105F')
@@ -2048,7 +2046,7 @@ impl WinInfo {
     }
 
     fn move_rows(&mut self, cells: &mut Cells, range: &str, target: &str) {
-        let (t_lo, t_hi) = match self.parse_range(range) {
+        let (t_lo, t_hi) = match self.parse_row_range(range) {
             Ok((l, h)) => (l, h),
             Err(e) => {
                 cmd_err::print(e, self.height);
@@ -2128,16 +2126,14 @@ impl WinInfo {
     // sheet functions
     //
     fn sort_by(&mut self, cells: &mut Cells, col_name: &str, sort_dir: Sort) {
-        let col_name = Self::trim_quotes(col_name);
         match cells.get_col_idx(col_name) {
-            None => {
+            Err(e) => {
                 cmd_err::print(
-                      CmdErr::NoName(col_name), 
-                      self.height
-                    );
+                    e, self.height
+                );
                 return;
             }
-            Some(col_idx) => {
+            Ok(col_idx) => {
                 cells.w_cell().is_focused = false;
                 {
                     let mut col = &mut cells.columns[col_idx];
@@ -2196,7 +2192,7 @@ impl WinInfo {
         }
     }
 
-    fn slice_cols(&mut self, range: &str, cells: &mut Csvs) {
+    fn slice_cols(&mut self, range: &str, csvs: &mut Csvs) {
         let cols = match Self::tokenize_range(range) {
             Ok(tokens) => tokens,
             Err(e) => {
@@ -2207,6 +2203,42 @@ impl WinInfo {
                 return;
             }
         };
+
+        // -remove columns
+        // -push them into new Cells
+        //  -think of what name to give the slice...
+        //  -maybe keep a slices field in Cells?
+        // -create new Context
+        // -add Context to Csvs and change handle to it
+        //
+        let cells = csvs.get_cells();
+        let ida = match cells.get_col_idx(cols[0]) {
+            Ok(id) => id,
+            Err(e) => {
+                cmd_err::print(
+                    e, self.height
+                );
+                return;
+            }
+        };
+        let idb = match cells.get_col_idx(cols[1]) {
+            Ok(id) => id,
+            Err(e) => {
+                cmd_err::print(
+                    e, self.height
+                );
+                return;
+            }
+        };
+/*
+            cells.columns.remove(self.w_pointer);
+            cells.header.remove(self.w_pointer);
+            cells.col_ids.pop();
+            for i in self.w_pointer..cells.col_ids.len() {
+                cells.col_ids[i].width = cells.header[i].width;
+            }
+            cells.written = true;
+*/
     }
 
     fn slice_rows(&mut self, range: &str, cells: &mut Csvs) {
