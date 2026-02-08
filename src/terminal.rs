@@ -1168,13 +1168,22 @@ impl WinInfo {
             "mv" | "move"    => {
                 match tokens.next() {
                     None => cmd_err::print(
-                                CmdErr::MissingLocation(subcmd), 
+                                CmdErr::MissingRange(subcmd), 
                                 self.height
                             ),
-                    Some(loc) => self.move_focused_column(
-                                    csvs.get_cells(), 
-                                    &loc
-                                ),
+                    Some(range) => {
+                        match tokens.next() {
+                            None => cmd_err::print(
+                                        CmdErr::MissingLocation(subcmd),
+                                        self.height
+                                    ),
+                            Some(loc) => self.move_columns(
+                                            csvs.get_cells(), 
+                                            &range,
+                                            &loc,
+                                        ),
+                        }
+                    }
                 }
             }
             "f"  | "find"    => {
@@ -1310,7 +1319,24 @@ impl WinInfo {
         };
         
         match subcmd {
-            "i"  | "insert" => self.insert_row(csvs.get_cells()),
+            "i"  | "insert" => {
+                let count = match tokens.next() {
+                    Some(num) => {
+                        match num.parse::<usize>() {
+                            Ok(u) => u,
+                            Err(e) => {
+                                cmd_err::print(
+                                    CmdErr::InvalidDec(num),
+                                    self.height
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    None => 1usize,
+                };
+                self.insert_row(csvs.get_cells(), count);;
+            }
             "d"  | "delete" => self.delete_row(csvs),
             "mv" | "move"   => {
                 match tokens.next() {
@@ -1456,53 +1482,106 @@ impl WinInfo {
 
     // column functions
     //
-    fn move_focused_column(&mut self, cells: &mut Cells, loc: &str) {
-        let mut idx = match loc.chars().nth(0).unwrap() {
-            // column names must be quoted
-            '"' | '\'' => {
-                // make sure quotes match
-                let last = loc.len() - 1;
-                if loc.chars().nth(last).unwrap() == loc.chars().nth(0).unwrap() {
-                    let name = &loc[1..(last).max(1)];
-                    match cells.header.iter().position(|h| &h.content == name) {
-                        Some(index) => index,
-                        None => {
-                            cmd_err::print(CmdErr::NoName(name), self.height);
-                            return;
-                        }
+    fn move_columns(&mut self, cells: &mut Cells, range: &str, loc: &str) {
+        let (mut tokens, delim) = Self::tokenize_range(range); 
+        
+        let ida = match tokens[0] {
+            "" => 0,
+            "_" => self.w_pointer,
+            _ => {
+                match cells.get_col_idx(tokens[0]) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        cmd_err::print(
+                            e, self.height
+                        );
+                        return;
                     }
-                } else {
-                    cmd_err::print(CmdErr::UnmatchedQuote(loc), self.height);
-                    return;
                 }
             }
-            // if unquoted, search col_ids
-            _ => {
-                // automatically discount loc if longer than any col_id
-                let last = cells.col_ids.len() - 1;
-                if loc.len() > cells.col_ids[last].content.len() {
-                    cmd_err::print(CmdErr::NoId(loc), self.height);
-                    return;
-                } else {
-                    match cells.col_ids.iter().position(|i| &i.content == loc) {
-                        Some(index) => index,
-                        None => {
-                            cmd_err::print(CmdErr::NoId(loc), self.height);
-                            return;
+        };
+
+        let idb = match tokens.get(1) {
+            None => ida,
+            Some(t) => {
+                match delim {
+                    None => ida,
+                    Some(d) => {
+                        match d {
+                            '-' => {
+                                match *t {
+                                    "" => cells.num_cols() - 1,
+                                    _ => {
+                                        match cells.get_col_idx(t) {
+                                            Ok(id) => id,
+                                            Err(e) => {
+                                                cmd_err::print(
+                                                    e, self.height
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            '+' => {
+                                match *t {
+                                    "" => cells.num_cols() - 1,
+                                    _ => {
+                                        match Self::str_to_dec(t) {
+                                            Ok(d) => {
+                                                let i = ida + d;
+                                                if i > cells.num_cols() {
+                                                    cmd_err::print(
+                                                        CmdErr::InvalidIndex(ida + d),
+                                                        self.height
+                                                    );
+                                                    return;
+                                                }
+                                                i
+                                            }
+                                            Err(e) => {
+                                                cmd_err::print(
+                                                    e, self.height
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => ida,
                         }
                     }
                 }
             }
         };
-        
-        let f_col = cells.columns.remove(self.w_pointer);
-        let f_col_name = cells.header.remove(self.w_pointer);
-        // adjust col_id widths
-        cells.col_ids[self.w_pointer].width = cells.columns[self.w_pointer].width;
-        cells.col_ids[idx].width = f_col.width;
-        // move column and header
-        cells.columns.insert(idx, f_col);
-        cells.header.insert(idx, f_col_name);
+
+        let mut idx = match cells.get_col_idx(loc) {
+            Ok(id) => id,
+            Err(e) => {
+                cmd_err::print(e, self.height);
+                return;
+            }
+        };
+
+        cells.w_cell().is_focused = false;
+        let is_behind = (ida > idx) as usize;
+        let is_ahead = (idx > ida) as usize;
+        let mut x = 0usize;
+        let diff = idb - ida;
+        for i in 0..=diff {
+            let a = ida + i * is_behind;
+            x = idx + diff * is_ahead + i * is_behind;
+            let col = cells.columns.remove(a);
+            let col_name = cells.header.remove(a);
+            // adjust col_id widths
+            cells.col_ids[a].width = cells.columns[a].width;
+            cells.col_ids[x].width = col.width;
+            // move column and header
+            cells.columns.insert(x, col);
+            cells.header.insert(x, col_name);
+        }
         cells.written = true;
 
         self.set_w_pointer(idx);
@@ -1632,22 +1711,21 @@ impl WinInfo {
         for i in 0..self.num_rows {
             new_col.push_cell(Cell::new(""));
         }
-        cells.insert_column(self.w_pointer + 1, new_col);
+        cells.insert_column(self.w_pointer, new_col);
         
         let col_name = Cell::new(&name);
-        cells.insert_col_name(self.w_pointer + 1, col_name);
+        cells.insert_col_name(self.w_pointer, col_name);
         
         cells.increment_col_ids();
         // make sure each col_id's width
         // matches the width of the column below
-        for i in self.w_pointer + 1..cells.col_ids.len() {
+        for i in self.w_pointer..cells.col_ids.len() {
             cells.col_ids[i].width = cells.header[i].width;
         }
 
         cells.written = true;
         self.num_cols += 1;
-        self.set_w_pointer(self.w_pointer + 1);
-        self.draw_screen(cells);
+        self.draw_from_column(cells);
         self.set_focused("");
         self.draw_focused_content();
         self.flush();
@@ -2017,16 +2095,21 @@ impl WinInfo {
 
     // row functions
     //
-    fn insert_row(&mut self, cells: &mut Cells) {
+    fn insert_row(&mut self, cells: &mut Cells, count: usize) {
         for col in &mut cells.columns {
-            col.insert_cell(self.h_pointer + 1, Cell::new(""));
+            for i in self.h_pointer..self.h_pointer + count {
+                let mut cell = Cell::new("");
+                col.insert_cell(self.h_pointer, cell);
+            }
         }
+        cells
+            .columns[self.w_pointer]
+            .cells[self.h_pointer + count]
+            .is_focused = false;
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
         cells.written = true;
-        self.num_rows += 1;
-        self.set_h_pointer(self.h_pointer + 1);
-        if self.changed == WinChange::Focus {
-            self.changed = WinChange::Rows;
-        }
+        self.num_rows += count;
+        self.changed = WinChange::Rows;
         self.show_csv(cells);
     }
 
@@ -2164,9 +2247,11 @@ impl WinInfo {
         // quotes refer to printed indices
         let (mut tokens, delim) = Self::tokenize_range(range);
 
-        // if token is empty str, start at first row
+        // if token is empty str, start at first row;
+        // if token is _, start at focused row
         let lo = match tokens[0] {
             "" => 0usize,
+            "_" => self.h_pointer,
             _ => Self::str_to_dec(tokens[0])?,
         };
 
@@ -2626,7 +2711,7 @@ impl WinInfo {
             .num_rows()
             .max(src_cells.num_rows()) - 1;
         
-        let st = at_col + 1;
+        let st = at_col;
         let end = st + num_cols;
         for i in st..end {
             let col = src_cells
@@ -2687,7 +2772,7 @@ impl WinInfo {
                 if src_name == dest_name {
                     let mut src_col = src_cells.columns.remove(j);
                     let _ = src_cells.header.remove(j);
-                    let st = at_row + 1;
+                    let st = at_row;
                     let end = st + num_rows;
                     for k in st..end {
                         let cell = src_col.remove_cell(0);
@@ -2698,7 +2783,7 @@ impl WinInfo {
                 j += 1;
             }
             if j == src_cells.num_cols() {
-                let st = at_row + 1;
+                let st = at_row;
                 let end = st + num_rows;
                 for k in st..end {
                     col.insert_cell(k, Cell::new(""));
@@ -2713,7 +2798,7 @@ impl WinInfo {
             let mut src_name = src_cells.header.remove(0);
             dest_cells.header.push(src_name);
             dest_cells.increment_col_ids();
-            let st = at_row + 1;
+            let st = at_row;
             let end = st + num_rows;
             for i in 0..dest_cells.num_rows() {
                 let mut cell = Cell::new("");
