@@ -221,9 +221,9 @@ impl Column {
         }
     }
 
-    pub fn remove_cell(&mut self, idx: usize) {
+    pub fn remove_cell(&mut self, idx: usize) -> Cell {
         let real_idx = self.indices[idx];
-        self.cells.remove(real_idx);
+        let cell = self.cells.remove(real_idx);
         for i in 0..idx {
             self.indices[i] -= (self.indices[i] >= real_idx) as usize;
         }
@@ -232,6 +232,7 @@ impl Column {
             self.indices[i - 1] -= (self.indices[i - 1] >= real_idx) as usize;
         }
         self.indices.pop();
+        cell
     }
 
     pub fn swap_cells(&mut self, a: usize, b: usize) {
