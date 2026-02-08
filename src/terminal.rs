@@ -254,13 +254,15 @@ impl WinInfo {
         }
     }
 
-    pub fn set_context(&mut self, con: &Context) {
+    pub fn set_context(&mut self, con: &mut Context) {
         self.num_cols = con.cells.num_cols();
         self.num_rows = con.cells.num_rows();
         self.w_pointer = con.w_pointer;
         self.h_pointer = con.h_pointer;
         self.w_offset = con.w_offset;
         self.h_offset = con.h_offset;
+        
+        self.print_context(con);
     }
 
     // set w_page and h_page whenever screen is redrawn
@@ -268,7 +270,7 @@ impl WinInfo {
         self.w_page = end.saturating_sub(beg);
     }
     pub fn set_h_page(&mut self, end: usize, beg: usize) {
-        self.h_page = end.saturating_sub(beg);
+        self.h_page = end.saturating_sub(beg) - 1;
     }
 
     pub fn set_write_mode(&mut self, w: bool) {
@@ -387,14 +389,15 @@ impl WinInfo {
         (self.cursor.line, self.cursor.col + self.cursor.offset)
     }
 
-    pub fn set_w_h(&mut self, cells: &mut Cells) {
+    pub fn set_w_h(&mut self, csvs: &mut Csvs) {
         unsafe {
             let mut ws: winsize = mem::zeroed();
             if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
                 self.width = ws.ws_col as usize;
                 self.height = ws.ws_row as usize;
             }
-            self.draw_screen(cells);
+            self.print_context(csvs.get_context());
+            self.draw_screen(csvs.get_cells());
             self.draw_focused_content();
             self.flush();
         }
@@ -447,7 +450,7 @@ impl WinInfo {
     }
     
     pub fn set_h_pointer(&mut self, h: usize) {
-        if h >= 0 && h < self.num_rows {
+        if h >= 0 && h < self.num_rows - 1 {
             let old_h = self.h_pointer;
             self.h_pointer = h;
             self.changed = WinChange::Focus;
@@ -474,7 +477,7 @@ impl WinInfo {
     }
 
     pub fn set_h_offset(&mut self, h: usize) {
-        if h >= 0 && h <= self.num_rows.saturating_sub(self.h_page + 1) {
+        if h >= 0 && h <= (self.num_rows - 1).saturating_sub(self.h_page + 1) {
             let old_h = self.h_offset;
             self.h_offset = h;
 
@@ -626,6 +629,23 @@ impl WinInfo {
         }
     }
 
+    pub fn print_context(&mut self, con: &mut Context) {
+        self.push_str_to_frame(
+            &format!(
+                "\x1b[{};1H\x1b[2K\x1b[0m",
+                self.height.saturating_sub(1)
+            )
+        );
+        self.push_str_to_frame(
+            &format!(
+                "\x1b[30;47m{}: {:<width$}\x1b[39;49m",
+                con.id.clone(),
+                con.cells().filename,
+                width = self.width
+            )
+        );
+    }
+
     pub fn draw_screen(&mut self, cells: &mut Cells) {
         // reset focused cell
         if self.h_pointer < cells.columns[0].len() {
@@ -633,13 +653,11 @@ impl WinInfo {
         } else {
             self.h_pointer = cells.columns[0].len() - 1;
         }
-        // wipe screen once
-        self.push_str_to_frame("\x1b[1;1H\x1b[2J");
         
         let mut id = self.w_offset;
-        for i in 1..self.height {
+        for i in 1..self.height - 1 {
             // move cursor to beginning of line
-            self.push_str_to_frame(&format!("\x1b[{i};1H"));
+            self.push_str_to_frame(&format!("\x1b[{i};1H\x1b[2K"));
 
             if i == 1 {
                 self.push_str_to_frame("\x1b[4m    |");
@@ -681,7 +699,7 @@ impl WinInfo {
         let start = cells.columns[col_id].start;
 
         let mut c = col_id;
-        for row in 1..self.height {
+        for row in 1..self.height - 1 {
             let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
                 row, start
             );
@@ -714,7 +732,7 @@ impl WinInfo {
             &format!("\x1b[{};1H\x1b[4m", term_row)
         );
 
-        for row in term_row..self.height {
+        for row in term_row..self.height - 1 {
             let row_id = row - 3 + self.h_offset;
             self.push_str_to_frame(
                 &format!(
@@ -1029,13 +1047,13 @@ impl WinInfo {
             // whole-column functions
             "col" => self.col_cmd(
                         tokens,
-                        csvs.get_cells()
+                        csvs
                     ),
             // row
             // row operations
             "row" => self.row_cmd(
                         tokens,
-                        csvs.get_cells()
+                        csvs
                     ),
             // sheet
             // whole-sheet operations
@@ -1089,7 +1107,7 @@ impl WinInfo {
         }
     }
     
-    fn col_cmd(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+    fn col_cmd(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
         let mut tokens = tokens.into_iter();
         let tok = tokens.next().unwrap();
         let subcmd = match tokens.next() {
@@ -1110,7 +1128,10 @@ impl WinInfo {
                                 CmdErr::MissingLocation(subcmd), 
                                 self.height
                             ),
-                    Some(loc) => self.move_focused_column(cells, &loc),
+                    Some(loc) => self.move_focused_column(
+                                    csvs.get_cells(), 
+                                    &loc
+                                ),
                 }
             }
             "f"  | "find"    => {
@@ -1119,7 +1140,11 @@ impl WinInfo {
                                 CmdErr::MissingValue(subcmd), 
                                 self.height
                             ),
-                    Some(val) => self.find_value_in_col(cells, &val),
+                    Some(val) => self.find_value_in_col(
+                                    csvs, 
+                                    &val
+                                ),
+                                
                 }
             }
             "n"  | "new"     => {
@@ -1128,7 +1153,10 @@ impl WinInfo {
                                 CmdErr::MissingName(subcmd), 
                                 self.height
                             ),
-                    Some(name) => self.new_column(cells, &name),
+                    Some(name) => self.new_column(
+                                    csvs.get_cells(), 
+                                    &name
+                                ),
                 }
             }
             "rm" | "remove"  => {
@@ -1137,7 +1165,7 @@ impl WinInfo {
                                     CmdErr::TooManyArgs(subcmd), 
                                     self.height
                                 ),
-                    None => self.remove_column(cells),
+                    None => self.remove_column(csvs),
                 }
             }
             "g"  | "group"   => {
@@ -1146,14 +1174,20 @@ impl WinInfo {
                                 CmdErr::MissingList(subcmd), 
                                 self.height
                             ),
-                    Some(list) => self.group_columns(cells, &list),
+                    Some(list) => self.group_columns(
+                                            csvs.get_cells(), 
+                                            &list
+                                        ),
                 }
             }
-            "u"  | "unique"  => self.show_unique_column_values(cells),
+            "u"  | "unique"  => self.show_unique_column_values(csvs),
             "s"  | "sort"    => {
                 let mut s_dir = Sort::AscAlph;
                 match tokens.next() {
-                    None => self.sort_focused_column(cells, s_dir),
+                    None => self.sort_focused_column(
+                                            csvs.get_cells(), 
+                                            s_dir
+                                        ),
                     Some(spec) => {
                         match spec {
                             "a" => (),
@@ -1168,18 +1202,26 @@ impl WinInfo {
                                 return;
                             }
                         }
-                        self.sort_focused_column(cells, s_dir);
+                        self.sort_focused_column(
+                                    csvs.get_cells(), 
+                                    s_dir
+                                );
                     }
                 }
             }
-            "rv" | "revert" => self.revert_focused_column(cells),
+            "rv" | "revert" => self.revert_focused_column(
+                                    csvs.get_cells()
+                                ),
             "fn" | "fillna" => {
                 match tokens.next() {
                     None => cmd_err::print(
                                 CmdErr::MissingValue(subcmd),
                                 self.height
                             ),
-                    Some(val) => self.col_fillna(cells, &val),
+                    Some(val) => self.col_fillna(
+                                        csvs.get_cells(), 
+                                        &val
+                                    ),
                 }
             }
             "r"  | "replace" => {
@@ -1194,7 +1236,11 @@ impl WinInfo {
                                         CmdErr::MissingValue(subcmd),
                                         self.height
                                     ),
-                            Some(new) => self.replace_in_col(cells, &targ, &new),
+                            Some(new) => self.replace_in_col(
+                                                csvs.get_cells(), 
+                                                &targ, 
+                                                &new
+                                            ),
                         }
                     }
                 }
@@ -1206,7 +1252,7 @@ impl WinInfo {
         }
     }
 
-    fn row_cmd(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+    fn row_cmd(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
         let mut tokens = tokens.into_iter();
         let tok = tokens.next().unwrap();
         let subcmd = match tokens.next() {
@@ -1221,8 +1267,8 @@ impl WinInfo {
         };
         
         match subcmd {
-            "i"  | "insert" => self.insert_row(cells),
-            "d"  | "delete" => self.delete_row(cells),
+            "i"  | "insert" => self.insert_row(csvs.get_cells()),
+            "d"  | "delete" => self.delete_row(csvs),
             "mv" | "move"   => {
                 match tokens.next() {
                     None => cmd_err::print(
@@ -1236,10 +1282,10 @@ impl WinInfo {
                                         self.height
                                     ),
                             Some(target) => self.move_rows(
-                                            cells, 
-                                            &range, 
-                                            &target
-                                        ),
+                                                csvs.get_cells(), 
+                                                &range, 
+                                                &target
+                                            ),
                         }
                     }
                 }
@@ -1294,7 +1340,11 @@ impl WinInfo {
                                 }
                             }
                         };
-                        self.sort_by(csvs.get_cells(), &col, s_dir);
+                        self.sort_by(
+                            csvs.get_cells(), 
+                            &col, 
+                            s_dir
+                        );
                     }
                 }
             }
@@ -1421,7 +1471,8 @@ impl WinInfo {
         self.flush();
     }
 
-    fn find_value_in_col(&mut self, cells: &mut Cells, val: &str) {
+    fn find_value_in_col(&mut self, csvs: &mut Csvs, val: &str) {
+        let cells = csvs.get_cells();
         let val = Self::trim_quotes(val);
         let rows = &cells.columns[self.w_pointer].cells;
         let indices: Vec<usize> = rows.iter()
@@ -1465,12 +1516,14 @@ impl WinInfo {
         };
         self.draw_col_find(cells, idx, &indices);
 
+        drop(cells);
+
         let mut buf = [0u8; 1];
         loop {
             match poll_stdin(&mut buf) {
                 Ok(PollEvent::Sig) => {
                     match check_flags() {
-                        SigFlag::Winch => self.set_w_h(cells),
+                        SigFlag::Winch => self.set_w_h(csvs),
                         SigFlag::Int | SigFlag::Quit => continue, // will never catch
                         SigFlag::Non => break, // must've been quit/int
                     }
@@ -1480,7 +1533,11 @@ impl WinInfo {
                     match buf {
                         [b'n'] => {
                             idx = (idx + 1) % indices.len();
-                            self.draw_col_find(cells, idx, &indices);
+                            self.draw_col_find(
+                                csvs.get_cells(), 
+                                idx, 
+                                &indices
+                            );
                             buf[0] = 0u8;
                         }
                         [b'b'] => {
@@ -1489,7 +1546,11 @@ impl WinInfo {
                             } else {
                                 idx -= 1;
                             }
-                            self.draw_col_find(cells, idx, &indices);
+                            self.draw_col_find(
+                                csvs.get_cells(), 
+                                idx, 
+                                &indices
+                            );
                             buf[0] = 0u8;
                         }
                         _   => {
@@ -1542,22 +1603,35 @@ impl WinInfo {
         self.flush();
     }
 
-    fn remove_column(&mut self, cells: &mut Cells) {
+    fn remove_column(&mut self, csvs: &mut Csvs) {
         // confirm remove
-        let col_name = cells.header[self.w_pointer].content.clone();
+        let col_name = csvs
+            .get_cells()
+            .header[self.w_pointer]
+            .content
+            .clone();
         print_bottom!(
             self,
             "\x1b[?25lConfirm remove column '{}' with 'y': ",
             col_name
         );
         self.flush();
-        let mut buffer = [0u8; 1];
+        let mut buf = [0u8; 1];
         loop {
-            match std::io::stdin().read(&mut buffer) {
-                Ok(0) => std::thread::sleep(std::time::Duration::from_millis(10)),
-                Ok(n) => {
-                    match &buffer[..n] {
+            match poll_stdin(&mut buf) {
+                Ok(PollEvent::Sig) => {
+                    match check_flags() {
+                        SigFlag::Winch => self.set_w_h(csvs),
+                        SigFlag::Int | SigFlag::Quit => continue, // will never catch
+                        SigFlag::Non => break, // must've been quit/int
+                    }
+                }
+                Ok(PollEvent::Data(0)) => continue,
+
+                Ok(PollEvent::Data(n)) => {
+                    match &buf[..n] {
                         [b'y'] | [b'Y']  => {
+                            let cells = csvs.get_cells();
                             cells.columns.remove(self.w_pointer);
                             cells.header.remove(self.w_pointer);
                             cells.col_ids.pop();
@@ -1662,7 +1736,8 @@ impl WinInfo {
         cells.written = true;
     }
 
-    fn show_unique_column_values(&mut self, cells: &mut Cells) {
+    fn show_unique_column_values(&mut self, csvs: &mut Csvs) {
+        let cells = csvs.get_cells();
         let orig = &cells.columns[self.w_pointer];
 
         let mut uq = Column::new();
@@ -1724,12 +1799,15 @@ impl WinInfo {
             cells.header[self.w_pointer].content
         );
         self.flush();
+
+        drop(cells);
+
         let mut buf = [0u8; 8];
         loop {
             match poll_stdin(&mut buf) {
                 Ok(PollEvent::Sig) => {
                     match check_flags() {
-                        SigFlag::Winch => self.set_w_h(cells),
+                        SigFlag::Winch => self.set_w_h(csvs),
                         SigFlag::Int | SigFlag::Quit => (), // will never catch this
                         SigFlag::Non => break, // must've caught quit/int
                     }
@@ -1740,13 +1818,17 @@ impl WinInfo {
                         [27, 91, 65] => {
                             if self.h_pointer > uq_st {
                                 self.set_h_pointer(self.h_pointer.saturating_sub(1));
-                                self.show_csv(cells);
+                                self.show_csv(
+                                    csvs.get_cells()
+                                );
                             }
                         }
                         [27, 91, 66] => {
                             if self.h_pointer < uq_end {
                                 self.set_h_pointer(self.h_pointer + 1);
-                                self.show_csv(cells);
+                                self.show_csv(
+                                    csvs.get_cells()
+                                );
                             }
                         }
                         [17] => break,
@@ -1764,6 +1846,7 @@ impl WinInfo {
             }
         }
         // restore original
+        let cells = csvs.get_cells();
         cells.columns.remove(self.w_pointer);
         cells.insert_column(self.w_pointer, orig);
         cells.set_w_cell(cells.w_cell.0, cells.w_cell.1);
@@ -1897,20 +1980,29 @@ impl WinInfo {
         self.show_csv(cells);
     }
 
-    fn delete_row(&mut self, cells: &mut Cells) {
+    fn delete_row(&mut self, csvs: &mut Csvs) {
         print_bottom!(
             self,
             "\x1b[?25lConfirm remove row {:04X} with 'y': ",
             self.h_pointer
         );
         self.flush();
-        let mut buffer = [0u8; 1];
+        let mut buf = [0u8; 1];
         loop {
-            match std::io::stdin().read(&mut buffer) {
-                Ok(0) => std::thread::sleep(std::time::Duration::from_millis(10)),
-                Ok(n) => {
-                    match &buffer[..n] {
+            match poll_stdin(&mut buf) {
+                Ok(PollEvent::Sig) => {
+                    match check_flags() {
+                        SigFlag::Winch => self.set_w_h(csvs),
+                        SigFlag::Int | SigFlag::Quit => continue, // will never catch
+                        SigFlag::Non => break, // must've been quit/int
+                    }
+                }
+                Ok(PollEvent::Data(0)) => continue,
+
+                Ok(PollEvent::Data(n)) => {
+                    match &buf[..n] {
                         [b'y'] | [b'Y']  => {
+                            let cells = csvs.get_cells();
                             cells.set_w_cell(self.w_pointer, self.h_pointer.saturating_sub(1));
                             for col in &mut cells.columns {
                                 col.remove_cell(self.h_pointer);
