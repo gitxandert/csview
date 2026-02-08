@@ -2595,18 +2595,15 @@ impl WinInfo {
             }
         };
     
-        // insert at focus
-        let at = self.w_pointer;
-
         match or {
             "c" | "cols" => self.splice_cols(
                                 con_id, 
-                                at, 
+                                self.w_pointer, 
                                 csvs
                             ),
             "r" | "rows" => self.splice_rows(
                                 con_id, 
-                                at,
+                                self.h_pointer,
                                 csvs
                             ),
             _ => cmd_err::print(
@@ -2673,7 +2670,7 @@ impl WinInfo {
         // create new columns
         let mut src_con = csvs.remove_context(con_id);
         let mut src_cells = src_con.cells();
-        let num_rows = src_cells.num_rows() - 1;
+        let num_rows = src_cells.num_rows();
         src_cells.w_cell().is_focused = false;
         let mut dest_cells = csvs.get_cells();
         
@@ -2697,15 +2694,36 @@ impl WinInfo {
                         col.insert_cell(k, cell);
                     }
                     break;
-                } else {
-                    let st = at_row + 1;
-                    let end = st + num_rows;
-                    for k in st..end {
-                        col.insert_cell(k, Cell::new(""));
-                    }
                 }
                 j += 1;
             }
+            if j == src_cells.num_cols() {
+                let st = at_row + 1;
+                let end = st + num_rows;
+                for k in st..end {
+                    col.insert_cell(k, Cell::new(""));
+                }
+            }
+        }
+
+        // should only be the dissimilar ones left
+        while src_cells.num_cols() > 0 {
+            let mut dest_col = Column::new();
+            let mut src_col = src_cells.columns.remove(0);
+            let mut src_name = src_cells.header.remove(0);
+            dest_cells.header.push(src_name);
+            dest_cells.increment_col_ids();
+            let st = at_row + 1;
+            let end = st + num_rows;
+            for i in 0..dest_cells.num_rows() {
+                let mut cell = Cell::new("");
+                if i >= st && i < end {
+                    cell = src_col.remove_cell(0);
+                }
+                dest_col.push_cell(cell);
+            }
+            dest_cells.push_column(dest_col);
+            self.num_cols += 1
         }
         
         dest_cells.written = true;
