@@ -1001,6 +1001,20 @@ impl WinInfo {
         tokens
     }
 
+    fn tokenize_range(range: &str) -> Result<Vec<&str>, CmdErr> {
+        for c in range.chars() {
+            match c {
+                ch if ch == '-' || ch == '+' => {
+                    let tokens = Self::tokenize(range, ch);
+                    return Ok(tokens);
+                }
+                _   => continue,
+            };
+        }
+        
+        Err(CmdErr::InvalidRange(range))
+    }
+
     pub fn process_command(&mut self, csvs: &mut Csvs) {
         let input = self.write_buffer.as_string();
         let mut tokens = Self::tokenize(&input, ' ');
@@ -1031,8 +1045,7 @@ impl WinInfo {
                                   ),
             // invalid
             _ => cmd_err::print(
-                    CmdErr::InvalidCommand, 
-                    tokens[0], 
+                    CmdErr::InvalidCommand(tokens[0]), 
                     self.height
                 ),
         }
@@ -1050,8 +1063,7 @@ impl WinInfo {
                         // `cn to` changes the focused column's name
                         match tokens.next() {
                             None => cmd_err::print(
-                                        CmdErr::MissingName,
-                                        spec, 
+                                        CmdErr::MissingName(spec), 
                                         self.height
                                     ),
                             Some(name) => self.change_col_name(cells, &name),
@@ -1062,16 +1074,14 @@ impl WinInfo {
                         // column to find
                         match tokens.next() {
                             None => cmd_err::print(
-                                        CmdErr::MissingName,
-                                        spec, 
+                                        CmdErr::MissingName(spec), 
                                         self.height
                                     ),
                             Some(name) => self.find_column(cells, &name),
                         }
                     }
                     _ => cmd_err::print(
-                            CmdErr::UnknownSpec,
-                            spec, 
+                            CmdErr::UnknownSpec(spec), 
                             self.height
                         ),
                 }
@@ -1085,8 +1095,7 @@ impl WinInfo {
         let subcmd = match tokens.next() {
             None => {
                 cmd_err::print(
-                    CmdErr::MissingSubCmd,
-                    tok, 
+                    CmdErr::MissingSubCmd(tok), 
                     self.height
                 );
                 return;
@@ -1098,8 +1107,7 @@ impl WinInfo {
             "mv" | "move"    => {
                 match tokens.next() {
                     None => cmd_err::print(
-                                CmdErr::MissingLocation,
-                                subcmd, 
+                                CmdErr::MissingLocation(subcmd), 
                                 self.height
                             ),
                     Some(loc) => self.move_focused_column(cells, &loc),
@@ -1108,8 +1116,7 @@ impl WinInfo {
             "f"  | "find"    => {
                 match tokens.next() {
                     None => cmd_err::print(
-                                CmdErr::MissingValue,
-                                subcmd, 
+                                CmdErr::MissingValue(subcmd), 
                                 self.height
                             ),
                     Some(val) => self.find_value_in_col(cells, &val),
@@ -1118,8 +1125,7 @@ impl WinInfo {
             "n"  | "new"     => {
                 match tokens.next() {
                     None => cmd_err::print(
-                                CmdErr::MissingName,
-                                subcmd, 
+                                CmdErr::MissingName(subcmd), 
                                 self.height
                             ),
                     Some(name) => self.new_column(cells, &name),
@@ -1128,8 +1134,7 @@ impl WinInfo {
             "rm" | "remove"  => {
                 match tokens.next() {
                     Some(_) => cmd_err::print(
-                                    CmdErr::TooManyArgs,
-                                    subcmd, 
+                                    CmdErr::TooManyArgs(subcmd), 
                                     self.height
                                 ),
                     None => self.remove_column(cells),
@@ -1138,8 +1143,7 @@ impl WinInfo {
             "g"  | "group"   => {
                 match tokens.next() {
                     None => cmd_err::print(
-                                CmdErr::MissingList,
-                                subcmd, 
+                                CmdErr::MissingList(subcmd), 
                                 self.height
                             ),
                     Some(list) => self.group_columns(cells, &list),
@@ -1158,8 +1162,7 @@ impl WinInfo {
                             "nr" => s_dir = Sort::DescNum,
                             _ => {
                                 cmd_err::print(
-                                    CmdErr::UnknownSpec,
-                                    spec, 
+                                    CmdErr::UnknownSpec(spec), 
                                     self.height
                                 );
                                 return;
@@ -1173,8 +1176,7 @@ impl WinInfo {
             "fn" | "fillna" => {
                 match tokens.next() {
                     None => cmd_err::print(
-                                CmdErr::MissingValue,
-                                subcmd, 
+                                CmdErr::MissingValue(subcmd),
                                 self.height
                             ),
                     Some(val) => self.col_fillna(cells, &val),
@@ -1183,15 +1185,13 @@ impl WinInfo {
             "r"  | "replace" => {
                 match tokens.next() {
                     None => cmd_err::print(
-                                CmdErr::MissingValue,
-                                subcmd, 
+                                CmdErr::MissingValue(subcmd),
                                 self.height
                             ),
                     Some(targ) => {
                         match tokens.next() {
                             None => cmd_err::print(
-                                        CmdErr::MissingValue,
-                                        subcmd, 
+                                        CmdErr::MissingValue(subcmd),
                                         self.height
                                     ),
                             Some(new) => self.replace_in_col(cells, &targ, &new),
@@ -1200,8 +1200,7 @@ impl WinInfo {
                 }
             }
             _ => cmd_err::print(
-                    CmdErr::InvalidSubCmd,
-                    subcmd, 
+                    CmdErr::InvalidSubCmd(subcmd),
                     self.height
                 ),
         }
@@ -1213,8 +1212,7 @@ impl WinInfo {
         let subcmd = match tokens.next() {
             None => {
                 cmd_err::print(
-                    CmdErr::MissingSubCmd,
-                    tok, 
+                    CmdErr::MissingSubCmd(tok), 
                     self.height
                 );
                 return;
@@ -1228,15 +1226,13 @@ impl WinInfo {
             "mv" | "move"   => {
                 match tokens.next() {
                     None => cmd_err::print(
-                                CmdErr::MissingRange,
-                                subcmd, 
+                                CmdErr::MissingRange(subcmd), 
                                 self.height
                             ),
                     Some(range) => {
                         match tokens.next() {
                             None => cmd_err::print(
-                                        CmdErr::MissingTarget,
-                                        subcmd, 
+                                        CmdErr::MissingTarget(subcmd), 
                                         self.height
                                     ),
                             Some(target) => self.move_rows(
@@ -1249,8 +1245,7 @@ impl WinInfo {
                 }
             }
             _ =>  cmd_err::print(
-                    CmdErr::InvalidSubCmd,
-                    tok, 
+                    CmdErr::InvalidSubCmd(tok), 
                     self.height
                 ),
         }
@@ -1261,8 +1256,7 @@ impl WinInfo {
         let subcmd = match tokens.get(1) {
             None =>{
                 cmd_err::print(
-                    CmdErr::MissingSubCmd,
-                    tok, 
+                    CmdErr::MissingSubCmd(tok), 
                     self.height
                 );
                 return;
@@ -1278,8 +1272,7 @@ impl WinInfo {
                 }
                 match tokens.next() {
                     None => cmd_err::print(
-                                CmdErr::MissingName,
-                                tok,
+                                CmdErr::MissingName(tok),
                                 self.height
                             ),
                     Some(col) => {
@@ -1293,8 +1286,7 @@ impl WinInfo {
                                     "nr" => Sort::DescNum,
                                     _ => {
                                         cmd_err::print(
-                                            CmdErr::InvalidArg,
-                                            dir, 
+                                            CmdErr::InvalidArg(dir), 
                                             self.height
                                         );
                                         return;
@@ -1308,8 +1300,7 @@ impl WinInfo {
             }
             "sl" | "slice" => self.slice(tokens, csvs),
             _ => cmd_err::print(
-                    CmdErr::InvalidSubCmd,
-                    subcmd, 
+                    CmdErr::InvalidSubCmd(subcmd), 
                     self.height
                 ),
         }
@@ -1360,7 +1351,7 @@ impl WinInfo {
                 return;
             }
         }
-        cmd_err::print(CmdErr::NoName, name, self.height);
+        cmd_err::print(CmdErr::NoName(name), self.height);
     }
 
     // column functions
@@ -1376,12 +1367,12 @@ impl WinInfo {
                     match cells.header.iter().position(|h| &h.content == name) {
                         Some(index) => index,
                         None => {
-                            cmd_err::print(CmdErr::NoName, name, self.height);
+                            cmd_err::print(CmdErr::NoName(name), self.height);
                             return;
                         }
                     }
                 } else {
-                    cmd_err::print(CmdErr::UnmatchedQuote, loc, self.height);
+                    cmd_err::print(CmdErr::UnmatchedQuote(loc), self.height);
                     return;
                 }
             }
@@ -1390,13 +1381,13 @@ impl WinInfo {
                 // automatically discount loc if longer than any col_id
                 let last = cells.col_ids.len() - 1;
                 if loc.len() > cells.col_ids[last].content.len() {
-                    cmd_err::print(CmdErr::NoId, loc, self.height);
+                    cmd_err::print(CmdErr::NoId(loc), self.height);
                     return;
                 } else {
                     match cells.col_ids.iter().position(|i| &i.content == loc) {
                         Some(index) => index,
                         None => {
-                            cmd_err::print(CmdErr::NoId, loc, self.height);
+                            cmd_err::print(CmdErr::NoId(loc), self.height);
                             return;
                         }
                     }
@@ -1599,7 +1590,7 @@ impl WinInfo {
                     }
                 }
                 _ => {
-                    cmd_err::print(CmdErr::StdinErr, "col remove", self.height);
+                    cmd_err::print(CmdErr::StdinErr("col remove"), self.height);
                     break;
                 }
             }
@@ -1616,7 +1607,7 @@ impl WinInfo {
             Some(idx) => idx,
             None      => {
                 cmd_err::print(
-                    CmdErr::NoName, p_col_name, self.height
+                    CmdErr::NoName(p_col_name), self.height
                 );
                 return;
             }
@@ -1632,7 +1623,7 @@ impl WinInfo {
                 Some(idx) => ids.push(idx),
                 None => {
                     cmd_err::print(
-                        CmdErr::NoName, name, self.height
+                        CmdErr::NoName(name), self.height
                     );
                     return;
                 }
@@ -1958,7 +1949,7 @@ impl WinInfo {
                     }
                 }
                 _ => {
-                    cmd_err::print(CmdErr::StdinErr, "row delete", self.height);
+                    cmd_err::print(CmdErr::StdinErr("row delete"), self.height);
                     break;
                 }
             }
@@ -1971,7 +1962,7 @@ impl WinInfo {
         'a', 'b', 'c', 'd', 'e', 'f',
     ];
 
-    fn compute_valid_hex(c: char) -> Result<usize, CmdErr> {
+    fn compute_valid_hex(c: char) -> Result<usize, CmdErr<'static>> {
         let n = (c == Self::VALID_HEX[0]) as usize +
                 2 * (c == Self::VALID_HEX[1]) as usize +
                 3 * (c == Self::VALID_HEX[2]) as usize +
@@ -1996,7 +1987,7 @@ impl WinInfo {
                 16 * (c == Self::VALID_HEX[21]) as usize;
 
         if n > 0 { return Ok(n - 1); }
-        Err(CmdErr::InvalidHex)
+        Err(CmdErr::InvalidHex(c))
     }
 
     fn hex_to_dec(hex: &str) -> Result<usize, CmdErr> {
@@ -2019,29 +2010,22 @@ impl WinInfo {
             _       => {
                 match s.parse::<usize>() {
                     Ok(val) => Ok(val),
-                    Err(_)  => return Err(CmdErr::InvalidDec),
+                    Err(_)  => return Err(CmdErr::InvalidDec(s)),
                 }
             }
         }
     }
 
-    fn parse_range(&mut self, range: &str) -> Result<(usize, usize), CmdErr> {
+    fn parse_range<'a>(&mut self, range: &'a str) -> Result<(usize, usize), CmdErr<'a>> {
         // range can be expressed as:
         // - a single index (e.g. '63' or 99)
         // - two indices separated by a hyphen (e.g. '104D'-'105F')
         // - an index, a '+', and how many rows to include (e.g. 'A7'+10)
         // quotes refer to printed indices
-        let mut tokens: Vec<&str> = Vec::new();
-        tokens.push(range);
-        for c in range.chars() {
-            match c {
-                ch if ch == '-' || ch == '+' => {
-                    tokens = Self::tokenize(range, ch);
-                    break;
-                }
-                _   => continue,
-            };
-        }
+        let mut tokens = match Self::tokenize_range(range) {
+            Ok(t) => t,
+            Err(e) => return Err(e),
+        };
 
         // if token is empty str, start at first row
         let lo = match tokens[0] {
@@ -2067,7 +2051,7 @@ impl WinInfo {
         let (t_lo, t_hi) = match self.parse_range(range) {
             Ok((l, h)) => (l, h),
             Err(e) => {
-                cmd_err::print(e, "rows mv", self.height);
+                cmd_err::print(e, self.height);
                 return;
             }
         };
@@ -2076,19 +2060,19 @@ impl WinInfo {
         let hi = t_hi.max(t_lo);
 
         if lo < 0 || lo >= self.num_rows {
-            cmd_err::print(CmdErr::InvalidIndex, &format!("{lo}"), self.height);
+            cmd_err::print(CmdErr::InvalidIndex(lo), self.height);
             return;
         }
 
         if hi >= self.num_rows {
-            cmd_err::print(CmdErr::InvalidIndex, &format!("{hi}"), self.height);
+            cmd_err::print(CmdErr::InvalidIndex(hi), self.height);
             return;
         }
 
         let target = match Self::str_to_dec(target) {
             Ok(d) => d,
             Err(e) => {
-                cmd_err::print(e, "rows mv", self.height);
+                cmd_err::print(e, self.height);
                 return;
             }
         };
@@ -2148,8 +2132,8 @@ impl WinInfo {
         match cells.get_col_idx(col_name) {
             None => {
                 cmd_err::print(
-                      CmdErr::NoName,
-                      col_name, self.height
+                      CmdErr::NoName(col_name), 
+                      self.height
                     );
                 return;
             }
@@ -2184,8 +2168,7 @@ impl WinInfo {
             Some(o) => o,
             None => {
                 cmd_err::print(
-                    CmdErr::MissingValue,
-                    "slice {'col' or 'row'}",
+                    CmdErr::MissingValue("slice {'col' or 'row'}"),
                     self.height
                 );
                 return;
@@ -2196,8 +2179,7 @@ impl WinInfo {
            Some(r) => r,
            None => {
                cmd_err::print(
-                   CmdErr::MissingRange,
-                   "slice",
+                   CmdErr::MissingRange("slice"),
                    self.height
                 );
                return;
@@ -2208,15 +2190,23 @@ impl WinInfo {
             "col" => self.slice_cols(&range, csvs),
             "row" => self.slice_rows(&range, csvs),
             _ => cmd_err::print(
-                    CmdErr::InvalidArg,
-                    or,
+                    CmdErr::InvalidArg(or),
                     self.height
                 ),
         }
     }
 
     fn slice_cols(&mut self, range: &str, cells: &mut Csvs) {
-        print_bottom!(self, "slicing cols in range {}", range); 
+        let cols = match Self::tokenize_range(range) {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                cmd_err::print(
+                        e,
+                        self.height
+                );
+                return;
+            }
+        };
     }
 
     fn slice_rows(&mut self, range: &str, cells: &mut Csvs) {
