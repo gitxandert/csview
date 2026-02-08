@@ -1,126 +1,131 @@
 use std::io::{self, Read, Write};
 
-pub enum CmdErr {
-    InvalidArg,
-    InvalidCommand,
-    InvalidDec,
-    InvalidHex,
-    InvalidIndex,
-    InvalidSubCmd,
-    MissingList,
-    MissingLocation,
-    MissingName,
-    MissingRange,
-    MissingValue,
-    MissingSubCmd,
-    MissingTarget,
-    NoId,
-    NoName,
-    StdinErr,
-    TooManyArgs,
-    UnknownSpec,
-    UnmatchedQuote
+pub enum CmdErr<'a> {
+    InvalidArg(&'a str),
+    InvalidCommand(&'a str),
+    InvalidDec(&'a str),
+    InvalidHex(char),
+    InvalidIndex(usize),
+    InvalidRange(&'a str),
+    InvalidSubCmd(&'a str),
+    MissingList(&'a str),
+    MissingLocation(&'a str),
+    MissingName(&'a str),
+    MissingRange(&'a str),
+    MissingValue(&'a str),
+    MissingSubCmd(&'a str),
+    MissingTarget(&'a str),
+    NoId(&'a str),
+    NoName(&'a str),
+    StdinErr(&'a str),
+    TooManyArgs(&'a str),
+    UnknownSpec(&'a str),
+    UnmatchedQuote(&'a str)
 }
 
-pub fn print(err: CmdErr, token: &str, line: usize) {
+pub fn print(err: CmdErr, line: usize) {
     let mut out = io::stdout();
     let mut outstring = String::new();
     let outstring = {
         match err {
-            CmdErr::InvalidArg => format!(
+            CmdErr::InvalidArg(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid argument '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::InvalidCommand => format!(
+            CmdErr::InvalidCommand(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid command '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::InvalidDec => format!(
+            CmdErr::InvalidDec(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: '{}' cannot be coerced to decimal",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::InvalidHex => format!(
+            CmdErr::InvalidHex(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: '{}' is not valid hexadecimal",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::InvalidIndex => format!(
+            CmdErr::InvalidIndex(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: index '{}' is out of bounds",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::InvalidSubCmd => format!(
+            CmdErr::InvalidRange(t) => format!(
+                    "\x1b[{};1H\x1b[2KERR: '{}' is not a valid range",
+                    line, t
+                ),
+
+            CmdErr::InvalidSubCmd(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid sub-command '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::MissingList => format!(
+            CmdErr::MissingList(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: missing list for '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::MissingLocation => format!(
+            CmdErr::MissingLocation(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: missing location for '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::MissingName => format!(
+            CmdErr::MissingName(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: missing name for '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::MissingRange => format!(
+            CmdErr::MissingRange(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: missing range for '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::MissingTarget => format!(
+            CmdErr::MissingTarget(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: missing target index for '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::MissingValue => format!(
+            CmdErr::MissingValue(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: missing value for '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::MissingSubCmd => format!(
+            CmdErr::MissingSubCmd(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: missing sub-command for '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::NoId => format!(
+            CmdErr::NoId(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: no column id '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::NoName => format!(
+            CmdErr::NoName(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: no column called '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::StdinErr => format!(
+            CmdErr::StdinErr(t) => format!(
                     "x1b[{};1H\x1b[2KERR: stdin error while processing '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::TooManyArgs => format!(
+            CmdErr::TooManyArgs(t) => format!(
                     "x1b[{};1H\x1b[2KERR: too many argumentss for '{}'",
-                    line, token
+                    line, t
                 ),
 
-
-            CmdErr::UnknownSpec => format!(
+            CmdErr::UnknownSpec(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: unknown specifier '{}'",
-                    line, token
+                    line, t
                 ),
 
-            CmdErr::UnmatchedQuote => format!(
+            CmdErr::UnmatchedQuote(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: unmatched quote in {}",
-                    line, token
+                    line, t
                 ),
         }
     };
