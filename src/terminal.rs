@@ -11,9 +11,9 @@ use libc::{
 };
 
 use crate::{
-    cmd_err::{self, CmdErr},
     cells::*,
-    csv_io::{poll_stdin, PollEvent},
+    cmd_err::{self, CmdErr},
+    csv_io::{make_col_ids, poll_stdin, PollEvent},
 };
 
 #[derive(Debug, PartialEq)]
@@ -2230,15 +2230,59 @@ impl WinInfo {
                 return;
             }
         };
-/*
-            cells.columns.remove(self.w_pointer);
-            cells.header.remove(self.w_pointer);
+
+        cells.w_cell().is_focused = false;
+        cells.slices += 1;
+        let mut fn_split = Self::tokenize(&cells.filename, '.');
+        let first = format!(
+                        "{}_{}",
+                        fn_split[0],
+                        cells.slices
+                    );
+        fn_split[0] = &first;
+        let slice_name = fn_split.join(".");
+
+        let col_len = idb - ida + 1;
+        let col_ids: Vec<Cell> = make_col_ids(col_len);
+        let mut new_cells = Cells::new(
+            slice_name,
+            cells.delim,
+            Vec::<Cell>::new(),
+            col_ids,
+            col_len
+        );
+
+        let mut new_header = Vec::<Cell>::new();
+        for _ in ida..=idb {
+            let col = cells.columns.remove(ida);
+            new_cells.push_column(col);
+            
+            let name = cells.header.remove(ida);
+            new_header.push(name);
             cells.col_ids.pop();
-            for i in self.w_pointer..cells.col_ids.len() {
-                cells.col_ids[i].width = cells.header[i].width;
-            }
-            cells.written = true;
-*/
+        }
+        new_cells.header = new_header;
+        // realign original cells
+        for i in ida..cells.col_ids.len() {
+            cells.col_ids[i].width = cells.header[i].width;
+        }
+        cells.written = true;
+        new_cells.written = true;
+        
+        drop(cells);
+        
+        let new_id = csvs.num_contexts();
+        let new_context = Context::new(
+                            new_id.clone(),
+                            new_cells
+                        );
+        csvs.push_context(new_context);
+        csvs.set_handle(new_id);
+
+        let context = csvs.get_context();
+        self.set_context(context);
+        self.changed = WinChange::Screen;
+        self.show_csv(context.cells());
     }
 
     fn slice_rows(&mut self, range: &str, cells: &mut Csvs) {
