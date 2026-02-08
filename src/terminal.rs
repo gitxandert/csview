@@ -692,7 +692,7 @@ impl WinInfo {
         if self.h_pointer < cells.columns[0].len() {
             cells.set_w_cell(self.w_pointer, self.h_pointer);
         } else {
-            self.h_pointer = cells.columns[0].len() - 1;
+            self.h_pointer = cells.columns[0].len().saturating_sub(1);
         }
         
         let mut id = self.w_offset;
@@ -1060,18 +1060,20 @@ impl WinInfo {
         tokens
     }
 
-    fn tokenize_range(range: &str) -> Result<Vec<&str>, CmdErr> {
+    fn tokenize_range(range: &str) -> (Vec<&str>, Option<char>) {
+        let mut tokens = Vec::<&str>::new();
         for c in range.chars() {
             match c {
                 ch if ch == '-' || ch == '+' => {
-                    let tokens = Self::tokenize(range, ch);
-                    return Ok(tokens);
+                    tokens = Self::tokenize(range, ch);
+                    return (tokens, Some(ch));
                 }
                 _   => continue,
             };
         }
         
-        Err(CmdErr::InvalidRange(range))
+        tokens.push(range);
+        (tokens, None)
     }
 
     pub fn process_command(&mut self, csvs: &mut Csvs) {
@@ -1398,11 +1400,17 @@ impl WinInfo {
         }
     }
 
-    fn trim_quotes(q: &str) -> &str {
-        if &q[..1] == "'" || &q[..1] == "\"" {
-            return &q[1..q.len() - 1];
+    fn trim_quotes(q: &str) -> String {
+        let mut chars = q.chars();
+        if chars.nth(0).unwrap() == '\'' 
+            || chars.nth(0).unwrap() == '"' {
+            
+            let ret: String = chars
+                .take(q.len().saturating_sub(2))
+                .collect();
+            return ret;
         }
-        q
+        q.to_string()
     }
 
     // cn functions
@@ -1417,7 +1425,7 @@ impl WinInfo {
 
     fn change_col_name(&mut self, cells: &mut Cells, new_name: &str) {
         let new_name = Self::trim_quotes(new_name);
-        cells.header[self.w_pointer].content = new_name.to_string();
+        cells.header[self.w_pointer].content = new_name;
         cells.written = true;
 
         let start = cells.columns[self.w_pointer].start;
@@ -1436,14 +1444,14 @@ impl WinInfo {
         let name = Self::trim_quotes(name);
         let header = &cells.header;
         for i in 0..header.len() {
-            if &header[i].content == name {
+            if &header[i].content == &name {
                 self.set_w_pointer(i);
                 self.changed = WinChange::Columns;
                 self.show_csv(cells);
                 return;
             }
         }
-        cmd_err::print(CmdErr::NoName(name), self.height);
+        cmd_err::print(CmdErr::NoName(&name), self.height);
     }
 
     // column functions
@@ -1519,7 +1527,7 @@ impl WinInfo {
         let rows = &cells.columns[self.w_pointer].cells;
         let indices: Vec<usize> = rows.iter()
             .enumerate()
-            .filter(|&(_idx, cell)| cell.content.contains(val))
+            .filter(|&(_idx, cell)| cell.content.contains(&val))
             .map(|(idx, _cell)| idx)
             .collect();
         
@@ -1626,7 +1634,7 @@ impl WinInfo {
         }
         cells.insert_column(self.w_pointer + 1, new_col);
         
-        let col_name = Cell::new(name);
+        let col_name = Cell::new(&name);
         cells.insert_col_name(self.w_pointer + 1, col_name);
         
         cells.increment_col_ids();
@@ -1982,7 +1990,7 @@ impl WinInfo {
         let mut col = &mut cells.columns[self.w_pointer];
         for cell in &mut col.cells {
             if &cell.content == "" {
-                cell.content.push_str(val);
+                cell.content.push_str(&val);
             }
         }
         cells.written = true;
@@ -1997,8 +2005,8 @@ impl WinInfo {
 
         let mut col = &mut cells.columns[self.w_pointer];
         for cell in &mut col.cells {
-            if &cell.content == t {
-                cell.content = n.to_string();
+            if &cell.content == &t {
+                cell.content = n.clone();
             }
         }
         cells.written = true;
@@ -2154,10 +2162,7 @@ impl WinInfo {
         // - two indices separated by a hyphen (e.g. '104D'-'105F')
         // - an index, a '+', and how many rows to include (e.g. 'A7'+10)
         // quotes refer to printed indices
-        let mut tokens = match Self::tokenize_range(range) {
-            Ok(t) => t,
-            Err(e) => return Err(e),
-        };
+        let (mut tokens, delim) = Self::tokenize_range(range);
 
         // if token is empty str, start at first row
         let lo = match tokens[0] {
@@ -2170,7 +2175,23 @@ impl WinInfo {
             Some(val) => {
                 match *val {
                     "" => self.num_rows - 1,
-                    _ => Self::str_to_dec(val)?,
+                    _ => {
+                        match Self::str_to_dec(val) {
+                            Ok(v) => {
+                                match delim {
+                                    Some(d) => {
+                                        match d {
+                                            '-' => v,
+                                            '+' => lo + v,
+                                            _ => lo,
+                                        }
+                                    }
+                                    None => lo,
+                                }
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
                 }
             }
             None => lo,
@@ -2327,16 +2348,7 @@ impl WinInfo {
     }
 
     fn slice_cols(&mut self, range: &str, csvs: &mut Csvs) {
-        let cols = match Self::tokenize_range(range) {
-            Ok(tokens) => tokens,
-            Err(e) => {
-                cmd_err::print(
-                        e,
-                        self.height
-                );
-                return;
-            }
-        };
+        let (cols, delim) = Self::tokenize_range(range);
 
         // -remove columns
         // -push them into new Cells
@@ -2353,14 +2365,49 @@ impl WinInfo {
                 return;
             }
         };
-        let idb = match cells.get_col_idx(cols[1]) {
-            Ok(id) => id,
-            Err(e) => {
-                cmd_err::print(
-                    e, self.height
-                );
-                return;
+        let idb = match cols.get(1) {
+            Some(c) => {
+                let c = match delim {
+                    Some(d) => {
+                        match d {
+                            '-' => *c,
+                            '+' => {
+                                match Self::str_to_dec(*c) {
+                                    Ok(dec) => {
+                                        let num = ida + dec;
+                                        if num >= cells.header.len() {
+                                            cmd_err::print(
+                                                CmdErr::InvalidIndex(num),
+                                                self.height
+                                            );
+                                            return;
+                                        }
+                                        &cells.header[num].content
+                                    }
+                                    Err(e) => {
+                                        cmd_err::print(
+                                            e, self.height
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
+                            _ => cols[0],
+                        }
+                    }
+                    None => cols[0],
+                };
+                match cells.get_col_idx(c) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        cmd_err::print(
+                            e, self.height
+                        );
+                        return;
+                    }
+                }
             }
+            None => ida,
         };
 
         cells.w_cell().is_focused = false;
@@ -2458,16 +2505,27 @@ impl WinInfo {
 
         for col in &mut cells.columns {
             let mut new_col = Column::new();
-            for j in st..=end {
-                let cell = col.remove_cell(j);
+            for _ in st..=end {
+                let cell = col.remove_cell(st);
                 new_col.push_cell(cell);
             } 
             new_cells.push_column(new_col);
         }
         cells.written = true;
         new_cells.written = true;
-        
         drop(cells);
+
+        self.num_rows = self.num_rows.saturating_sub(
+            end.saturating_sub(st)
+        );
+        if self.h_pointer > self.num_rows - 2 {
+            self.h_pointer = self.num_rows - 2;
+            self.h_offset = (self.num_rows - 1).saturating_sub(self.h_page);
+            csvs.get_cells().w_cell = (self.w_pointer, self.h_pointer);
+            let mut con = csvs.get_context();
+            con.h_pointer = self.h_pointer;
+            con.h_offset = self.h_offset;
+        }
         
         let new_id = csvs.num_contexts();
         let new_context = Context::new(
@@ -2608,9 +2666,58 @@ impl WinInfo {
         self.flush();
     }
 
+    fn splice_rows(&mut self, con_id: usize, at_row: usize, csvs: &mut Csvs) {
+        // insert rows from csvs.context[at_row]
+        // after the focused column;
+        // if the column names are different,
+        // create new columns
+        let mut src_con = csvs.remove_context(con_id);
+        let mut src_cells = src_con.cells();
+        let num_rows = src_cells.num_rows() - 1;
+        src_cells.w_cell().is_focused = false;
+        let mut dest_cells = csvs.get_cells();
+        
+        for i in 0..dest_cells.num_cols() {
+            let mut col = &mut dest_cells.columns[i];
+            let dest_name = &dest_cells.header[i].content;
+            let mut j = 0usize;
+            loop {
+                // loop through src column names
+                let src_name = match src_cells.header.get(j) {
+                    Some(name) => &name.content,
+                    None => break,
+                };
+                if src_name == dest_name {
+                    let mut src_col = src_cells.columns.remove(j);
+                    let _ = src_cells.header.remove(j);
+                    let st = at_row + 1;
+                    let end = st + num_rows;
+                    for k in st..end {
+                        let cell = src_col.remove_cell(0);
+                        col.insert_cell(k, cell);
+                    }
+                    break;
+                } else {
+                    let st = at_row + 1;
+                    let end = st + num_rows;
+                    for k in st..end {
+                        col.insert_cell(k, Cell::new(""));
+                    }
+                }
+                j += 1;
+            }
+        }
+        
+        dest_cells.written = true;
+        
+        self.num_rows += num_rows;
+        self.draw_rows(dest_cells);
 
-    fn splice_rows(&mut self, con_id: usize, at_col: usize, csvs: &mut Csvs) {
-        todo!()
+        drop(dest_cells);
+        
+        self.print_context(csvs);
+        self.draw_focused_content();
+        self.flush();
     }
 }
 
