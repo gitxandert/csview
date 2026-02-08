@@ -21,10 +21,10 @@ pub fn process_input(
                         w_info.set_context(
                             csvs.get_context()
                         );
-                        w_info.changed = WinChange::Screen;
-                        w_info.show_csv(
-                            csvs.get_cells()
-                        );
+                        w_info.draw_screen(csvs.get_cells());
+                        w_info.print_context(csvs);
+                        w_info.draw_focused_content();
+                        w_info.flush();
                     }
                 }
                 // normal arrows
