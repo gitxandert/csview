@@ -1001,7 +1001,7 @@ impl WinInfo {
         tokens
     }
 
-    pub fn process_command(&mut self, cells: &mut Cells) {
+    pub fn process_command(&mut self, csvs: &mut Csvs) {
         let input = self.write_buffer.as_string();
         let mut tokens = Self::tokenize(&input, ' ');
         match tokens[0] {
@@ -1009,25 +1009,25 @@ impl WinInfo {
             // can show, edit, and find column names
             "cn" => self.cn_cmd(
                         tokens,
-                        cells
+                        csvs.get_cells()
                     ),
             // column
             // whole-column functions
             "col" => self.col_cmd(
                         tokens,
-                        cells
+                        csvs.get_cells()
                     ),
             // row
             // row operations
             "row" => self.row_cmd(
                         tokens,
-                        cells
+                        csvs.get_cells()
                     ),
             // sheet
             // whole-sheet operations
             "sh" | "sheet" => self.sheet_cmd(
                                     tokens,
-                                    cells
+                                    csvs
                                   ),
             // invalid
             _ => cmd_err::print(
@@ -1256,7 +1256,7 @@ impl WinInfo {
         }
     }
         
-    fn sheet_cmd(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+    fn sheet_cmd(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
         let tok = tokens[0];
         let subcmd = match tokens.get(1) {
             None =>{
@@ -1302,11 +1302,11 @@ impl WinInfo {
                                 }
                             }
                         };
-                        self.sort_by(cells, &col, s_dir);
+                        self.sort_by(csvs.get_cells(), &col, s_dir);
                     }
                 }
             }
-            "sl" | "slice" => self.slice(tokens, cells),
+            "sl" | "slice" => self.slice(tokens, csvs),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd,
                     subcmd, 
@@ -2175,7 +2175,7 @@ impl WinInfo {
         }
     }
 
-    fn slice(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+    fn slice(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
         let mut tokens = tokens.into_iter();
         for i in 0..2 {
             let _ = tokens.next();
@@ -2205,8 +2205,8 @@ impl WinInfo {
         };
 
         match or {
-            "col" => self.slice_cols(&range, cells),
-            "row" => self.slice_rows(&range, cells),
+            "col" => self.slice_cols(&range, csvs),
+            "row" => self.slice_rows(&range, csvs),
             _ => cmd_err::print(
                     CmdErr::InvalidArg,
                     or,
@@ -2215,11 +2215,11 @@ impl WinInfo {
         }
     }
 
-    fn slice_cols(&mut self, range: &str, cells: &mut Cells) {
+    fn slice_cols(&mut self, range: &str, cells: &mut Csvs) {
         print_bottom!(self, "slicing cols in range {}", range); 
     }
 
-    fn slice_rows(&mut self, range: &str, cells: &mut Cells) {
+    fn slice_rows(&mut self, range: &str, cells: &mut Csvs) {
         print_bottom!(self, "slicing rows in range {}", range);
     }
 
