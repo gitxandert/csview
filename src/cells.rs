@@ -2,6 +2,7 @@ use std::io::{self, Error, ErrorKind, Read, Write, stdout};
 
 use crate::{
     csv_io::int_to_base_26,
+    cmd_err::{self, CmdErr},
     terminal::{WinChange, WinInfo}
 };
 
@@ -387,13 +388,23 @@ impl Cells {
         self.col_ids.push(Cell::new(&int_to_base_26(len)));
     }
 
-    pub fn get_col_idx(&self, name: &str) -> Option<usize> {
-        for i in 0..self.header.len() {
-            if &self.header[i].content == name {
-                return Some(i);
+    pub fn get_col_idx<'a>(&self, id: &'a str) -> Result<usize, CmdErr<'a>> {
+        if &id[..1] == "'" || &id[..1] == "\"" {
+            let name = &id[1..id.len() - 1];
+            for i in 0..self.header.len() {
+                if &self.header[i].content == name {
+                    return Ok(i);
+                }
             }
+            return Err(CmdErr::NoName(name));
+        } else {
+            for i in 0..self.col_ids.len() {
+                if &self.col_ids[i].content == id {
+                    return Ok(i);
+                }
+            }
+            return Err(CmdErr::NoId(id));
         }
-        None
     }
 }
 
