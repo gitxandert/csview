@@ -109,7 +109,7 @@ pub fn int_to_base_26(mut x: u32) -> String {
     String::from_utf8(bytes).unwrap()
 }
 
-fn make_col_ids(num_cols: usize) -> Vec<Cell> {
+pub fn make_col_ids(num_cols: usize) -> Vec<Cell> {
     let mut row = Vec::<Cell>::new();
 
     for i in 0..num_cols as u32 {
