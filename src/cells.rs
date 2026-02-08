@@ -470,6 +470,10 @@ impl Csvs {
         &mut self.contexts[self.handle]
     }
 
+    pub fn remove_context(&mut self, id: usize) -> Context {
+        self.contexts.remove(id)
+    }
+
     pub fn get_cells(&mut self) -> &mut Cells {
         &mut self.contexts[self.handle].cells
     }
