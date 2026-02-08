@@ -2183,8 +2183,8 @@ impl WinInfo {
         };
 
         match or {
-            "col" => self.slice_cols(&range, csvs),
-            "row" => self.slice_rows(&range, csvs),
+            "c" | "cols" => self.slice_cols(&range, csvs),
+            "r" | "rows" => self.slice_rows(&range, csvs),
             _ => cmd_err::print(
                     CmdErr::InvalidArg(or),
                     self.height
@@ -2206,8 +2206,6 @@ impl WinInfo {
 
         // -remove columns
         // -push them into new Cells
-        //  -think of what name to give the slice...
-        //  -maybe keep a slices field in Cells?
         // -create new Context
         // -add Context to Csvs and change handle to it
         //
@@ -2285,13 +2283,72 @@ impl WinInfo {
         self.show_csv(context.cells());
     }
 
-    fn slice_rows(&mut self, range: &str, cells: &mut Csvs) {
-        print_bottom!(self, "slicing rows in range {}", range);
+    fn slice_rows(&mut self, range: &str, csvs: &mut Csvs) {
+        let (st, end) = match self.parse_row_range(range) {
+            Ok((s,t)) => (s, t),
+            Err(e) => {
+                cmd_err::print(
+                        e,
+                        self.height
+                );
+                return;
+            }
+        };
+
+        // -remove rows
+        // -push them into new Columns with old col names
+        // -push new Columns into new Cells
+        // -create new Context
+        // -add Context to Csvs and change handle to it
+        //
+        let cells = csvs.get_cells();
+
+        cells.w_cell().is_focused = false;
+        cells.slices += 1;
+        let mut fn_split = Self::tokenize(&cells.filename, '.');
+        let first = format!(
+                        "{}_{}",
+                        fn_split[0],
+                        cells.slices
+                    );
+        fn_split[0] = &first;
+        let slice_name = fn_split.join(".");
+
+        let mut new_cells = Cells::new(
+            slice_name,
+            cells.delim,
+            Cells::clone_cell_row(&cells.header),
+            Cells::clone_cell_row(&cells.col_ids),
+            self.num_cols
+        );
+
+        for col in &mut cells.columns {
+            let mut new_col = Column::new();
+            for j in st..=end {
+                let cell = col.remove_cell(j);
+                new_col.push_cell(cell);
+            } 
+            new_cells.push_column(new_col);
+        }
+        cells.written = true;
+        new_cells.written = true;
+        
+        drop(cells);
+        
+        let new_id = csvs.num_contexts();
+        let new_context = Context::new(
+                            new_id.clone(),
+                            new_cells
+                        );
+        csvs.push_context(new_context);
+        csvs.set_handle(new_id);
+
+        let context = csvs.get_context();
+        self.set_context(context);
+        self.changed = WinChange::Screen;
+        self.show_csv(context.cells());
     }
-
 }
-
-
 
 // Terminal takeover + signal handling + globals for WIDTH and HEIGHT
 
