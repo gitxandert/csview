@@ -341,13 +341,11 @@ pub fn process_input(
                     w_info.changed = WinChange::Command;
                 }
                 [10] | [13] => { /* enter (\n, \r) */
-                    let cells = csvs.get_cells();
-                    w_info.process_command(cells);
+                    w_info.process_command(csvs);
                     w_info.set_command_mode(false);
                 }
                 [13, 10] => { /* enter (\r\n) */
-                    let cells = csvs.get_cells();
-                    w_info.process_command(cells);
+                    w_info.process_command(csvs);
                     w_info.set_command_mode(false);
                 }
                 [27, 91, 50, 126] => { /* insert */ }
