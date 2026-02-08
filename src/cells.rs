@@ -291,6 +291,7 @@ pub struct Cells {
     pub w_cell: (usize, usize),
     pub changed: bool,
     pub written: bool,
+    pub slices: usize,
 }
 
 impl Cells {
@@ -299,6 +300,7 @@ impl Cells {
         let w_cell = (0usize, 0usize);
         let changed = false;
         let written = false;
+        let slices = 0usize;
 
         Self { 
             filename,
@@ -308,7 +310,8 @@ impl Cells {
             columns, 
             w_cell, 
             changed, 
-            written 
+            written,
+            slices
         }
     }
 
@@ -435,6 +438,10 @@ impl Context {
         self.w_offset = wi.w_offset;
         self.h_offset = wi.h_offset;
     }
+
+    pub fn cells(&mut self) -> &mut Cells {
+        &mut self.cells
+    }
 }
 
 pub struct Csvs {
@@ -448,6 +455,10 @@ impl Csvs {
             contexts,
             handle: 0usize,
         }
+    }
+
+    pub fn push_context(&mut self, con: Context) {
+        self.contexts.push(con);
     }
     
     pub fn save_context(&mut self, wi: &WinInfo) {
