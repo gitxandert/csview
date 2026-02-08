@@ -425,3 +425,38 @@ impl Context {
         self.h_offset = wi.h_offset;
     }
 }
+
+pub struct Csvs {
+    pub contexts: Vec<Context>,
+    pub handle: usize,
+}
+
+impl Csvs {
+    pub fn new(contexts: Vec<Context>) -> Self {
+        Self {
+            contexts,
+            handle: 0usize,
+        }
+    }
+    
+    pub fn save_context(&mut self, wi: &WinInfo) {
+        self.contexts[self.handle].save(wi)
+    }
+
+    pub fn get_context(&mut self) -> &mut Context {
+        &mut self.contexts[self.handle]
+    }
+
+    pub fn get_cells(&mut self) -> &mut Cells {
+        &mut self.contexts[self.handle].cells
+    }
+
+    pub fn num_contexts(&self) -> usize {
+        self.contexts.len()
+    }
+
+    pub fn set_handle(&mut self, id: usize) {
+        self.handle = id;
+    }
+}
+    
