@@ -136,15 +136,15 @@ fn main() {
                     match save_backup(&cells.filename) {
                         Ok(b) => {
                             println!("\t{b}");
-                            match write_to_file(&mut cells) {
-                                Ok(s) => println!("\t{s}"),
-                                Err(e) => println!("\t{e}"),
-                            }
                         }
                         Err(e) => {
                             println!("\tWARNING -- could not create back up due to the following:");
-                            println!("\t{e}");
+                            println!("\t\t{e}");
                         }
+                    }
+                    match write_to_file(&mut cells) {
+                        Ok(s) => println!("\t{s}"),
+                        Err(e) => println!("\t{e}"),
                     }
                 }
                 _ => (),
