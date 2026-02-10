@@ -234,6 +234,22 @@ impl Column {
         cell
     }
 
+    pub fn drain_cells(&mut self, range: std::ops::RangeInclusive<usize>) -> Vec<Cell> {
+        let start = *range.start();
+        let end = *range.end();
+        
+        let mut reindexed = Vec::<Cell>::with_capacity(self.cells.len());
+       
+        for &real_idx in &self.indices {
+            reindexed.push(self.cells.get(real_idx).unwrap().clone());
+        }
+        self.cells = reindexed;
+        let drained_cells = self.cells.drain(start..=end).collect();
+        self.indices = (0..self.cells.len()).collect();
+
+        drained_cells
+    }
+
     pub fn swap_cells(&mut self, a: usize, b: usize) {
         let int = self.indices[a];
         self.indices[a] = self.indices[b];
