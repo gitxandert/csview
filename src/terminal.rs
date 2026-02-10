@@ -1987,7 +1987,7 @@ impl WinInfo {
         let mut indices = col.indices.clone();
         match dir {
             Sort::AscAlph => 
-                indices.sort_unstable_by(|&i, &j| {
+                indices.sort_by(|&i, &j| {
                     let a = {
                         match col.view_cell(i) {
                             "" => &format!("{}a", col.view_cell(j)),
@@ -2003,13 +2003,13 @@ impl WinInfo {
                     a.cmp(&b)
                 }),
             Sort::DescAlph => 
-                indices.sort_unstable_by(|&i, &j| {
+                indices.sort_by(|&i, &j| {
                     let a = col.view_cell(i);
                     let b = col.view_cell(j);
                     b.cmp(&a)
                 }),
             Sort::AscNum => {
-                indices.sort_unstable_by(|&i, &j| {
+                indices.sort_by(|&i, &j| {
                     let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MAX,
@@ -2022,7 +2022,7 @@ impl WinInfo {
                 })
             }
             Sort::DescNum => {
-                indices.sort_unstable_by(|&i, &j| {
+                indices.sort_by(|&i, &j| {
                     let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MIN,
@@ -2590,10 +2590,9 @@ impl WinInfo {
 
         for col in &mut cells.columns {
             let mut new_col = Column::new();
-            for _ in st..=end {
-                let cell = col.remove_cell(st);
-                new_col.push_cell(cell);
-            } 
+            let removed = col.drain_cells(st..=end);
+            new_col.cells = removed;
+            new_col.indices = (0..(end-st + 1)).collect();
             new_cells.push_column(new_col);
         }
         cells.written = true;
@@ -2755,10 +2754,12 @@ impl WinInfo {
         // create new columns
         let mut src_con = csvs.remove_context(con_id);
         let mut src_cells = src_con.cells();
-        let num_rows = src_cells.num_rows();
         src_cells.w_cell().is_focused = false;
         let mut dest_cells = csvs.get_cells();
-        
+       
+        let num_rows = src_cells.num_rows();
+        let st = at_row + 1;
+        let end = st + num_rows;
         for i in 0..dest_cells.num_cols() {
             let mut col = &mut dest_cells.columns[i];
             let dest_name = &dest_cells.header[i].content;
@@ -2772,22 +2773,31 @@ impl WinInfo {
                 if src_name == dest_name {
                     let mut src_col = src_cells.columns.remove(j);
                     let _ = src_cells.header.remove(j);
-                    let st = at_row;
-                    let end = st + num_rows;
-                    for k in st..end {
-                        let cell = src_col.remove_cell(0);
-                        col.insert_cell(k, cell);
+                    if st >= self.num_rows {
+                        let mut end_of_col = col.cells.split_off(st);
+                        col.cells.append(&mut src_col.cells);
+                        col.cells.append(&mut end_of_col);
+                    } else {
+                        col.cells.append(&mut src_col.cells);
                     }
+                    col.indices = (0..col.len()).collect();
                     break;
                 }
                 j += 1;
             }
             if j == src_cells.num_cols() {
-                let st = at_row;
-                let end = st + num_rows;
-                for k in st..end {
-                    col.insert_cell(k, Cell::new(""));
+                if st >= self.num_rows {
+                    let mut end_of_col = col.cells.split_off(st);
+                    for _ in st..end {
+                        col.push_cell(Cell::new(""));
+                    }
+                    col.cells.append(&mut end_of_col);
+                } else {
+                    for _ in st..end {
+                        col.push_cell(Cell::new(""));
+                    }
                 }
+                col.indices = (0..col.len()).collect();
             }
         }
 
@@ -2798,15 +2808,14 @@ impl WinInfo {
             let mut src_name = src_cells.header.remove(0);
             dest_cells.header.push(src_name);
             dest_cells.increment_col_ids();
-            let st = at_row;
-            let end = st + num_rows;
-            for i in 0..dest_cells.num_rows() {
-                let mut cell = Cell::new("");
-                if i >= st && i < end {
-                    cell = src_col.remove_cell(0);
-                }
-                dest_col.push_cell(cell);
+            for i in 0..st {
+                dest_col.push_cell(Cell::new(""));
             }
+            dest_col.cells.append(&mut src_col.cells);
+            for i in end + 1..dest_cells.num_rows() {
+                dest_col.push_cell(Cell::new(""));
+            }
+            dest_col.indices = (0..dest_col.len()).collect();
             dest_cells.push_column(dest_col);
             self.num_cols += 1
         }
