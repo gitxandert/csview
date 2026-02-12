@@ -206,8 +206,6 @@ pub struct WinInfo {
 // (only works with WinInfo)
 macro_rules! print_bottom {
     ($self:expr, $fmt:expr $(, $args:expr)*) => {
-        // Here, 'self' and 'self.height' are assumed to be in scope
-        // where the macro is called.
         let formatted_string = format!(
             concat!("\x1b[{};1H", "\x1b[2K", "\x1b[0m", $fmt),
             $self.height,
@@ -2083,8 +2081,10 @@ impl WinInfo {
 
         let mut col = &mut cells.columns[self.w_pointer];
         for cell in &mut col.cells {
-            if &cell.content == &t {
-                cell.content = n.clone();
+            // Check if the cell content contains the target substring
+            if cell.content.contains(&t) {
+                // Replace the substring and reassign to cell.content
+                cell.content = cell.content.replace(&t, &n);
             }
         }
         cells.written = true;
