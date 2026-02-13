@@ -1,4 +1,30 @@
-# listen, I'm a bad person, I ignore warnings because who cares about camelcase
+#!/bin/bash
+# small install script to build for release and install in $HOME/.csview/bin
+#
+
+# Build
+echo "Building csview..."
 export RUSTFLAGS="-Awarnings"
 cargo build --release
-sudo install -m 0755 target/release/csview /usr/local/bin/csview
+
+# Define the installation directory
+INSTALL_DIR="$HOME/.local/bin"
+mkdir -p "$INSTALL_DIR"
+
+# Install the binary
+echo "Installing csview to $INSTALL_DIR..."
+install -m 0755 target/release/csview "$INSTALL_DIR/csview"
+
+# Define the PATH export line
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+
+# 4. Check if the line exists in .bashrc, if not, append it
+if ! grep -qF "$PATH_LINE" "$HOME/.bashrc"; then
+    echo "Adding $INSTALL_DIR to PATH in ~/.bashrc..."
+    echo "" >> "$HOME/.bashrc"
+    echo "# Added by csview installer" >> "$HOME/.bashrc"
+    echo "$PATH_LINE" >> "$HOME/.bashrc"
+    echo "Please run 'source ~/.bashrc' or restart your terminal."
+else
+    echo "PATH is already updated in ~/.bashrc."
+fi 
