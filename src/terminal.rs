@@ -1727,7 +1727,7 @@ impl WinInfo {
 
         cells.written = true;
         self.num_cols += 1;
-        self.draw_from_column(cells);
+        self.draw_screen(cells);
         self.set_focused("");
         self.draw_focused_content();
         self.flush();
