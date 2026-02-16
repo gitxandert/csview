@@ -2807,6 +2807,7 @@ impl WinInfo {
         let end = st + num_rows;
         for i in 0..dest_cells.num_cols() {
             let mut col = &mut dest_cells.columns[i];
+            col.reindex();
             let dest_name = &dest_cells.header[i].content;
             let mut j = 0usize;
             loop {
