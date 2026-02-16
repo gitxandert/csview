@@ -598,7 +598,11 @@ impl WinInfo {
             let mut cell = col.get_cell(row);
             let take = cell.text_offset + cell.width.min(cell.len() - cell.text_offset);
             let content = &cell.content;
-            let visible = &content[cell.text_offset..take];
+            let visible: String = content
+                .chars()
+                .skip(cell.text_offset)
+                .take(take)
+                .collect();
             let formatted = {
                 if cell.is_focused {
                     self.set_focused(&content);
