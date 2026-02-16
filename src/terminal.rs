@@ -1613,15 +1613,18 @@ impl WinInfo {
     }
 
     fn find_value_in_col(&mut self, csvs: &mut Csvs, val: &str) {
-        let cells = csvs.get_cells();
         let val = Self::trim_quotes(val);
-        let rows = &cells.columns[self.w_pointer].cells;
-        let indices: Vec<usize> = rows.iter()
-            .enumerate()
-            .filter(|&(_idx, cell)| cell.content.contains(&val))
-            .map(|(idx, _cell)| idx)
-            .collect();
-        
+        let cells = csvs.get_cells();
+        let col = &mut cells.columns[self.w_pointer];
+
+        let mut indices = Vec::<usize>::new();
+        for i in 0..col.len() {
+            let cell = col.get_cell(i);
+            if cell.content.contains(&val) {
+                indices.push(i);
+            }
+        }
+
         if indices.len() == 0 {
             print_bottom!(
                 self,
@@ -1640,7 +1643,7 @@ impl WinInfo {
         // - return to normal functionality with 'esc'
         let mut idx = {
             // start with the closest example of the value
-            let mut diff = rows.len();
+            let mut diff = col.len();
             let mut i = 0usize;
             for _ in 0..indices.len() {
                 let idx = indices[i];
