@@ -1361,6 +1361,15 @@ impl WinInfo {
                     }
                 }
             }
+            "g" | "goto" => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingLocation(subcmd),
+                                self.height
+                            ),
+                    Some(loc) => self.goto_row(csvs.get_cells(), &loc),
+                }
+            }
             _ =>  cmd_err::print(
                     CmdErr::InvalidSubCmd(tok), 
                     self.height
@@ -2368,6 +2377,27 @@ impl WinInfo {
         self.flush();
     }
 
+    fn goto_row(&mut self, cells: &mut Cells, loc: &str) {
+        let i = match Self::str_to_dec(loc) {
+            Ok(index) => index,
+            Err(e) => {
+                cmd_err::print(e, self.height);
+                return;
+            }
+        };
+        if i >= self.num_rows {
+            cmd_err::print(
+                CmdErr::InvalidIndex(i),
+                self.height
+            );
+            return;
+        }
+        self.set_h_pointer(i);
+        self.draw_screen(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
+
     // sheet functions
     //
     fn sort_by(&mut self, cells: &mut Cells, col_name: &str, sort_dir: Sort) {
@@ -2753,7 +2783,7 @@ impl WinInfo {
     }
 
     fn splice_rows(&mut self, con_id: usize, at_row: usize, csvs: &mut Csvs) {
-        // insert rows from csvs.context[at_row]
+        // insert rows from csvs.context[[con_id]
         // after the focused column;
         // if the column names are different,
         // create new columns
@@ -2779,11 +2809,11 @@ impl WinInfo {
                     let mut src_col = src_cells.columns.remove(j);
                     let _ = src_cells.header.remove(j);
                     if st >= self.num_rows {
+                        col.cells.append(&mut src_col.cells);
+                    } else {
                         let mut end_of_col = col.cells.split_off(st);
                         col.cells.append(&mut src_col.cells);
                         col.cells.append(&mut end_of_col);
-                    } else {
-                        col.cells.append(&mut src_col.cells);
                     }
                     col.indices = (0..col.len()).collect();
                     break;
@@ -2792,15 +2822,15 @@ impl WinInfo {
             }
             if j == src_cells.num_cols() {
                 if st >= self.num_rows {
+                    for _ in st..end {
+                        col.push_cell(Cell::new(""));
+                    }
+                } else {
                     let mut end_of_col = col.cells.split_off(st);
                     for _ in st..end {
                         col.push_cell(Cell::new(""));
                     }
                     col.cells.append(&mut end_of_col);
-                } else {
-                    for _ in st..end {
-                        col.push_cell(Cell::new(""));
-                    }
                 }
                 col.indices = (0..col.len()).collect();
             }
