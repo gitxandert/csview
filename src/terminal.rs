@@ -1868,13 +1868,14 @@ impl WinInfo {
 
     fn show_unique_column_values(&mut self, csvs: &mut Csvs) {
         let cells = csvs.get_cells();
-        let orig = &cells.columns[self.w_pointer];
+        let orig = &mut cells.columns[self.w_pointer];
 
         let mut uq = Column::new();
         uq.start = orig.start;
         uq.width = orig.width;
 
-        for o_cell in &orig.cells {
+        for i in 0..orig.len() {
+            let o_cell = orig.get_cell(i);
             if o_cell.content == "" {
                 continue;
             }
