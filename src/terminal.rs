@@ -1370,6 +1370,7 @@ impl WinInfo {
                     Some(loc) => self.goto_row(csvs.get_cells(), &loc),
                 }
             }
+            "n" | "num" => self.show_row_num(),
             _ =>  cmd_err::print(
                     CmdErr::InvalidSubCmd(tok), 
                     self.height
@@ -2394,6 +2395,12 @@ impl WinInfo {
         }
         self.set_h_pointer(i);
         self.draw_screen(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    fn show_row_num(&mut self) {
+        self.set_focused(&format!("{}", self.h_pointer));
         self.draw_focused_content();
         self.flush();
     }
