@@ -413,14 +413,18 @@ impl Cells {
     }
 
     pub fn get_col_idx<'a>(&self, id: &'a str) -> Result<usize, CmdErr<'a>> {
-        if &id[..1] == "'" || &id[..1] == "\"" {
-            let name = &id[1..id.len() - 1];
+        let mut id_chars = id.chars();
+        let first = id_chars.nth(0).unwrap();
+        if first == '\'' || first == '"' {
+            let name: String = id_chars
+                .take(id.len() - 2)
+                .collect();
             for i in 0..self.header.len() {
-                if &self.header[i].content == name {
+                if self.header[i].content == name {
                     return Ok(i);
                 }
             }
-            return Err(CmdErr::NoName(name));
+            return Err(CmdErr::NoName(id));
         } else {
             for i in 0..self.col_ids.len() {
                 if &self.col_ids[i].content == id {
@@ -491,6 +495,11 @@ impl Csvs {
     }
 
     pub fn remove_context(&mut self, id: usize) -> Context {
+        for c in &mut self.contexts {
+            if c.id > id {
+                c.id -= 1;
+            }
+        }
         self.contexts.remove(id)
     }
 
