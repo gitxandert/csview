@@ -923,6 +923,9 @@ impl WinInfo {
         self.push_str_to_frame(&cursor);
         let start = cells.columns[i].start;
         self.print_row(cells, &mut i, row, start);
+        self.set_w_page(
+            i, self.w_offset
+        );
     }
 
     pub fn push_to_frame(&mut self, c: char) {
@@ -2818,6 +2821,7 @@ impl WinInfo {
                 };
                 if src_name == dest_name {
                     let mut src_col = src_cells.columns.remove(j);
+                    src_col.reindex();
                     let _ = src_cells.header.remove(j);
                     if st >= self.num_rows {
                         col.cells.append(&mut src_col.cells);
@@ -2851,6 +2855,7 @@ impl WinInfo {
         while src_cells.num_cols() > 0 {
             let mut dest_col = Column::new();
             let mut src_col = src_cells.columns.remove(0);
+            src_col.reindex();
             let mut src_name = src_cells.header.remove(0);
             dest_cells.header.push(src_name);
             dest_cells.increment_col_ids();
