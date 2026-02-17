@@ -775,7 +775,8 @@ impl WinInfo {
             &format!("\x1b[{};1H\x1b[4m", term_row)
         );
 
-        for row in term_row..self.height - 1 {
+        let lim = (self.height - 1).min(self.num_rows - self.h_offset + 3);
+        for row in term_row..lim {
             let row_id = row - 3 + self.h_offset;
             self.push_str_to_frame(
                 &format!(
@@ -1340,7 +1341,7 @@ impl WinInfo {
                     }
                     None => 1usize,
                 };
-                self.insert_row(csvs.get_cells(), count);;
+                self.insert_row(csvs.get_cells(), count);
             }
             "d"  | "delete" => self.delete_row(csvs),
             "mv" | "move"   => {
@@ -2489,7 +2490,11 @@ impl WinInfo {
         // -add Context to Csvs and change handle to it
         //
         let cells = csvs.get_cells();
-        let ida = match cells.get_col_idx(cols[0]) {
+        let mut first = cols[0];
+        if first == "" {
+            first = "A";
+        }
+        let ida = match cells.get_col_idx(first) {
             Ok(id) => id,
             Err(e) => {
                 cmd_err::print(
@@ -2730,7 +2735,7 @@ impl WinInfo {
         match or {
             "c" | "cols" => self.splice_cols(
                                 con_id, 
-                                self.w_pointer, 
+                                self.w_pointer + 1, 
                                 csvs
                             ),
             "r" | "rows" => self.splice_rows(
