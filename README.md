@@ -56,6 +56,8 @@ csview also has a command mode, accessed through ':' :
     - `cn to {name}`
         - changes the focused column's name to a new name
 - **col**: column functions
+    - `col c` | `col count`
+        - prints how many columns there are
     - `col mv {range} {loc}` | `col move {range} {loc}`
         - moves the range of colummns provided to a new location
         - range can be expressed as:
@@ -96,6 +98,8 @@ csview also has a command mode, accessed through ':' :
     - `col r {target} {new}` | `col replace {target} {new}`
         - replaces the target value with the new one
 - **row**: row functions
+    - `row c` | `row count`
+        - prints how many rows there are
     - `row i {count}` | `row insert {count}`
         - inserts count rows below the focused row (default 1 row)
     - `row d` | `row delete`
