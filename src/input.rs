@@ -1,14 +1,14 @@
 use crate::{
     cells::{Cells, Context, Csvs},
     csv_io::{save_backup, write_to_file},
-    terminal::{InputMode, ScrollMode, WinChange, WinInfo},
+    terminal::{InputMode, ScrollMode, SigFlag, WinChange, WinInfo},
 };
 
 pub fn process_input(
     input: &[u8], 
     w_info: &mut WinInfo, 
     csvs: &mut Csvs, 
-) {
+) -> SigFlag {
     match w_info.input_mode {
         InputMode::Scroll => {
             match input {
@@ -277,8 +277,15 @@ pub fn process_input(
                     let c = match str::from_utf8(input) {
                         Ok(valid) => valid,
                         Err(_) => {
-                            eprintln!("Invalid input {:?}", input);
-                            return;
+                            w_info.push_str_to_frame(
+                                &format!(
+                                    "\x1b[{};1HInvalid input {:?}", 
+                                    w_info.height,
+                                    input
+                                )
+                            );
+                            w_info.flush();
+                            return SigFlag::Non;
                         }
                     };
                     w_info.add_to_write_buffer(c);
@@ -346,16 +353,24 @@ pub fn process_input(
                     w_info.changed = WinChange::Command;
                 }
                 [10] | [13] => { /* enter (\n, \r) */
-                    w_info.process_command(csvs);
-                    let cells = csvs.get_cells();
-                    let col = cells.get_column(w_info.w_pointer);
-                    w_info.set_command_mode(false, &col);
+                    match w_info.process_command(csvs) {
+                        SigFlag::Quit => return SigFlag::Quit,
+                        _ => {
+                            let cells = csvs.get_cells();
+                            let col = cells.get_column(w_info.w_pointer);
+                            w_info.set_command_mode(false, &col);
+                        }
+                    }
                 }
                 [13, 10] => { /* enter (\r\n) */
-                    w_info.process_command(csvs);
-                    let cells = csvs.get_cells();
-                    let col = cells.get_column(w_info.w_pointer);
-                    w_info.set_command_mode(false, &col);
+                    match w_info.process_command(csvs) {
+                        SigFlag::Quit => return SigFlag::Quit,
+                        _ => {
+                            let cells = csvs.get_cells();
+                            let col = cells.get_column(w_info.w_pointer);
+                            w_info.set_command_mode(false, &col);
+                        }
+                    }
                 }
                 [27, 91, 50, 126] => { /* insert */ }
                 [27, 91, 51, 126] => { /* delete */ }
@@ -369,8 +384,15 @@ pub fn process_input(
                     let c = match str::from_utf8(input) {
                         Ok(valid) => valid,
                         Err(_) => {
-                            eprintln!("Invalid input {:?}", input);
-                            return;
+                            w_info.push_str_to_frame(
+                                &format!(
+                                    "\x1b[{};1HInvalid input {:?}", 
+                                    w_info.height,
+                                    input
+                                )
+                            );
+                            w_info.flush();
+                            return SigFlag::Non;
                         }
                     };
                     w_info.add_to_write_buffer(c);
@@ -379,4 +401,5 @@ pub fn process_input(
             }
         }
     }
+    SigFlag::Non
 }
