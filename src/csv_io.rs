@@ -130,6 +130,13 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
     
     let mut cells = Cells::new(filename, delim.clone(), header, col_ids, col_len);
 
+    if lines.len() == 0 {
+        for j in 0..col_len {
+            let mut column = Column::new();
+            cells.push_column(column);
+            cells.push_to_col(j, Cell::new(""));
+        }
+    }
     for i in 0..lines.len() {
         let row: Vec<Cell> = parse_by_delim(&lines[i], delim);
         for j in 0..col_len {
