@@ -1910,57 +1910,8 @@ impl WinInfo {
     fn show_unique_column_values(&mut self, csvs: &mut Csvs) {
         let cells = csvs.get_cells();
         let orig = &mut cells.columns[self.w_pointer];
-
-        let mut uq = Column::new();
-        uq.start = orig.start;
-        uq.width = orig.width;
-
-        for i in 0..orig.len() {
-            let o_cell = orig.get_cell(i);
-            if o_cell.content == "" {
-                continue;
-            }
-            let mut seen = false;
-            for u_cell in &uq.cells {
-                if u_cell.content == o_cell.content {
-                    seen = true;
-                    break;
-                }
-            }
-            if !seen {
-                let mut new_cell = o_cell.clone();
-                new_cell.text_offset = 0usize;
-                uq.push_cell(new_cell);
-            }
-        }
-
-        if uq.len() == 0 {
-            print_bottom!(
-                self,
-                "No values in '{}'",
-                cells.header[self.w_pointer].content
-            );
-            return;
-        }
-
-        // temporarily remove original column
-        drop(orig);
-        cells.w_cell().is_focused = false;
-        let orig = cells.columns.remove(self.w_pointer);
-        // insert uq at same place,
-        // with values offset vertically
-        for i in 0..self.h_offset {
-            uq.insert_cell(i, Cell::new(""));
-        }
-        let uq_st = self.h_offset;
-        let uq_len = uq.len() - uq_st;
-        let uq_end = uq.len() - 1;
-        for i in uq.len()..orig.len() {
-            uq.insert_cell(i, Cell::new(""));
-        }
-        cells.insert_column(self.w_pointer, uq);
-        cells.set_w_cell(cells.w_cell.0, cells.w_cell.1);
-        self.draw_from_column(cells);
+        let uq_len = orig.make_unique(); 
+        
         let values = "values";
         print_bottom!(
             self,
@@ -1969,60 +1920,9 @@ impl WinInfo {
             &values[0..6-2usize.saturating_sub(uq_len)], 
             cells.header[self.w_pointer].content
         );
-        self.flush();
-
-        drop(cells);
-
-        let mut buf = [0u8; 8];
-        loop {
-            match poll_stdin(&mut buf) {
-                Ok(PollEvent::Sig) => {
-                    match check_flags() {
-                        SigFlag::Winch => self.set_w_h(csvs),
-                        SigFlag::Int | SigFlag::Quit => (), // will never catch this
-                        SigFlag::Non => break, // must've caught quit/int
-                    }
-                }
-                Ok(PollEvent::Data(0)) => continue,
-                Ok(PollEvent::Data(n)) => {
-                    match &buf[..n] {
-                        [27, 91, 65] => {
-                            if self.h_pointer > uq_st {
-                                self.set_h_pointer(self.h_pointer.saturating_sub(1));
-                                self.show_csv(
-                                    csvs.get_cells()
-                                );
-                            }
-                        }
-                        [27, 91, 66] => {
-                            if self.h_pointer < uq_end {
-                                self.set_h_pointer(self.h_pointer + 1);
-                                self.show_csv(
-                                    csvs.get_cells()
-                                );
-                            }
-                        }
-                        [17] => break,
-                        _   => continue,
-                    }
-                }
-                Err(e) => {
-                    print_bottom!(
-                        self,
-                        "ERR: {}",
-                        e
-                    );
-                    self.flush();
-                }
-            }
-        }
-        // restore original
-        let cells = csvs.get_cells();
-        cells.columns.remove(self.w_pointer);
-        cells.insert_column(self.w_pointer, orig);
-        cells.set_w_cell(cells.w_cell.0, cells.w_cell.1);
+        
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
         self.draw_from_column(cells);
-        self.draw_focused_content();
         self.flush();
     }
 
@@ -2098,7 +1998,7 @@ impl WinInfo {
     fn revert_focused_column(&mut self, cells: &mut Cells) {
         cells.w_cell().is_focused = false;
         let mut col = &mut cells.columns[self.w_pointer];
-        col.indices = (0..col.len()).collect();
+        col.revert();
         cells.set_w_cell(self.w_pointer, self.h_pointer);
         cells.written = true;
         self.draw_from_column(cells);
@@ -2616,7 +2516,8 @@ impl WinInfo {
 
         let mut new_header = Vec::<Cell>::new();
         for _ in ida..=idb {
-            let col = cells.columns.remove(ida);
+            let mut col = cells.columns.remove(ida);
+            col.reindex();
             new_cells.push_column(col);
             
             let name = cells.header.remove(ida);
@@ -2811,9 +2712,10 @@ impl WinInfo {
         let st = at_col;
         let end = st + num_cols;
         for i in st..end {
-            let col = src_cells
+            let mut col = src_cells
                 .columns
                 .remove(0);
+            col.reindex();
             let col_name = src_cells
                 .header
                 .remove(0);
