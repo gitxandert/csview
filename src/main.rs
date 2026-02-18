@@ -92,9 +92,10 @@ fn main() {
             Ok(PollEvent::Data(n)) => {
                 let input = &buffer[..n];
                 if !input.is_empty() {
-
-                    process_input(input, &mut w_info, &mut csvs);
-                    w_info.show_csv(csvs.get_cells());
+                    match process_input(input, &mut w_info, &mut csvs) {
+                        SigFlag::Quit => break,
+                        _ => w_info.show_csv(csvs.get_cells()),
+                    }
                 }
             }
             Ok(PollEvent::Sig) => {
