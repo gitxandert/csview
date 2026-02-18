@@ -185,6 +185,7 @@ pub struct Column {
     pub start: usize, // terminal col where this begins
     pub width: usize,
     pub indices: Vec<usize>,
+    padding: usize,
 }
 
 impl Column {
@@ -194,6 +195,7 @@ impl Column {
             start: 0usize,
             width: 12usize,
             indices: Vec::<usize>::new(),
+            padding: 0usize,
         }
     }
 
@@ -241,6 +243,8 @@ impl Column {
             reindexed.push(self.cells.get(real_idx).unwrap().clone());
         }
         self.cells = reindexed;
+        self.indices = (0..self.cells.len()).collect();
+        self.padding = 0;
     }
 
     pub fn drain_cells(&mut self, range: std::ops::RangeInclusive<usize>) -> Vec<Cell> {
@@ -273,6 +277,45 @@ impl Column {
         }
     }
 
+    pub fn make_unique(&mut self) -> usize {
+        let mut seen = Vec::<String>::new();
+        let mut seen_idx = Vec::<usize>::new();
+        let mut u_idx = Vec::<usize>::new();
+        for i in 0..self.indices.len() {
+            let mut s = 0;
+            let cur = self.indices[i].clone();
+            let content = self.get_cell(cur).content.clone();
+            for _ in 0..seen.len() {
+                if &content == &seen[s] || &content == "" {
+                    break;
+                }
+                s += 1;
+            }
+            if s == seen.len() {
+                seen.push(content);
+                u_idx.push(cur);
+            } else {
+                seen_idx.push(cur);
+            }
+        }
+        // save num unique to return
+        let uq_len = u_idx.len();
+        self.padding = self.len() - uq_len;
+        for _ in 0..self.padding {
+            u_idx.push(self.cells.len());
+            self.cells.push(Cell::new(""));
+        }
+        u_idx.append(&mut seen_idx);
+        self.indices = u_idx;
+
+        uq_len
+    }
+
+    pub fn revert(&mut self) {
+        self.indices = (0..self.len()).collect();
+        self.indices.split_off(self.cells.len() - self.padding);
+    }
+
     pub fn set_start(&mut self, st: usize) {
         self.start = st;
     }
@@ -298,7 +341,7 @@ impl Column {
     }
 
     pub fn len(&self) -> usize {
-        self.cells.len()
+        self.cells.len() - self.padding
     }
 }
 
