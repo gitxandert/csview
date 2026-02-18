@@ -1089,10 +1089,12 @@ impl WinInfo {
         (tokens, None)
     }
 
-    pub fn process_command(&mut self, csvs: &mut Csvs) {
+    pub fn process_command(&mut self, csvs: &mut Csvs) -> SigFlag {
         let input = self.write_buffer.as_string();
         let mut tokens = Self::tokenize(&input, ' ');
         match tokens[0] {
+            // quit
+            "q" | "quit" => return SigFlag::Quit,
             // column name
             // can show, edit, and find column names
             "cn" => self.cn_cmd(
@@ -1123,6 +1125,7 @@ impl WinInfo {
                     self.height
                 ),
         }
+        SigFlag::Non
     }
 
     fn cn_cmd(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
