@@ -353,7 +353,7 @@ impl Cells {
     }
 
     pub fn set_column_width(&mut self, w: usize) {
-        let width = (3 > w) as usize * 3 + (w > 3) as usize * w;
+        let width = w.max(3);
         let idx = self.w_cell.0; // w_cell is where the focus is
         let mut column = self.columns.get_mut(idx).unwrap();
         let mut col_id = self.col_ids.get_mut(idx).unwrap();
