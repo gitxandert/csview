@@ -698,8 +698,7 @@ impl WinInfo {
         }
         
         let mut id = self.w_offset;
-        let lim = (self.height - 1).min(self.num_rows - self.h_offset + 3);
-        for i in 1..lim {
+        for i in 1..self.height - 1 {
             // move cursor to beginning of line
             self.push_str_to_frame(&format!("\x1b[{i};1H\x1b[2K"));
 
@@ -1753,6 +1752,13 @@ impl WinInfo {
     }
 
     fn remove_column(&mut self, csvs: &mut Csvs) {
+        if self.num_cols == 1 {
+            print_bottom!(
+                self,
+                "\x1b[?25lCannot remove the only column."
+            );
+            return;
+        }
         // confirm remove
         let col_name = csvs
             .get_cells()
@@ -2138,6 +2144,13 @@ impl WinInfo {
     }
 
     fn delete_row(&mut self, csvs: &mut Csvs) {
+        if self.num_rows == 1 {
+            print_bottom!(
+                self,
+                "\x1b[?25lCannot delete the only row."
+            );
+            return;
+        }
         print_bottom!(
             self,
             "\x1b[?25lConfirm remove row {:04X} with 'y': ",
@@ -2171,7 +2184,7 @@ impl WinInfo {
                             if self.h_offset < self.num_rows.saturating_sub(self.h_page) {
                                 self.draw_rows(cells);
                             } else {
-                                self.h_offset -= 1;
+                                self.h_offset = self.h_offset.saturating_sub(1);
                                 self.draw_screen(cells);
                             }
                             
@@ -2537,13 +2550,19 @@ impl WinInfo {
                     }
                     None => cols[0],
                 };
-                match cells.get_col_idx(c) {
-                    Ok(id) => id,
-                    Err(e) => {
-                        cmd_err::print(
-                            e, self.height
-                        );
-                        return;
+                match c {
+                    "" => self.num_cols - 1,
+                    "_" => self.w_pointer,
+                    _ => {
+                        match cells.get_col_idx(c) {
+                            Ok(id) => id,
+                            Err(e) => {
+                                cmd_err::print(
+                                    e, self.height
+                                );
+                                return;
+                            }
+                        }
                     }
                 }
             }
