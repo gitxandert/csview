@@ -697,10 +697,10 @@ impl WinInfo {
 
     pub fn draw_screen(&mut self, cells: &mut Cells) {
         // reset focused cell
-        if self.h_pointer < cells.columns[0].len() {
+        if self.h_pointer < self.num_rows {
             cells.set_w_cell(self.w_pointer, self.h_pointer);
         } else {
-            self.h_pointer = cells.columns[0].len().saturating_sub(1);
+            self.h_pointer = self.num_rows.saturating_sub(1);
         }
         
         let mut id = self.w_offset;
@@ -1408,7 +1408,7 @@ impl WinInfo {
         };
         
         match subcmd {
-            "sb" | "sortby" => {
+            "s" | "sortby" => {
                 let mut tokens = tokens.into_iter();
                 for i in 0..2 {
                     let _ = tokens.next();
@@ -1445,6 +1445,20 @@ impl WinInfo {
                     }
                 }
             }
+            "sf" | "siftby" => {
+                let mut tokens = tokens.into_iter();
+                for i in 0..2 {
+                    let _ = tokens.next();
+                }
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingName(tok),
+                                self.height
+                            ),
+                    Some(col) => self.sift_by(csvs.get_cells(), &col),
+                }
+            }
+            "rv" | "revert" => self.revert_sheet(csvs.get_cells()),
             "sl" | "slice" => self.slice(tokens, csvs),
             "sp" | "splice" => self.splice(tokens, csvs),
             _ => cmd_err::print(
@@ -2381,6 +2395,68 @@ impl WinInfo {
                 self.flush();
             }
         }
+    }
+
+    fn sift_by(&mut self, cells: &mut Cells, col_name: &str) {
+         match cells.get_col_idx(col_name) {
+            Err(e) => {
+                cmd_err::print(
+                    e, self.height
+                );
+                return;
+            }
+            Ok(col_idx) => {
+                cells.w_cell().is_focused = false;
+                let orig_len = self.num_rows;
+                {
+                    let mut col = &mut cells.columns[col_idx];
+                    self.num_rows = col.make_unique();
+                }
+
+                let new_indices = cells.columns[col_idx].indices.clone();
+
+                for i in 0..col_idx {
+                    let col = cells.get_column(i);
+                    let padding = col.len() - self.num_rows;
+                    for _ in 0..padding {
+                        col.push_cell(Cell::new(""));
+                    }
+                    col.padding = padding;
+                    col.indices = new_indices.clone();
+                }
+                for i in col_idx + 1..cells.columns.len() {
+                    let col = cells.get_column(i);
+                    let padding = col.len() - self.num_rows;
+                    for _ in 0..padding {
+                        col.push_cell(Cell::new(""));
+                    }
+                    col.padding = padding;
+                    col.indices = new_indices.clone();
+                }
+                cells.written = true;
+                self.set_h_pointer(self.h_pointer);
+                cells.set_w_cell(self.w_pointer, self.h_pointer);
+                self.draw_screen(cells);
+                print_bottom!(
+                    self,
+                    "Sifted from {} to {} rows",
+                    orig_len,
+                    self.num_rows
+                );
+                self.flush();
+            }
+        }
+    }
+
+    fn revert_sheet(&mut self, cells: &mut Cells) {
+        for col in &mut cells.columns {
+            col.revert();
+        }
+        self.num_rows = cells.num_rows();
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
+        self.draw_screen(cells);
+        self.draw_focused_content();
+        self.flush();
     }
 
     fn slice(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
