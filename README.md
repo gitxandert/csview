@@ -85,13 +85,15 @@ csview also has a command mode, accessed through ':' :
             - `n`: numerically-ascending
             - `nr`: numerically-descending
         - when sorting numerically, non-numerical values are pushed to the bottom of the column
+    - `col rv` | `col revert`
+        - reverts column indices back to original order ("unsorts" a column)
     - `col fn {value}` | `col fillna {value}`
         - fill empty cells with the provided value (use quotes for sentences)
     - `col r {target} {new}` | `col replace {target} {new}`
         - replaces the target value with the new one
 - **row**: row functions
-    - `row i` | `row insert`
-        - inserts a row below the focused row
+    - `row i {count}` | `row insert {count}`
+        - inserts count rows below the focused row (default 1 row)
     - `row d` | `row delete`
         - deletes the focused row after confirmation
     - `row mv {range} {index}` | `row move {range} {index}`
@@ -118,6 +120,9 @@ csview also has a command mode, accessed through ':' :
             - a single column name/id or row index/id
             - two column names/ids or row indices/ids separated by a '-'
             - a column name/id or row index/id, a '+', and the number of columns or row afterward to include
+        - shortcuts for range indices:
+            - no index: the first row/col if before -/+, the last row/col if after - (but not +)
+            - underscore: the focused row/col
     - `sh sp {orientation} {sheet id} {loc}` | `sheet splice {sheet id} {orientation} {loc}`
         - adds one sheet's content to the focused sheet by orientation and at the location specified
         - sheet id is a number key associated with a sheet apart from the focused sheet's
