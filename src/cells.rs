@@ -185,7 +185,7 @@ pub struct Column {
     pub start: usize, // terminal col where this begins
     pub width: usize,
     pub indices: Vec<usize>,
-    padding: usize,
+    pub padding: usize,
 }
 
 impl Column {
@@ -239,8 +239,8 @@ impl Column {
     pub fn reindex(&mut self) {
         let mut reindexed = Vec::<Cell>::with_capacity(self.cells.len());
        
-        for &real_idx in &self.indices {
-            reindexed.push(self.cells.get(real_idx).unwrap().clone());
+        for i in 0..self.len() - self.padding {
+            reindexed.push(self.cells.get(self.indices[i]).unwrap().clone());
         }
         self.cells = reindexed;
         self.indices = (0..self.cells.len()).collect();
@@ -281,12 +281,17 @@ impl Column {
         let mut seen = Vec::<String>::new();
         let mut seen_idx = Vec::<usize>::new();
         let mut u_idx = Vec::<usize>::new();
-        for i in 0..self.indices.len() {
-            let mut s = 0;
+        for i in 0..self.len() - self.padding {
             let cur = self.indices[i].clone();
             let content = self.get_cell(cur).content.clone();
+            if &content == "" { 
+                seen_idx.push(cur);
+                continue; 
+            }
+            
+            let mut s = 0;
             for _ in 0..seen.len() {
-                if &content == &seen[s] || &content == "" {
+                if &content == &seen[s] {
                     break;
                 }
                 s += 1;
@@ -300,12 +305,16 @@ impl Column {
         }
         // save num unique to return
         let uq_len = u_idx.len();
-        self.padding = self.len() - uq_len;
-        for _ in 0..self.padding {
+        let seen_len = seen_idx.len();
+
+        self.padding += seen_len;
+        
+        for _ in 0..seen_len {
             u_idx.push(self.cells.len());
             self.cells.push(Cell::new(""));
         }
         u_idx.append(&mut seen_idx);
+        
         self.indices = u_idx;
 
         uq_len
