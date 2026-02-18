@@ -698,7 +698,8 @@ impl WinInfo {
         }
         
         let mut id = self.w_offset;
-        for i in 1..self.height - 1 {
+        let lim = (self.height - 1).min(self.num_rows - self.h_offset + 3);
+        for i in 1..lim {
             // move cursor to beginning of line
             self.push_str_to_frame(&format!("\x1b[{i};1H\x1b[2K"));
 
@@ -742,7 +743,8 @@ impl WinInfo {
         let start = cells.columns[col_id].start;
 
         let mut c = col_id;
-        for row in 1..self.height - 1 {
+        let lim = (self.height - 1).min(self.num_rows - self.h_offset + 3);
+        for row in 1..lim {
             let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
                 row, start
             );
