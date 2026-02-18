@@ -25,12 +25,14 @@ You can feed multiple files as arguments to csview, but they currently need to a
 
 csview currently admits the following key bindings:
 - **ctrl + C | ctrl + forward-slash**
-    - closes the program
+    - exits the program
 - **ctrl + W**
     - toggle write mode, allowing editing of the focused cell
 - **ctrl + S**
     - saves file as is, with a pre-save backup
     - (on exit, the program will prompt the user to save any unsaved edits)
+- **ctrl + Q**
+    - exits command mode (see below)
 - **arrow keys**
     - highlight individual cells; if in write mode, these scroll through text
 - **ctrl + arrow key**
@@ -45,6 +47,8 @@ csview currently admits the following key bindings:
     - switch between different files
 
 csview also has a command mode, accessed through ':' :
+- **q** | **quit**
+    - exits the program
 - **cn**: column name functions
     - by itself: displays the current column's name
     - `cn f {name}` | `cn find {name}`
