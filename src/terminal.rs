@@ -1181,6 +1181,7 @@ impl WinInfo {
         };
 
         match subcmd {
+            "c"  | "count"   => self.print_col_count(),
             "mv" | "move"    => {
                 match tokens.next() {
                     None => cmd_err::print(
@@ -1335,6 +1336,7 @@ impl WinInfo {
         };
         
         match subcmd {
+            "c"  | "count" => self.print_row_count(),
             "i"  | "insert" => {
                 let count = match tokens.next() {
                     Some(num) => {
@@ -1508,6 +1510,14 @@ impl WinInfo {
 
     // column functions
     //
+    fn print_col_count(&mut self) {
+        print_bottom!(
+            self,
+            "{} columns",
+            self.num_cols
+        );
+    }
+
     fn move_columns(&mut self, cells: &mut Cells, range: &str, loc: &str) {
         let (mut tokens, delim) = Self::tokenize_range(range); 
         
@@ -1645,7 +1655,6 @@ impl WinInfo {
                 "No instance of '{}' in '{}'",
                 val, cells.header[self.w_pointer].content
             );
-            self.flush();
             return;
         }
         // hide cursor
@@ -1812,7 +1821,6 @@ impl WinInfo {
                                 "Removed column '{}'",
                                 col_name
                             );
-                            self.flush();
 
                             break;
                         }
@@ -1822,7 +1830,6 @@ impl WinInfo {
                                 "Column '{}' was not removed.",
                                 col_name
                             );
-                            self.flush();
                             break;
                         }
                     }
@@ -1933,7 +1940,6 @@ impl WinInfo {
                 "No values in '{}'",
                 cells.header[self.w_pointer].content
             );
-            self.flush();
             return;
         }
 
@@ -2134,6 +2140,14 @@ impl WinInfo {
 
     // row functions
     //
+    fn print_row_count(&mut self) {
+        print_bottom!(
+            self,
+            "{} rows",
+            self.num_rows
+        );
+    }
+
     fn insert_row(&mut self, cells: &mut Cells, count: usize) {
         let start = self.h_pointer + 1;
         for col in &mut cells.columns {
