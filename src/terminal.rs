@@ -285,7 +285,7 @@ impl WinInfo {
         out.flush().unwrap();
     }
 
-    pub fn set_command_mode(&mut self, b: bool) {
+    pub fn set_command_mode(&mut self, b: bool, col: &Column) {
         match b {
             true => {
                 unsafe {
@@ -307,6 +307,12 @@ impl WinInfo {
                 unsafe {
                     IN_COMMAND.store(false, Ordering::SeqCst);
                 }
+                // reset cursor
+                self.set_cursor(
+                    self.h_pointer - self.h_offset + 3,
+                    col.start + 1,
+                    col.width
+                );
                 self.input_mode = InputMode::Scroll;
                 self.push_str_to_frame("\x1b[?25l");
             }
@@ -336,7 +342,7 @@ impl WinInfo {
         for i in (buf.gap_start + buf.gap_len)..buf.data.len() {
             cell.content.push(buf.data[i]);
         }
-        cell.text_offset = buf.offset;
+        cell.text_offset = 0;
         self.changed = WinChange::Cell;
     }
 
@@ -596,7 +602,7 @@ impl WinInfo {
 
         while start + width < self.width {
             let mut cell = col.get_cell(row);
-            let take = cell.text_offset + cell.width.min(cell.len() - cell.text_offset);
+            let take = cell.width.min(cell.len() - cell.text_offset);
             let content = &cell.content;
             let visible: String = content
                 .chars()
@@ -2126,10 +2132,11 @@ impl WinInfo {
     // row functions
     //
     fn insert_row(&mut self, cells: &mut Cells, count: usize) {
+        let start = self.h_pointer + 1;
         for col in &mut cells.columns {
-            for i in self.h_pointer..self.h_pointer + count {
+            for i in start..start + count {
                 let mut cell = Cell::new("");
-                col.insert_cell(self.h_pointer, cell);
+                col.insert_cell(i, cell);
             }
         }
         cells
