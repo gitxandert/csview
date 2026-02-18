@@ -202,7 +202,9 @@ pub fn process_input(
                 }
                 // : (command)
                 [58] => {
-                    w_info.set_command_mode(true);
+                    let cells = csvs.get_cells();
+                    let col = cells.get_column(w_info.w_pointer);
+                    w_info.set_command_mode(true, &col);
                 }
                 _ => (),
             }
@@ -314,7 +316,10 @@ pub fn process_input(
                     );
                     w_info.draw_focused_content();
                     w_info.flush();
-                    w_info.set_command_mode(false);
+
+                    let cells = csvs.get_cells();
+                    let col = cells.get_column(w_info.w_pointer);
+                    w_info.set_command_mode(false, &col);
                 }
                 [27, 91, 90] => { // shift-tab
                     // ignore for now
@@ -342,11 +347,15 @@ pub fn process_input(
                 }
                 [10] | [13] => { /* enter (\n, \r) */
                     w_info.process_command(csvs);
-                    w_info.set_command_mode(false);
+                    let cells = csvs.get_cells();
+                    let col = cells.get_column(w_info.w_pointer);
+                    w_info.set_command_mode(false, &col);
                 }
                 [13, 10] => { /* enter (\r\n) */
                     w_info.process_command(csvs);
-                    w_info.set_command_mode(false);
+                    let cells = csvs.get_cells();
+                    let col = cells.get_column(w_info.w_pointer);
+                    w_info.set_command_mode(false, &col);
                 }
                 [27, 91, 50, 126] => { /* insert */ }
                 [27, 91, 51, 126] => { /* delete */ }
