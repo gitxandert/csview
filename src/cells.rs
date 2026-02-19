@@ -283,7 +283,7 @@ impl Column {
         let mut u_idx = Vec::<usize>::new();
         for i in 0..self.len() - self.padding {
             let cur = self.indices[i].clone();
-            let content = self.get_cell(cur).content.clone();
+            let content = self.cells[cur].content.clone();
             if &content == "" { 
                 seen_idx.push(cur);
                 continue; 
@@ -322,7 +322,8 @@ impl Column {
 
     pub fn revert(&mut self) {
         self.indices = (0..self.len()).collect();
-        self.indices.split_off(self.cells.len() - self.padding);
+        self.cells.split_off(self.cells.len() - self.padding);
+        self.padding = 0;
     }
 
     pub fn set_start(&mut self, st: usize) {
