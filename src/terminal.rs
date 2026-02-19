@@ -1942,9 +1942,10 @@ impl WinInfo {
 
     fn sort_indices(col: &mut Column, dir: Sort) {
         let mut indices = col.indices.clone();
+        let visible_len = col.len().saturating_sub(col.padding);
         match dir {
             Sort::AscAlph => 
-                indices.sort_by(|&i, &j| {
+                indices[..visible_len].sort_by(|&i, &j| {
                     let a = {
                         match col.view_cell(i) {
                             "" => &format!("{}a", col.view_cell(j)),
@@ -1960,13 +1961,13 @@ impl WinInfo {
                     a.cmp(&b)
                 }),
             Sort::DescAlph => 
-                indices.sort_by(|&i, &j| {
+                indices[..visible_len].sort_by(|&i, &j| {
                     let a = col.view_cell(i);
                     let b = col.view_cell(j);
                     b.cmp(&a)
                 }),
             Sort::AscNum => {
-                indices.sort_by(|&i, &j| {
+                indices[..visible_len].sort_by(|&i, &j| {
                     let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MAX,
@@ -1979,7 +1980,7 @@ impl WinInfo {
                 })
             }
             Sort::DescNum => {
-                indices.sort_by(|&i, &j| {
+                indices[..visible_len].sort_by(|&i, &j| {
                     let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MIN,
@@ -2449,6 +2450,7 @@ impl WinInfo {
     }
 
     fn revert_sheet(&mut self, cells: &mut Cells) {
+        cells.w_cell().is_focused = false;
         for col in &mut cells.columns {
             col.revert();
         }
@@ -2505,6 +2507,7 @@ impl WinInfo {
         // -add Context to Csvs and change handle to it
         //
         let cells = csvs.get_cells();
+        cells.w_cell().is_focused = false;
         let mut first = cols[0];
         if first == "" {
             first = "A";
