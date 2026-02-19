@@ -82,7 +82,6 @@ csview also has a command mode, accessed through ':' :
         - groups together a comma-separated list of columns (specified by quoted column names) 
     - `col u` | `col unique`
         - reformats the focused column to show all unique values
-        - scroll up and down, return to normal functionality with `ctrl + q`, `ctrl + c`, or `ctrl + forward-slash`
     - `col s {arg}` | `col sort {arg}`
         - sort the focused column alphanumerically-ascending
         - an additional argument controls the sort:
@@ -92,11 +91,13 @@ csview also has a command mode, accessed through ':' :
             - `nr`: numerically-descending
         - when sorting numerically, non-numerical values are pushed to the bottom of the column
     - `col rv` | `col revert`
-        - reverts column indices back to original order ("unsorts" a column)
+        - reverts column indices back to original order ("unsorts"/"un-uniques" a column)
     - `col fn {value}` | `col fillna {value}`
         - fill empty cells with the provided value (use quotes for sentences)
     - `col r {target} {new}` | `col replace {target} {new}`
         - replaces the target value with the new one
+    - `col a` | `col add`
+        - sums all numeric cells in a column
 - **row**: row functions
     - `row c` | `row count`
         - prints how many rows there are
@@ -114,10 +115,17 @@ csview also has a command mode, accessed through ':' :
         - goes to the target row, provided as a single quoted index or unquoted integer
     - `row n` | `row num`
         - shows the current row index (which is in hexidecimal) in decimal
+    - `row a` | `row add`
+        - sums all numerics cells in a row
 - **sh/sheet**: sheet functions
-    - `sh sb {column} {direction}` | `sheet sortby {column} {direction}`
+    - `sh s {column} {direction}` | `sheet sortby {column} {direction}`
         - reindexes all columns according to the sorted column's indices
         - direction arguments are the same as for `col sort`
+    - `sh sf {column}` | `sheet siftby {column}`
+        - sifts sheet according to unique values in the indicated column
+    - `sh rv` | `sh revert`
+        - reverts sheet to state prior to sorting/sifting
+            - does not work on sliced-out sheets, but does work on sheets that have been sliced
     - `sh sl {orientation} {range}` | `sheet slice {orientation} {range}`
         - slices out the specified columns or rows into a separate sheet
             - switch between sheets with the number keys
