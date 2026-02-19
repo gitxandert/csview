@@ -1314,6 +1314,7 @@ impl WinInfo {
                     }
                 }
             }
+            "a" | "add" => self.add_vals_in_col(csvs.get_cells()),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd),
                     self.height
@@ -1387,6 +1388,7 @@ impl WinInfo {
                 }
             }
             "n" | "num" => self.show_row_num(),
+            "a" | "add" => self.add_vals_in_row(csvs.get_cells()),
             _ =>  cmd_err::print(
                     CmdErr::InvalidSubCmd(tok), 
                     self.height
@@ -2053,6 +2055,28 @@ impl WinInfo {
         self.flush();
     }
 
+    fn add_vals_in_col(&mut self, cells: &mut Cells) {
+        let col = cells.get_column(self.w_pointer);
+        let mut valid = 0;
+        let mut sum: f64 = 0.0;
+        for cell in &mut col.cells {
+            match cell.content.parse::<f64>() {
+                Ok(f) => {
+                    sum += f;
+                    valid += 1;
+                }
+                Err(_) => continue,
+            }
+        }
+        print_bottom!(
+            self,
+            "{} (parsed {} out of {} cells)",
+            sum,
+            valid,
+            col.len()
+        );
+    }
+
     // row functions
     //
     fn print_row_count(&mut self) {
@@ -2364,6 +2388,27 @@ impl WinInfo {
         self.set_focused(&format!("{}", self.h_pointer));
         self.draw_focused_content();
         self.flush();
+    }
+
+    fn add_vals_in_row(&mut self, cells: &mut Cells) {
+        let mut sum: f64 = 0.0;
+        let mut valid = 0;
+        for col in &mut cells.columns {
+            match col.get_cell(self.h_pointer).content.parse::<f64>() {
+                Ok(n) => {
+                    sum += n;
+                    valid += 1;
+                }
+                Err(_) => continue,
+            }
+        }
+        print_bottom!(
+            self,
+            "{} (parsed {} out of {} cells)",
+            sum,
+            valid,
+            self.num_cols
+        );
     }
 
     // sheet functions
