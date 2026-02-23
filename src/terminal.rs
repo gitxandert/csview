@@ -359,7 +359,7 @@ impl WinInfo {
         let new_cur_off = cursor.offset + 1;
         if new_cur_off > cursor.limit {
             let new_buf_off = buf.offset + 1;
-            let diff = buf.content_len.saturating_sub(new_buf_off);
+            let diff = buf.content_len.saturating_sub(buf.offset);
             if diff > buf.window {
                 buf.offset = new_buf_off;
                 buf.move_gap(buf.gap_start + 1);
