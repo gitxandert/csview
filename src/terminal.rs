@@ -1627,12 +1627,13 @@ impl WinInfo {
             x = idx + diff * is_ahead + i * is_behind;
             let col = cells.columns.remove(a);
             let col_name = cells.header.remove(a);
-            // adjust col_id widths
-            cells.col_ids[a].width = cells.columns[a].width;
-            cells.col_ids[x].width = col.width;
+            let w = col.width;
             // move column and header
             cells.columns.insert(x, col);
             cells.header.insert(x, col_name);
+            // adjust col_id widths
+            cells.col_ids[a].width = cells.columns[a].width;
+            cells.col_ids[x].width = w;
         }
         cells.written = true;
 
