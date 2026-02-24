@@ -549,10 +549,10 @@ impl Csvs {
 
     pub fn remove_context(&mut self, id: usize) -> Context {
         for c in &mut self.contexts {
-            if c.id > id {
-                c.id -= 1;
-            }
+            c.id -= (c.id > id) as usize;
         }
+        self.handle -= (self.handle > id) as usize; 
+
         self.contexts.remove(id)
     }
 
