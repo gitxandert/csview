@@ -19,6 +19,7 @@ pub enum CmdErr<'a> {
     MissingTarget(&'a str),
     NoId(&'a str),
     NoName(&'a str),
+    NoNameContains(&'a str),
     SameCon,
     StdinErr(&'a str),
     TooManyArgs(&'a str),
@@ -118,6 +119,11 @@ pub fn print(err: CmdErr, line: usize) {
 
             CmdErr::NoName(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: no column called '{}'",
+                    line, t
+                ),
+
+            CmdErr::NoNameContains(t) => format!(
+                    "\x1b[{};1H\x1b[2KERR: no column name contains '{}'",
                     line, t
                 ),
 
