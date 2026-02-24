@@ -1512,15 +1512,23 @@ impl WinInfo {
     fn find_column(&mut self, cells: &mut Cells, name: &str) {
         let name = Self::trim_quotes(name);
         let header = &cells.header;
+        let mut next = self.w_pointer;
         for i in 0..header.len() {
-            if &header[i].content == &name {
-                self.set_w_pointer(i);
+            if header[next].content.contains(&name) {
+                let name = header[next].content.clone();
+                self.set_w_pointer(next);
                 self.changed = WinChange::Columns;
                 self.show_csv(cells);
+                print_bottom!(
+                    self,
+                    "{}",
+                    name
+                );
                 return;
             }
+            next = (next + 1) % header.len();
         }
-        cmd_err::print(CmdErr::NoName(&name), self.height);
+        cmd_err::print(CmdErr::NoNameContains(&name), self.height);
     }
 
     // column functions
