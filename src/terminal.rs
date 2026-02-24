@@ -1472,9 +1472,8 @@ impl WinInfo {
 
     fn trim_quotes(q: &str) -> String {
         let mut chars = q.chars();
-        if chars.nth(0).unwrap() == '\'' 
-            || chars.nth(0).unwrap() == '"' {
-            
+        let first = chars.nth(0).unwrap();
+        if first == '\'' || first == '"' {
             let ret: String = chars
                 .take(q.len().saturating_sub(2))
                 .collect();
