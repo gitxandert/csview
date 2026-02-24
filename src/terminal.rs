@@ -1831,6 +1831,8 @@ impl WinInfo {
 
                             cells.written = true;
                             self.num_cols -= 1;
+                            self.w_pointer -= self.w_pointer.saturating_sub(self.num_cols - 1);
+                            cells.w_cell = (self.w_pointer, self.h_pointer);
                             self.draw_screen(cells);
                             
                             print_bottom!(
