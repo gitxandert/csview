@@ -124,31 +124,41 @@ fn main() {
     for con in csvs.contexts {
         let mut cells = con.cells;
         if cells.written {
-            println!("Write {} to file? [y/N]: ", cells.filename);
+            print!("\nWrite {} to file? [y/N/s(ave as)]: ", cells.filename);
+            io::stdout().flush().unwrap();
             let mut input = String::new();
             io::stdin()
                 .read_line(&mut input)
                 .expect("Failed to read line");
-            match input.trim_end() {
-                "y" | "yes" | "Y" | "Yes" | "YES" => {
-                    // save backup to 
-                    // /home/user/.csview/backups/;
-                    // if fails, don't write
+            cells.filename = match input.trim_end().to_lowercase().as_str() {
+                "y" | "yes" => {
+                    // save backup to /home/user/.csview/backups/
+                    // only if retaining filename
                     match save_backup(&cells.filename) {
                         Ok(b) => {
                             println!("\t{b}");
                         }
                         Err(e) => {
-                            println!("\tWARNING -- could not create back up due to the following:");
+                            println!("\tWARNING -- could not create backup due to the following:");
                             println!("\t\t{e}");
                         }
                     }
-                    match write_to_file(&mut cells) {
-                        Ok(s) => println!("\t{s}"),
-                        Err(e) => println!("\t{e}"),
-                    }
-                }
-                _ => (),
+                    cells.filename
+                },
+                "s" | "save as" => {
+                    print!("Enter new filename: ");
+                    io::stdout().flush().unwrap();
+                    input = String::new();
+                    io::stdin()
+                        .read_line(&mut input)
+                        .expect("Failed to read line");
+                    input.trim_end().to_string()
+                },
+                _ => continue,
+            };
+            match write_to_file(&mut cells) {
+                Ok(s) => println!("\t{s}"),
+                Err(e) => println!("\t{e}"),
             }
         }
     }
