@@ -2841,7 +2841,7 @@ impl WinInfo {
         let num_cols = src_cells.num_cols();
         let max_rows = dest_cells
             .num_rows()
-            .max(src_cells.num_rows()) - 1;
+            .max(src_cells.num_rows());
         
         let st = at_col;
         let end = st + num_cols;
