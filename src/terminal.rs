@@ -1950,6 +1950,7 @@ impl WinInfo {
         cells.set_w_cell(self.w_pointer, self.h_pointer);
         self.draw_from_column(cells);
         self.flush();
+        cells.written = true;
     }
 
     fn sort_indices(col: &mut Column, dir: Sort) {
