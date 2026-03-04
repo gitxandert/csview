@@ -193,8 +193,8 @@ pub fn process_input(
                         }
                     }
                 }
-                // ctrl + w (write)
-                [23] => {
+                // ctrl/alt + w (write)
+                [23] | [27, 119] => {
                     let cells = csvs.get_cells();
                     w_info.set_write_buffer_w_cell(&cells.w_cell());
                     w_info.set_write_mode(true);
@@ -249,8 +249,8 @@ pub fn process_input(
                         _ => (),
                     }
                 }
-                // ctrl + w (write)
-                [23] => {
+                // ctrl/alt + w (write)
+                [23] | [27, 119] => {
                     let cells = csvs.get_cells();
                     w_info.set_write_mode(false);
                     let mut w_cell = cells.w_cell();
