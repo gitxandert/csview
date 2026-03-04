@@ -2776,7 +2776,7 @@ impl WinInfo {
         };
 
         let con_id = match tokens.next() {
-            Some(r) => {
+            Some(r) if r != "" => {
                 match Self::str_to_dec(r) {
                     Ok(num) => {
                         if csvs.handle == num {
@@ -2804,7 +2804,7 @@ impl WinInfo {
                     }
                 }
             }
-            None => {
+            _ => {
                 cmd_err::print(
                     CmdErr::MissingConId("splice"),
                     self.height
