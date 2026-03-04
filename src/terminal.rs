@@ -2874,7 +2874,7 @@ impl WinInfo {
         
         self.num_cols += num_cols;
         self.num_rows = max_rows;
-        self.draw_from_column(dest_cells);
+        self.draw_screen(dest_cells);
 
         drop(dest_cells);
         
