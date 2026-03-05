@@ -1717,7 +1717,7 @@ impl WinInfo {
                 }
             } 
 
-            i - 1
+            i.saturating_sub(1)
         };
         self.draw_col_find(cells, idx, &indices, "");
 
@@ -1760,11 +1760,7 @@ impl WinInfo {
                             );
                             buf[0] = 0u8;
                         }
-                        _   => {
-                            self.draw_focused_content();
-                            self.flush();
-                            break;
-                        }
+                        _   => break,
                     }
                 }
                 Err(e) => {
@@ -1777,6 +1773,9 @@ impl WinInfo {
                 }
             }
         }
+
+        self.draw_focused_content();
+        self.flush();
     }
 
     fn new_column(&mut self, cells: &mut Cells, name: &str) {
@@ -2166,7 +2165,24 @@ impl WinInfo {
         
         drop(cells);
 
-        let mut diff_idx = 0usize;
+        // get value closest to focus
+        let mut diff_idx = {
+            let mut i = 0usize;
+            let mut dv = diff_values[i];
+            let mut diff = dv.max(self.h_pointer) - dv.min(self.h_pointer);
+            for _ in 1..diff_values.len() {
+                dv = diff_values[i];
+                let cur_diff = dv.max(self.h_pointer) - dv.min(self.h_pointer);
+                if cur_diff < diff {
+                    diff = cur_diff;
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+
+            i.saturating_sub(1)
+        };
         self.push_str_to_frame("\x1b[?25l");
         let mess = format!("values not in {}", other);
         self.draw_col_find(
