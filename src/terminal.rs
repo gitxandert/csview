@@ -1707,7 +1707,7 @@ impl WinInfo {
             let mut i = 0usize;
             let mut idx = indices[i];
             let mut diff = self.h_pointer.max(idx) - self.h_pointer.min(idx);
-            for _ in 0..indices.len() {
+            for _ in 1..indices.len() {
                 let idx = indices[i + 1];
                 let cur_diff = self.h_pointer.max(idx) - self.h_pointer.min(idx);
                 if cur_diff < diff {
