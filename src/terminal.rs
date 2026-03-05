@@ -1704,10 +1704,11 @@ impl WinInfo {
         // - return to normal functionality with 'esc'
         let mut idx = {
             // start with the closest example of the value
-            let mut diff = col.len();
             let mut i = 0usize;
+            let mut idx = indices[i];
+            let mut diff = self.h_pointer.max(idx) - self.h_pointer.min(idx);
             for _ in 0..indices.len() {
-                let idx = indices[i];
+                let idx = indices[i + 1];
                 let cur_diff = self.h_pointer.max(idx) - self.h_pointer.min(idx);
                 if cur_diff < diff {
                     diff = cur_diff;
@@ -1717,7 +1718,7 @@ impl WinInfo {
                 }
             } 
 
-            i.saturating_sub(1)
+            i
         };
         self.draw_col_find(cells, idx, &indices, "");
 
@@ -2171,7 +2172,7 @@ impl WinInfo {
             let mut dv = diff_values[i];
             let mut diff = dv.max(self.h_pointer) - dv.min(self.h_pointer);
             for _ in 1..diff_values.len() {
-                dv = diff_values[i];
+                dv = diff_values[i + 1];
                 let cur_diff = dv.max(self.h_pointer) - dv.min(self.h_pointer);
                 if cur_diff < diff {
                     diff = cur_diff;
@@ -2181,7 +2182,7 @@ impl WinInfo {
                 }
             }
 
-            i.saturating_sub(1)
+            i
         };
         self.push_str_to_frame("\x1b[?25l");
         let mess = format!("values not in {}", other);
@@ -2230,11 +2231,7 @@ impl WinInfo {
                             );
                             buf[0] = 0u8;
                         }
-                        _ => {
-                            self.draw_focused_content();
-                            self.flush();
-                            break;
-                        }
+                        _ => break,
                     }
                 }
                 _ => {
@@ -2243,6 +2240,8 @@ impl WinInfo {
                 }
             }
         }
+        self.draw_focused_content();
+        self.flush();
     }
 
     // row functions
