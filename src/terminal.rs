@@ -2106,12 +2106,15 @@ impl WinInfo {
 
     fn col_diff(&mut self, csvs: &mut Csvs, other: &str) {
         let cells = csvs.get_cells();
-        let other_col_idx = cells.get_col_idx(other).map_err(|e| {
-            cmd_err::print(
-                e, self.height
-            );
-            return;
-        }).unwrap();
+        let other_col_idx = match cells.get_col_idx(other) {
+            Ok(idx) => idx,
+            Err(e) => {
+                cmd_err::print(
+                    e, self.height
+                );
+                return;
+            }
+        };
 
         let other_col = cells.get_column(other_col_idx);
 
