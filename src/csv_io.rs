@@ -64,7 +64,7 @@ fn parse_by_delim(line: &str, delim: char) -> Vec<Cell> {
                 is_quoted = !is_quoted;
             }
             ch if ch == delim && ch != '"' && !is_quoted => {
-                let cell = Cell::new(&cell_str);
+                let cell = Cell::new(cell_str.trim());
                 parsed.push(cell);
                 cell_str = String::new();
             }
