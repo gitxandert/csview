@@ -1315,6 +1315,18 @@ impl WinInfo {
                 }
             }
             "a" | "add" => self.add_vals_in_col(csvs.get_cells()),
+            "d" | "diff" => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingValue(subcmd),
+                                self.height
+                            ),
+                    Some(other) => self.col_diff(
+                                            csvs,
+                                            &other
+                                        ),
+                }
+            },
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd),
                     self.height
@@ -1649,13 +1661,15 @@ impl WinInfo {
         self.show_csv(cells);
     }
     
-    fn draw_col_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<usize>) {
+    fn draw_col_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<usize>, mess: &str) {
         self.set_h_pointer(indices[idx]);
         self.show_csv(cells);
         print_bottom!(
             self, 
-            "{}/{}",
-            idx + 1, indices.len()
+            "{}/{} {}",
+            idx + 1, 
+            indices.len(),
+            mess
         );
         self.flush();
     }
@@ -1705,7 +1719,7 @@ impl WinInfo {
 
             i - 1
         };
-        self.draw_col_find(cells, idx, &indices);
+        self.draw_col_find(cells, idx, &indices, "");
 
         drop(cells);
 
@@ -1727,7 +1741,8 @@ impl WinInfo {
                             self.draw_col_find(
                                 csvs.get_cells(), 
                                 idx, 
-                                &indices
+                                &indices,
+                                ""
                             );
                             buf[0] = 0u8;
                         }
@@ -1740,7 +1755,8 @@ impl WinInfo {
                             self.draw_col_find(
                                 csvs.get_cells(), 
                                 idx, 
-                                &indices
+                                &indices,
+                                ""
                             );
                             buf[0] = 0u8;
                         }
@@ -2086,6 +2102,128 @@ impl WinInfo {
             valid,
             col.len()
         );
+    }
+
+    fn col_diff(&mut self, csvs: &mut Csvs, other: &str) {
+        let cells = csvs.get_cells();
+        let other_col_idx = cells.get_col_idx(other).map_err(|e| {
+            cmd_err::print(
+                e, self.height
+            );
+            return;
+        }).unwrap();
+
+        let other_col = cells.get_column(other_col_idx);
+
+        let mut other_values = Vec::<String>::new();
+        for cell in &other_col.cells {
+            let mut found = false;
+            for o_v in &other_values {
+                if cell.content == *o_v {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                other_values.push(cell.content.clone());
+            }
+        }
+        drop(other_col);
+
+        let cur_col = cells.get_column(self.w_pointer);
+        let mut cur_values = Vec::<(usize, &str)>::new();
+        for i in 0..cur_col.len() {
+            let mut found = false;
+            let cell = cur_col.view_cell(i);
+            for cv in &cur_values {
+                if cv.1 == cell {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                cur_values.push((i, cell));
+            }
+        }
+
+        let mut diff_values = Vec::<usize>::new();
+        for cv in &cur_values {
+            let mut found = false;
+            for ov in &other_values {
+                if ov.as_str() == cv.1 {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                diff_values.push(cv.0);
+            }
+        }
+        drop(cur_col);
+        
+        drop(cells);
+
+        let mut diff_idx = 0usize;
+        self.push_str_to_frame("\x1b[?25l");
+        let mess = format!("values not in {}", other);
+        self.draw_col_find(
+            csvs.get_cells(),
+            diff_idx,
+            &diff_values,
+            &mess
+        );
+        let mut buf = [0u8; 1];
+        loop {
+            match poll_stdin(&mut buf) {
+                Ok(PollEvent::Sig) => {
+                    match check_flags() {
+                        SigFlag::Winch => self.set_w_h(csvs),
+                        SigFlag::Int | SigFlag::Quit => continue, // will never catch
+                        SigFlag::Non => break, // must've been quit/int
+                    }
+                }
+
+                Ok(PollEvent::Data(0)) => continue,
+
+                Ok(PollEvent::Data(n)) => {
+                    match &buf[..n] {
+                        [b'n'] => {
+                            diff_idx = (diff_idx + 1) % diff_values.len();
+                            self.draw_col_find(
+                                csvs.get_cells(),
+                                diff_idx,
+                                &diff_values,
+                                &mess
+                            );
+                            buf[0] = 0u8;
+                        }
+                        [b'b'] => {
+                            if diff_idx == 0 {
+                                diff_idx = diff_values.len() - 1;
+                            } else {
+                                diff_idx -= 1;
+                            }
+                            self.draw_col_find(
+                                csvs.get_cells(),
+                                diff_idx,
+                                &diff_values,
+                                &mess
+                            );
+                            buf[0] = 0u8;
+                        }
+                        _ => {
+                            self.draw_focused_content();
+                            self.flush();
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    cmd_err::print(CmdErr::StdinErr("col diff"), self.height);
+                    break;
+                }
+            }
+        }
     }
 
     // row functions
