@@ -98,6 +98,8 @@ csview also has a command mode, accessed through ':' :
         - replaces the target value with the new one
     - `col a` | `col add`
         - sums all numeric cells in a column
+    - `col d {other}` | `col diff {other}`
+        - compares all unique values in the focused column with all unique values in the other column
 - **row**: row functions
     - `row c` | `row count`
         - prints how many rows there are
