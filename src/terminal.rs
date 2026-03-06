@@ -1782,27 +1782,31 @@ impl WinInfo {
     fn new_column(&mut self, cells: &mut Cells, name: &str) {
         let name = Self::trim_quotes(name);;
        
-        let mut w_cell = cells.w_cell();
-        w_cell.is_focused = false;
+        let loc = self.w_pointer + 1;
 
         let mut new_col = Column::new();
         for i in 0..self.num_rows {
             new_col.push_cell(Cell::new(""));
         }
-        cells.insert_column(self.w_pointer, new_col);
+        cells.insert_column(loc, new_col);
         
         let col_name = Cell::new(&name);
-        cells.insert_col_name(self.w_pointer, col_name);
+        cells.insert_col_name(loc, col_name);
         
+        // update col ids
         cells.increment_col_ids();
+
         // make sure each col_id's width
         // matches the width of the column below
-        for i in self.w_pointer..cells.col_ids.len() {
+        for i in loc..cells.col_ids.len() {
             cells.col_ids[i].width = cells.header[i].width;
         }
 
+        cells.set_w_cell(loc, self.h_pointer);
         cells.written = true;
+        
         self.num_cols += 1;
+        self.set_w_pointer(loc);
         self.draw_screen(cells);
         self.set_focused("");
         self.draw_focused_content();
