@@ -1321,9 +1321,23 @@ impl WinInfo {
                                 CmdErr::MissingValue(subcmd),
                                 self.height
                             ),
-                    Some(other) => self.col_diff(
+                    Some(other) => self.col_cmp(
                                             csvs,
-                                            &other
+                                            &other,
+                                            true
+                                        ),
+                }
+            },
+            "si" | "sim" => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingValue(subcmd),
+                                self.height
+                            ),
+                    Some(other) => self.col_cmp(
+                                            csvs,
+                                            &other,
+                                            false
                                         ),
                 }
             },
@@ -2108,7 +2122,7 @@ impl WinInfo {
         );
     }
 
-    fn col_diff(&mut self, csvs: &mut Csvs, other: &str) {
+    fn col_cmp(&mut self, csvs: &mut Csvs, other: &str, diff: bool) {
         let cells = csvs.get_cells();
         let other_col_idx = match cells.get_col_idx(other) {
             Ok(idx) => idx,
@@ -2131,7 +2145,7 @@ impl WinInfo {
                     break;
                 }
             }
-            if !found {
+            if !found && cell.content != "" {
                 other_values.push(cell.content.clone());
             }
         }
@@ -2148,12 +2162,12 @@ impl WinInfo {
                     break;
                 }
             }
-            if !found {
+            if !found && cell != "" {
                 cur_values.push((i, cell));
             }
         }
 
-        let mut diff_values = Vec::<usize>::new();
+        let mut cmp_values = Vec::<usize>::new();
         for cv in &cur_values {
             let mut found = false;
             for ov in &other_values {
@@ -2162,8 +2176,14 @@ impl WinInfo {
                     break;
                 }
             }
-            if !found {
-                diff_values.push(cv.0);
+            if diff {
+                if !found {
+                    cmp_values.push(cv.0);
+                }
+            } else {
+                if found {
+                    cmp_values.push(cv.0);
+                }
             }
         }
         drop(cur_col);
@@ -2173,10 +2193,10 @@ impl WinInfo {
         // get value closest to focus
         let mut diff_idx = {
             let mut i = 0usize;
-            let mut dv = diff_values[i];
+            let mut dv = cmp_values[i];
             let mut diff = dv.max(self.h_pointer) - dv.min(self.h_pointer);
-            for _ in 1..diff_values.len() {
-                dv = diff_values[i + 1];
+            for _ in 1..cmp_values.len() {
+                dv = cmp_values[i + 1];
                 let cur_diff = dv.max(self.h_pointer) - dv.min(self.h_pointer);
                 if cur_diff < diff {
                     diff = cur_diff;
@@ -2189,11 +2209,17 @@ impl WinInfo {
             i
         };
         self.push_str_to_frame("\x1b[?25l");
-        let mess = format!("values not in {}", other);
+        let mess = {
+            if diff {
+                format!("values not in {}", other)
+            } else {
+                format!("values in {}", other)
+            }
+        };
         self.draw_col_find(
             csvs.get_cells(),
             diff_idx,
-            &diff_values,
+            &cmp_values,
             &mess
         );
         let mut buf = [0u8; 1];
@@ -2212,25 +2238,25 @@ impl WinInfo {
                 Ok(PollEvent::Data(n)) => {
                     match &buf[..n] {
                         [b'n'] => {
-                            diff_idx = (diff_idx + 1) % diff_values.len();
+                            diff_idx = (diff_idx + 1) % cmp_values.len();
                             self.draw_col_find(
                                 csvs.get_cells(),
                                 diff_idx,
-                                &diff_values,
+                                &cmp_values,
                                 &mess
                             );
                             buf[0] = 0u8;
                         }
                         [b'b'] => {
                             if diff_idx == 0 {
-                                diff_idx = diff_values.len() - 1;
+                                diff_idx = cmp_values.len() - 1;
                             } else {
                                 diff_idx -= 1;
                             }
                             self.draw_col_find(
                                 csvs.get_cells(),
                                 diff_idx,
-                                &diff_values,
+                                &cmp_values,
                                 &mess
                             );
                             buf[0] = 0u8;
@@ -2239,7 +2265,11 @@ impl WinInfo {
                     }
                 }
                 _ => {
-                    cmd_err::print(CmdErr::StdinErr("col diff"), self.height);
+                    if diff {
+                        cmd_err::print(CmdErr::StdinErr("col diff"), self.height);
+                    } else {
+                        cmd_err::print(CmdErr::StdinErr("col sim"), self.height);
+                    } 
                     break;
                 }
             }
