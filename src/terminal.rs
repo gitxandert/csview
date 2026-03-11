@@ -1969,6 +1969,7 @@ impl WinInfo {
 
     fn show_unique_column_values(&mut self, csvs: &mut Csvs) {
         let cells = csvs.get_cells();
+        cells.w_cell().is_focused = false;
         let orig = &mut cells.columns[self.w_pointer];
         let uq_len = orig.make_unique(); 
         
@@ -1994,23 +1995,23 @@ impl WinInfo {
             Sort::AscAlph => 
                 indices[..visible_len].sort_by(|&i, &j| {
                     let a = {
-                        match col.view_cell(i) {
-                            "" => &format!("{}a", col.view_cell(j)),
-                            _ => col.view_cell(i),
+                        match col.cells[i].view() {
+                            "" => &format!("{}a", col.cells[j].view()),
+                            _ => col.cells[i].view(),
                         }
                     };
                     let b = {
-                        match col.view_cell(j) {
-                            "" => &format!("{}a", col.view_cell(i)),
-                            _ => col.view_cell(j),
+                        match col.cells[j].view() {
+                            "" => &format!("{}a", col.cells[i].view()),
+                            _ => col.cells[j].view(),
                         }
                     };
                     a.cmp(&b)
                 }),
             Sort::DescAlph => 
                 indices[..visible_len].sort_by(|&i, &j| {
-                    let a = col.view_cell(i);
-                    let b = col.view_cell(j);
+                    let a = col.cells[i].view();
+                    let b = col.cells[j].view();
                     b.cmp(&a)
                 }),
             Sort::AscNum => {
@@ -2137,7 +2138,8 @@ impl WinInfo {
         let other_col = cells.get_column(other_col_idx);
 
         let mut other_values = Vec::<String>::new();
-        for cell in &other_col.cells {
+        for i in 0..other_col.len() {
+            let cell = other_col.get_cell(i);
             let mut found = false;
             for o_v in &other_values {
                 if cell.content == *o_v {
