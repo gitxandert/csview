@@ -125,27 +125,41 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
     let mut lines: Vec<String> = parse_by_newline(&csv);
 
     let mut header: Vec<Cell> = parse_by_delim(&lines.remove(0), delim.clone());
-    let col_len = header.len();
+    let mut col_len = header.len();
     let col_ids: Vec<Cell> = make_col_ids(col_len);
     
     let mut cells = Cells::new(filename, delim.clone(), header, col_ids, col_len);
 
-    if lines.len() == 0 {
-        for j in 0..col_len {
-            let mut column = Column::new();
-            cells.push_column(column);
+    for j in 0..col_len {
+        let mut column = Column::new();
+        cells.push_column(column);
+        if lines.len() == 0 {
             cells.push_to_col(j, Cell::new(""));
         }
     }
+    
+    let mut unnamed_count = 1;
     for i in 0..lines.len() {
         let row: Vec<Cell> = parse_by_delim(&lines[i], delim);
-        for j in 0..col_len {
-            if i == 0 {
+        for j in 0..row.len() {
+            let cell = row.get(j).unwrap().clone();
+            if j >= col_len {
                 let mut column = Column::new();
                 cells.push_column(column);
-            }
-            let cell = row.get(j).unwrap().clone();
+                for _ in 0..i {
+                    cells.push_to_col(j, Cell::new(""));
+                }
+
+                col_len += 1;
+
+                let unnamed = format!("Unnamed_{}", unnamed_count);
+                cells.header.push(Cell::new(&unnamed));
+                cells.increment_col_ids();
+            }    
             cells.push_to_col(j, cell);
+        }
+        for k in row.len()..col_len {
+            cells.push_to_col(k, Cell::new(""));
         }
     }
     // set w_cell now, since there will be multiple contexts
