@@ -342,7 +342,8 @@ impl Column {
     }
 
     pub fn view_cell(&self, idx: usize) -> &str {
-        self.cells.get(idx).unwrap().view()
+        let real_idx = self.indices[idx];
+        self.cells.get(real_idx).unwrap().view()
     }
 
     pub fn get_cell(&mut self, idx: usize) -> &mut Cell {
