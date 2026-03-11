@@ -99,7 +99,9 @@ csview also has a command mode, accessed through ':' :
     - `col a` | `col add`
         - sums all numeric cells in a column
     - `col d {other}` | `col diff {other}`
-        - compares all unique values in the focused column with all unique values in the other column
+        - shows differences between all unique values in the focused column and all unique values in the other column
+    - `col si {other}` | `col sim {other}`
+        - shows similarities between all unique values in the focused column and all unique values in the other column
 - **row**: row functions
     - `row c` | `row count`
         - prints how many rows there are
