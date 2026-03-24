@@ -200,6 +200,7 @@ pub struct WinInfo {
     focused_content: String,
     cursor: Cursor,
     write_buffer: WriteBuf,
+    pub yanked: String,
 }
 
 // helper macro to print to bottom of screen
@@ -249,6 +250,7 @@ impl WinInfo {
             h_page: 0usize,
             cursor: Cursor::new(),
             write_buffer: WriteBuf::new(1024),
+            yanked: String::new(),
         }
     }
 
@@ -331,6 +333,19 @@ impl WinInfo {
         buf.offset = cell.text_offset;
         buf.move_gap(buf.offset);
         buf.window = cell.width;
+    }
+
+    pub fn set_yanked(&mut self, cell: &Cell) {
+        self.yanked = cell.content.clone();
+    }
+
+    pub fn paste(&mut self, cells: &mut Cells) {
+        let cell = cells.w_cell();
+        cell.content = self.yanked.clone();
+        self.set_focused(&cell.content);
+        drop(cell);
+        self.draw_focus(cells);
+        cells.written = true;
     }
 
     pub fn write_to_cell(&mut self, cell: &mut Cell) {
