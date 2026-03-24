@@ -200,6 +200,38 @@ pub fn process_input(
                     w_info.set_write_mode(true);
                     w_info.changed = WinChange::Write;
                 }
+                // y (yank)
+                [121] => {
+                    let cell = csvs.get_cells().w_cell();
+                    w_info.set_yanked(cell);
+                    w_info.push_str_to_frame(
+                        &format!(
+                            "\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
+                            w_info.height, cell.content
+                        )
+                    );
+                    w_info.flush();
+                }
+                // p (paste)
+                [112] => {
+                    if w_info.yanked == "" {
+                        w_info.push_str_to_frame(
+                            &format!(
+                                "\x1b[{};1H\x1b[2K\x1b[0mNothing has been yanked",
+                                w_info.height
+                            )
+                        );
+                    } else {
+                        w_info.paste(csvs.get_cells());
+                        w_info.push_str_to_frame(
+                            &format!(
+                                "\x1b[{};1H\x1b[2K\x1b[0mpasted '{}' to cell",
+                                w_info.height, csvs.get_cells().w_cell().content
+                            )
+                        );
+                    }
+                    w_info.flush();
+                }
                 // : (command)
                 [58] => {
                     let cells = csvs.get_cells();
