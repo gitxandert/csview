@@ -43,6 +43,10 @@ csview currently admits the following key bindings:
     - scroll through text within a cell when not in write mode
 - **ctrl + shift + arrow key (left or right)**  
     - adjust column width
+- **y**
+    - yank (copy) the content of a cell
+- **p**
+    - paste yanked content to a focused cell
 - **number keys**
     - switch between different files
 
