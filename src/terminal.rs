@@ -2310,6 +2310,7 @@ impl WinInfo {
         for col in &mut cells.columns {
             for i in start..start + count {
                 let mut cell = Cell::new("");
+                cell.width = col.width;
                 col.insert_cell(i, cell);
             }
         }
