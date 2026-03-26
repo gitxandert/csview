@@ -154,5 +154,7 @@ csview also has a command mode, accessed through ':' :
             - 'c' | 'cols'
             - 'r' | 'rows'
         - loc is the column name/id or row index/id of the focused sheet to splice at
+    - `sh r {target} {new}` | `sheet replace {target} {new}`
+        - replaces the target value with a new one across the entire sheet
 - **ctrl + Q**
     - quits command mode
