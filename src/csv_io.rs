@@ -15,7 +15,6 @@ fn parse_by_newline(block: &str) -> Vec<String> {
     
     let mut line = String::new();
     let mut is_quoted = false;
-    let mut saw_newline = false;
     
     for c in block.chars() {
         match c {
@@ -25,24 +24,18 @@ fn parse_by_newline(block: &str) -> Vec<String> {
             }
             '\n' => {
                 // guard against consecutive newlines
-                if !saw_newline {
-                    saw_newline = true;
-                    if !is_quoted {
-                        parsed.push(line.clone());
-                        line.clear();
-                    }
+                if !is_quoted {
+                    parsed.push(line.clone());
+                    line.clear();
                 }
             }
             _ => {
-                saw_newline = false;
                 line.push(c);
             }
         }
     }
 
-    if !saw_newline {
-        parsed.push(line);
-    }
+    parsed.push(line);
 
     parsed
 }
