@@ -2836,7 +2836,6 @@ impl WinInfo {
             None => ida,
         };
 
-        cells.w_cell().is_focused = false;
         cells.slices += 1;
         let mut fn_split = Self::tokenize(&cells.filename, '.');
         let first = format!(
@@ -2874,6 +2873,11 @@ impl WinInfo {
         }
         cells.written = true;
         new_cells.written = true;
+
+        if cells.w_cell.0 >= cells.num_cols() {
+            cells.w_cell.0 = cells.num_cols().saturating_sub(1);
+            eprintln!("cells.w_cell.0 = {}", cells.w_cell.0);
+        }
         
         drop(cells);
         
