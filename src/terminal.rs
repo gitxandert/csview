@@ -1504,6 +1504,7 @@ impl WinInfo {
             "rv" | "revert" => self.revert_sheet(csvs.get_cells()),
             "sl" | "slice" => self.slice(tokens, csvs),
             "sp" | "splice" => self.splice(tokens, csvs),
+            "r"  | "replace" => self.replace_in_sheet(tokens, csvs.get_cells()),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd), 
                     self.height
@@ -3179,6 +3180,47 @@ impl WinInfo {
         drop(dest_cells);
         
         self.print_context(csvs);
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    fn replace_in_sheet(&mut self, tokens: Vec<&str>, cells: &mut Cells) {
+        let replace = match tokens.get(2) {
+            Some(r) => Self::trim_quotes(r),
+            None => {
+                cmd_err::print(
+                    CmdErr::MissingValue("sh replace"),
+                    self.height
+                );
+                return;
+            }
+        };
+
+        let with = match tokens.get(3) {
+            Some(w) => Self::trim_quotes(w),
+            None => {
+                cmd_err::print(
+                    CmdErr::MissingValue("sh replace"),
+                    self.height
+                );
+                return;
+            }
+        };
+
+        for i in 0..cells.num_cols() {
+            let col = cells.get_column(i);
+            for j in 0..col.len() {
+                let cell = col.get_cell(j);
+                // Check if the cell content contains the target substring
+                if cell.content.contains(&replace) {
+                    // Replace the substring and reassign to cell.content
+                    cell.content = cell.content.replace(&replace, &with);
+                }
+            }
+        }
+
+        cells.written = true;
+        self.draw_from_column(cells);
         self.draw_focused_content();
         self.flush();
     }
