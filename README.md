@@ -44,9 +44,13 @@ csview currently admits the following key bindings:
 - **ctrl + shift + arrow key (left or right)**  
     - adjust column width
 - **y**
-    - yank (copy) the content of a cell
+    - yank (copy) content of focused cell
+- **d**
+    - yank and remove content of focused cell
 - **p**
-    - paste yanked content to a focused cell
+    - paste yanked content to focused cell
+- **ctrl + p**
+    - (write mode) paste yanked content at the cursor
 - **number keys**
     - switch between different files
 
@@ -156,5 +160,5 @@ csview also has a command mode, accessed through ':' :
         - loc is the column name/id or row index/id of the focused sheet to splice at
     - `sh r {target} {new}` | `sheet replace {target} {new}`
         - replaces the target value with a new one across the entire sheet
-- **ctrl + Q**
+- **ctrl + q**
     - quits command mode
