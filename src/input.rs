@@ -200,6 +200,21 @@ pub fn process_input(
                     w_info.set_write_mode(true);
                     w_info.changed = WinChange::Write;
                 }
+                // d (delete [also yanks])
+                [100] => {
+                    let cell = csvs.get_cells().w_cell();
+                    w_info.set_yanked(cell);
+                    cell.content.clear();
+                    w_info.push_str_to_frame(
+                        &format!(
+                            "\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
+                            w_info.height, w_info.yanked
+                        )
+                    );
+                    drop(cell);
+                    w_info.draw_focus(csvs.get_cells());
+                    w_info.flush();
+                }
                 // y (yank)
                 [121] => {
                     let cell = csvs.get_cells().w_cell();
@@ -280,6 +295,11 @@ pub fn process_input(
                         68 => (),
                         _ => (),
                     }
+                }
+                [16] => { // ctrl + p (paste)
+                    w_info.paste_yanked_to_write_buffer();
+                    w_info.changed = WinChange::Write;
+                    csvs.get_cells().written = true;
                 }
                 // ctrl/alt + w (write)
                 [23] | [27, 119] => {
