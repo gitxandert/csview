@@ -346,6 +346,10 @@ pub fn process_input(
                 [27] => { //escape 
                     // causes issues; ignore
                 }
+                [16] => { // ctrl + p (paste)
+                    w_info.paste_yanked_to_write_buffer();
+                    w_info.changed = WinChange::Command;
+                }
                 [17] => { // ctrl + q (quit)
                     w_info.push_str_to_frame(
                         &format!(
