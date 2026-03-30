@@ -518,26 +518,42 @@ impl WinInfo {
     }
 
     pub fn add_to_write_buffer(&mut self, content: &str) {
+        let add = content.len();
         for c in content.chars() {
             self.write_buffer.insert(c);
             
-            let cursor = &mut self.cursor;
-            let buf = &mut self.write_buffer;
-          
-            let new_cur_off = cursor.offset + 1;
-            if new_cur_off > cursor.limit {
-                let new_buf_off = buf.offset + 1;
-                let diff = buf.content_len.saturating_sub(new_buf_off);
-                if diff >= buf.window {
-                    buf.offset = new_buf_off;
-                }
-            } else {
-                if buf.gap_start <= buf.content_len {
-                    cursor.offset = new_cur_off;
-                }
+        }
+        
+        self.offset_cursor(add);
+
+        self.changed = WinChange::Write;
+    }
+
+    pub fn paste_yanked_to_write_buffer(&mut self) {
+        let add = self.yanked.len();
+        for c in self.yanked.chars() {
+            self.write_buffer.insert(c);
+        }
+        self.offset_cursor(add);
+        self.changed = WinChange::Write;
+    }
+
+    fn offset_cursor(&mut self, add: usize) {
+        let cursor = &mut self.cursor;
+        let buf = &mut self.write_buffer;
+      
+        let new_cur_off = cursor.offset + add;
+        if new_cur_off > cursor.limit {
+            let new_buf_off = buf.offset + add;
+            let diff = buf.content_len.saturating_sub(new_buf_off);
+            if diff >= buf.window {
+                buf.offset = new_buf_off;
+            }
+        } else {
+            if buf.gap_start <= buf.content_len {
+                cursor.offset = new_cur_off;
             }
         }
-        self.changed = WinChange::Write;
     }
 
     pub fn delete_from_write_buffer(&mut self) {
@@ -1705,6 +1721,11 @@ impl WinInfo {
     }
 
     fn find_value_in_col(&mut self, csvs: &mut Csvs, val: &str) {
+        if val == "" {
+            print_bottom!(self, "Specify a value for 'col f'");
+            return;
+        }
+
         let val = Self::trim_quotes(val);
         let cells = csvs.get_cells();
         let col = &mut cells.columns[self.w_pointer];
