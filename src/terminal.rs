@@ -2958,7 +2958,9 @@ impl WinInfo {
 
         for col in &mut cells.columns {
             let mut new_col = Column::new();
-            let removed = col.drain_cells(st..=end);
+            col.reindex();
+            let real_end = end.min(col.len().saturating_sub(1));
+            let removed = col.drain_cells(st..=real_end);
             new_col.cells = removed;
             new_col.indices = (0..(end-st + 1)).collect();
             new_cells.push_column(new_col);
