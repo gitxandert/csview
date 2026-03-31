@@ -3157,20 +3157,22 @@ impl WinInfo {
                 }
                 j += 1;
             }
-            if j == src_cells.num_cols() {
-                if st >= self.num_rows {
-                    for _ in st..end {
-                        col.push_cell(Cell::new(""));
-                    }
-                } else {
-                    let mut end_of_col = col.cells.split_off(st);
-                    for _ in st..end {
-                        col.push_cell(Cell::new(""));
-                    }
-                    col.cells.append(&mut end_of_col);
-                }
-                col.indices = (0..col.len()).collect();
-            }
+// I don't understand why this is here
+//
+//            if j == src_cells.num_cols() {
+//                if st >= self.num_rows {
+//                    for _ in st..end {
+//                        col.push_cell(Cell::new(""));
+//                    }
+//                } else {
+//                    let mut end_of_col = col.cells.split_off(st);
+//                    for _ in st..end {
+//                        col.push_cell(Cell::new(""));
+//                    }
+//                    col.cells.append(&mut end_of_col);
+//                }
+//                col.indices = (0..col.len()).collect();
+//            }
         }
 
         // should only be the dissimilar ones left
