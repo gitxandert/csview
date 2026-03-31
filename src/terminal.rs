@@ -2054,11 +2054,11 @@ impl WinInfo {
                 col.indices[..visible_len].sort_by(|&i, &j| {
                     let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
-                        Err(_)  => f32::MAX,
+                        Err(_)  => Self::extract_embedded_float(col.cells[i].view(), f32::MAX),
                     };
                     let b = match col.cells[j].content.parse::<f32>() {
                         Ok(num) => num,
-                        Err(_)  => f32::MAX,
+                        Err(_)  => Self::extract_embedded_float(&col.cells[j].view(), f32::MAX),
                     };
                     a.total_cmp(&b)
                 })
@@ -2067,15 +2067,90 @@ impl WinInfo {
                 col.indices[..visible_len].sort_by(|&i, &j| {
                     let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
-                        Err(_)  => f32::MIN,
+                        Err(_)  => Self::extract_embedded_float(&col.cells[i].view(), f32::MIN),
                     };
                     let b = match col.cells[j].content.parse::<f32>() {
                         Ok(num) => num,
-                        Err(_)  => f32::MIN,
+                        Err(_)  => Self::extract_embedded_float(&col.cells[j].view(), f32::MIN),
                     };
                     b.total_cmp(&a)
                 })
             }
+        }
+    }
+
+    fn extract_embedded_float(content: &str, _default: f32) -> f32 {
+        let mut num = String::new();
+        let mut found = false;
+        let mut dec = false;
+        let mut e = false;
+        let mut eneg = false;
+        for c in content.chars() {
+            match c {
+                '.' => {
+                    if !found {
+                        found = true;
+                        dec = true;
+                        num.push(c);
+                    } else {
+                        if !dec {
+                            dec = true;
+                            num.push(c);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                '+' => {
+                    if !found {
+                        found = true;
+                        num.push(c);
+                    } else {
+                        break;
+                    }
+                }
+                '-' => {
+                    if !found {
+                        found = true;
+                        num.push(c);
+                    } else {
+                        if e && !eneg {
+                            eneg = true;
+                            num.push(c);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                'e' => {
+                    if found {
+                        if !e {
+                            e = true;
+                            num.push(c);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    if c.is_ascii_digit() {
+                        num.push(c);
+                        if !found { found = true; }
+                    } else {
+                        if found { break; }
+                    }
+                }
+            }
+        }
+
+        // sanity check
+        if found {
+            match num.parse::<f32>() {
+                Ok(f) => return f,
+                Err(_) => return _default,
+            }
+        } else {
+            return _default;
         }
     }
 
