@@ -2026,11 +2026,10 @@ impl WinInfo {
     }
 
     fn sort_indices(col: &mut Column, dir: Sort) {
-        let mut indices = col.indices.clone();
         let visible_len = col.len().saturating_sub(col.padding);
         match dir {
             Sort::AscAlph => 
-                indices[..visible_len].sort_by(|&i, &j| {
+                col.indices[..visible_len].sort_by(|&i, &j| {
                     let a = {
                         match col.cells[i].view() {
                             "" => &format!("{}a", col.cells[j].view()),
@@ -2046,13 +2045,13 @@ impl WinInfo {
                     a.cmp(&b)
                 }),
             Sort::DescAlph => 
-                indices[..visible_len].sort_by(|&i, &j| {
+                col.indices[..visible_len].sort_by(|&i, &j| {
                     let a = col.cells[i].view();
                     let b = col.cells[j].view();
                     b.cmp(&a)
                 }),
             Sort::AscNum => {
-                indices[..visible_len].sort_by(|&i, &j| {
+                col.indices[..visible_len].sort_by(|&i, &j| {
                     let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MAX,
@@ -2065,7 +2064,7 @@ impl WinInfo {
                 })
             }
             Sort::DescNum => {
-                indices[..visible_len].sort_by(|&i, &j| {
+                col.indices[..visible_len].sort_by(|&i, &j| {
                     let a = match col.cells[i].content.parse::<f32>() {
                         Ok(num) => num,
                         Err(_)  => f32::MIN,
@@ -2078,8 +2077,6 @@ impl WinInfo {
                 })
             }
         }
-
-        col.indices = indices;
     }
 
     fn sort_focused_column(&mut self, cells: &mut Cells, dir: Sort) {
