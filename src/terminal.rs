@@ -3209,10 +3209,14 @@ impl WinInfo {
             col.reindex();
             let dest_name = &dest_cells.header[i].content;
             let mut j = 0usize;
+            let mut found = false;
             loop {
                 // loop through src column names
                 let src_name = match src_cells.header.get(j) {
-                    Some(name) => &name.content,
+                    Some(name) => {
+                        if !found { found = true; }
+                        &name.content
+                    }
                     None => break,
                 };
                 if src_name == dest_name {
@@ -3231,22 +3235,22 @@ impl WinInfo {
                 }
                 j += 1;
             }
-// I don't understand why this is here
-//
-//            if j == src_cells.num_cols() {
-//                if st >= self.num_rows {
-//                    for _ in st..end {
-//                        col.push_cell(Cell::new(""));
-//                    }
-//                } else {
-//                    let mut end_of_col = col.cells.split_off(st);
-//                    for _ in st..end {
-//                        col.push_cell(Cell::new(""));
-//                    }
-//                    col.cells.append(&mut end_of_col);
-//                }
-//                col.indices = (0..col.len()).collect();
-//            }
+
+            // if no matching src_col, then we still need to pad dest_col
+            if j == src_cells.num_cols() && !found {
+                if st >= self.num_rows {
+                    for _ in st..end {
+                        col.push_cell(Cell::new(""));
+                    }
+                } else {
+                    let mut end_of_col = col.cells.split_off(st);
+                    for _ in st..end {
+                        col.push_cell(Cell::new(""));
+                    }
+                    col.cells.append(&mut end_of_col);
+                }
+                col.indices = (0..col.len()).collect();
+            }
         }
 
         // should only be the dissimilar ones left
