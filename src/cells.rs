@@ -256,26 +256,25 @@ impl Column {
     }
 
     pub fn make_unique(&mut self) -> usize {
-        let mut seen = Vec::<String>::new();
+        let mut seen = Vec::<&str>::new();
         let mut seen_idx = Vec::<usize>::new();
         let mut u_idx = Vec::<usize>::new();
-        for i in 0..self.len() - self.padding {
-            let cur = self.indices[i].clone();
-            let content = self.cells[cur].content.clone();
-            if &content == "" { 
+        for i in 0..self.indices.len() {
+            let cur = self.indices[i];
+            if &self.cells[i].content == "" { 
                 seen_idx.push(cur);
                 continue; 
             }
             
             let mut s = 0;
             for _ in 0..seen.len() {
-                if &content == &seen[s] {
+                if &self.cells[i].content == &seen[s] {
                     break;
                 }
                 s += 1;
             }
             if s == seen.len() {
-                seen.push(content);
+                seen.push(&self.cells[i].content);
                 u_idx.push(cur);
             } else {
                 seen_idx.push(cur);
@@ -283,17 +282,18 @@ impl Column {
         }
         // save num unique to return
         let uq_len = u_idx.len();
-        let seen_len = seen_idx.len();
-
-        self.padding += seen_len;
-        
-        for _ in 0..seen_len {
-            u_idx.push(self.cells.len());
-            self.cells.push(Cell::new(""));
+        if uq_len != self.len() - self.padding {
+            let seen_len = seen_idx.len();
+            self.padding += seen_len;
+            
+            for _ in 0..seen_len {
+                u_idx.push(self.cells.len());
+                self.cells.push(Cell::new(""));
+            }
+            u_idx.append(&mut seen_idx);
+            
+            self.indices = u_idx;
         }
-        u_idx.append(&mut seen_idx);
-        
-        self.indices = u_idx;
 
         uq_len
     }
