@@ -2015,7 +2015,7 @@ impl WinInfo {
             self,
             "\x1b[?25l{} unique {} in '{}'",
             uq_len, 
-            &values[0..6-2usize.saturating_sub(uq_len)], 
+            &values[0..6-1usize.saturating_sub((uq_len != 1) as usize)], 
             cells.header[self.w_pointer].content
         );
         
