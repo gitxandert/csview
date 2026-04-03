@@ -1,4 +1,4 @@
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 
 pub enum CmdErr<'a> {
     InvalidArg(&'a str),
@@ -7,7 +7,7 @@ pub enum CmdErr<'a> {
     InvalidDec(&'a str),
     InvalidHex(char),
     InvalidIndex(usize),
-    InvalidRange(&'a str),
+    // InvalidRange(&'a str),
     InvalidSubCmd(&'a str),
     MissingConId(&'a str),
     MissingList(&'a str),
@@ -24,12 +24,11 @@ pub enum CmdErr<'a> {
     StdinErr(&'a str),
     TooManyArgs(&'a str),
     UnknownSpec(&'a str),
-    UnmatchedQuote(&'a str)
+    // UnmatchedQuote(&'a str)
 }
 
 pub fn print(err: CmdErr, line: usize) {
     let mut out = io::stdout();
-    let mut outstring = String::new();
     let outstring = {
         match err {
             CmdErr::InvalidArg(t) => format!(
@@ -62,10 +61,10 @@ pub fn print(err: CmdErr, line: usize) {
                     line, t
                 ),
 
-            CmdErr::InvalidRange(t) => format!(
-                    "\x1b[{};1H\x1b[2KERR: '{}' is not a valid range",
-                    line, t
-                ),
+      //      CmdErr::InvalidRange(t) => format!(
+      //              "\x1b[{};1H\x1b[2KERR: '{}' is not a valid range",
+      //              line, t
+      //          ),
 
             CmdErr::InvalidSubCmd(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid sub-command '{}'",
@@ -147,13 +146,13 @@ pub fn print(err: CmdErr, line: usize) {
                     line, t
                 ),
 
-            CmdErr::UnmatchedQuote(t) => format!(
-                    "\x1b[{};1H\x1b[2KERR: unmatched quote in {}",
-                    line, t
-                ),
+      //      CmdErr::UnmatchedQuote(t) => format!(
+      //              "\x1b[{};1H\x1b[2KERR: unmatched quote in {}",
+      //              line, t
+      //          ),
         }
     };
 
-    write!(out, "{outstring}");
+    let _ = write!(out, "{outstring}");
     out.flush().unwrap();
 }

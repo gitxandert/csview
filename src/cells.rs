@@ -1,9 +1,7 @@
-use std::io::{self, Error, ErrorKind, Read, Write, stdout};
-
 use crate::{
     csv_io::int_to_base_26,
-    cmd_err::{self, CmdErr},
-    terminal::{WinChange, WinInfo}
+    cmd_err::CmdErr,
+    terminal::WinInfo,
 };
 
 #[derive(Debug)]
@@ -53,10 +51,6 @@ impl Cell {
     pub fn new(content: &str) -> Self {
         // store escapes and their indices
         let mut esq = Vec::<EscSeq>::new();
-
-        // len keeps track of "real" len
-        // (i.e. the characters, not the formatting)
-        let mut real_len = 0usize;
 
         let mut line = String::new();
         let mut e = EscSeq::new();
@@ -149,10 +143,6 @@ impl Cell {
         self.content.len()
     }
 
-    pub fn set_content(&mut self, input: String) {
-        self.content = input;
-    }
-
     pub fn set_focused(&mut self, focused: bool) {
         self.is_focused = focused;
     }
@@ -160,18 +150,6 @@ impl Cell {
     // directly set it
     pub fn set_text_offset(&mut self, val: usize) {
         self.text_offset = val.min(self.len().saturating_sub(self.width));
-    }
-
-    pub fn dec_text_offset(&mut self, val: usize) {
-        self.text_offset = self.text_offset.saturating_sub(val);
-    }
-
-    pub fn inc_text_offset(&mut self, val: usize) {
-        if self.len().saturating_sub(self.text_offset) > self.width {
-            self.text_offset += val;
-        } else {
-            self.text_offset = self.len().saturating_sub(self.width);
-        }
     }
 
     pub fn set_width(&mut self, w: usize) {
@@ -239,7 +217,7 @@ impl Column {
     pub fn reindex(&mut self) {
         let mut reindexed = Vec::<Cell>::with_capacity(self.cells.len());
        
-        for i in 0..self.len() - self.padding {
+        for i in 0..self.len() {
             reindexed.push(self.cells.get(self.indices[i]).unwrap().clone());
         }
         self.cells = reindexed;
@@ -322,7 +300,7 @@ impl Column {
 
     pub fn revert(&mut self) {
         self.indices = (0..self.len()).collect();
-        self.cells.split_off(self.cells.len() - self.padding);
+        self.cells.truncate(self.cells.len() - self.padding);
         self.padding = 0;
     }
 
@@ -399,19 +377,12 @@ impl Cells {
         new_row
     }
 
-    pub fn changed(&mut self) -> bool {
-        let ret = self.changed;
-        self.changed ^= ret;
-
-        ret
-    }
-
     pub fn set_column_width(&mut self, w: usize) {
         let width = w.max(3);
         let idx = self.w_cell.0; // w_cell is where the focus is
-        let mut column = self.columns.get_mut(idx).unwrap();
-        let mut col_id = self.col_ids.get_mut(idx).unwrap();
-        let mut col_name = self.header.get_mut(idx).unwrap();
+        let column = self.columns.get_mut(idx).unwrap();
+        let col_id = self.col_ids.get_mut(idx).unwrap();
+        let col_name = self.header.get_mut(idx).unwrap();
         column.set_width(width);
         col_id.set_width(width);
         col_name.set_width(width);
@@ -456,7 +427,7 @@ impl Cells {
     }
 
     pub fn w_cell(&mut self) -> &mut Cell {
-        let mut col = self.columns.get_mut(self.w_cell.0).unwrap();
+        let col = self.columns.get_mut(self.w_cell.0).unwrap();
         col.get_cell(self.w_cell.1)
     }
 

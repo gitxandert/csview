@@ -1,14 +1,13 @@
 use std::{
     env,
-    ptr,
-    fs::{self, File},
+    fs,
     time::{SystemTime, UNIX_EPOCH},
-    io::{self, Error, ErrorKind, Read, Write, stdin, stdout},
+    io::{self, Read, stdin},
     path::{Component, Path, PathBuf}
 };
 use libc::{poll, pollfd, POLLIN, STDIN_FILENO};
 
-use crate::cells::{Cell, Cells, Column, EscSeq};
+use crate::cells::{Cell, Cells, Column};
 
 fn parse_by_newline(block: &str) -> Vec<String> {
     let mut parsed = Vec::<String>::new();
@@ -117,15 +116,14 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
     // extract lines, but parse into columns
     let mut lines: Vec<String> = parse_by_newline(&csv);
 
-    let mut header: Vec<Cell> = parse_by_delim(&lines.remove(0), delim.clone());
+    let header: Vec<Cell> = parse_by_delim(&lines.remove(0), delim.clone());
     let mut col_len = header.len();
     let col_ids: Vec<Cell> = make_col_ids(col_len);
     
     let mut cells = Cells::new(filename, delim.clone(), header, col_ids, col_len);
 
     for j in 0..col_len {
-        let mut column = Column::new();
-        cells.push_column(column);
+        cells.push_column(Column::new());
         if lines.len() == 0 {
             cells.push_to_col(j, Cell::new(""));
         }
@@ -137,7 +135,7 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
         for j in 0..row.len() {
             let cell = row.get(j).unwrap().clone();
             if j >= col_len {
-                let mut column = Column::new();
+                let column = Column::new();
                 cells.push_column(column);
                 for _ in 0..i {
                     cells.push_to_col(j, Cell::new(""));
@@ -148,6 +146,7 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
                 let unnamed = format!("Unnamed_{}", unnamed_count);
                 cells.header.push(Cell::new(&unnamed));
                 cells.increment_col_ids();
+                unnamed_count += 1;
             }    
             cells.push_to_col(j, cell);
         }
@@ -268,14 +267,11 @@ pub fn save_backup(file: &String) -> Result<String, io::Error> {
         // {filename}_0(.ext)
         None => {
             let stem = file.file_stem().unwrap_or_default();
-            let ext = file.extension().unwrap_or_default();
-
             let stem_str = stem.to_string_lossy();
-            let ext_str = ext.to_string_lossy();
 
-            let mut parts: Vec<&str> = stem_str.split('.').collect();
+            let parts: Vec<&str> = stem_str.split('.').collect();
             let prefix = parts[0];
-            let path = match parts.get(0) {
+            let path = match parts.get(1) {
                 Some(ext) => format!("{}_0.{}", prefix, ext),
                 None => format!("{}_0", prefix),
             };

@@ -1,9 +1,7 @@
 use std::{
-    cmp,
     mem,
-    fs::{File, OpenOptions},
-    io::{self, Read, Write},
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering}
+    io::Write,
+    sync::atomic::{AtomicBool, Ordering}
 };
 use libc::{
     self, c_int, ioctl, winsize, STDOUT_FILENO, TIOCGWINSZ,
@@ -276,12 +274,12 @@ impl WinInfo {
         match w {
             true => {
                 self.input_mode = InputMode::Write;
-                write!(out, "\x1b[?25h");
+                let _ = write!(out, "\x1b[?25h");
                 self.cursor.offset = 0usize;
             }
             false => {
                 self.input_mode = InputMode::Scroll;
-                write!(out, "\x1b[?25l");
+                let _ = write!(out, "\x1b[?25l");
             }
         }
         out.flush().unwrap();
@@ -290,9 +288,7 @@ impl WinInfo {
     pub fn set_command_mode(&mut self, b: bool, col: &Column) {
         match b {
             true => {
-                unsafe {
-                    IN_COMMAND.store(true, Ordering::SeqCst);
-                }
+                IN_COMMAND.store(true, Ordering::SeqCst);
                 self.input_mode = InputMode::Command;
                 // set cursor to a space after a colon at the bottom of the screen
                 self.set_cursor(self.height, 2, self.width.saturating_sub(1));
@@ -306,9 +302,7 @@ impl WinInfo {
                 );
             }
             false => {
-                unsafe {
-                    IN_COMMAND.store(false, Ordering::SeqCst);
-                }
+                IN_COMMAND.store(false, Ordering::SeqCst);
                 // reset cursor
                 self.set_cursor(
                     self.h_pointer - self.h_offset + 3,
@@ -343,7 +337,6 @@ impl WinInfo {
         let cell = cells.w_cell();
         cell.content = self.yanked.clone();
         self.set_focused(&cell.content);
-        drop(cell);
         self.draw_focus(cells);
         cells.written = true;
     }
@@ -421,7 +414,7 @@ impl WinInfo {
     }
     
     pub fn set_w_pointer(&mut self, w: usize) {
-        if w >= 0 && w < self.num_cols {
+        if w < self.num_cols {
             let old_w = self.w_pointer;
             self.w_pointer = w;
             self.changed = WinChange::Focus;
@@ -449,7 +442,7 @@ impl WinInfo {
     }
 
     pub fn set_w_offset(&mut self, w: usize) {
-        if w >= 0 && w < self.num_cols {
+        if w < self.num_cols {
             let old_w = self.w_offset;
             self.w_offset = w.min(self.num_cols.saturating_sub(self.w_page));
 
@@ -467,7 +460,7 @@ impl WinInfo {
     }
     
     pub fn set_h_pointer(&mut self, h: usize) {
-        if h >= 0 && h < self.num_rows - 1 {
+        if h < self.num_rows - 1 {
             let old_h = self.h_pointer;
             self.h_pointer = h;
             self.changed = WinChange::Focus;
@@ -494,7 +487,7 @@ impl WinInfo {
     }
 
     pub fn set_h_offset(&mut self, h: usize) {
-        if h >= 0 && h <= (self.num_rows - 1).saturating_sub(self.h_page + 1) {
+        if h <= (self.num_rows - 1).saturating_sub(self.h_page + 1) {
             let old_h = self.h_offset;
             self.h_offset = h;
 
@@ -632,7 +625,7 @@ impl WinInfo {
         let mut width = col.col_width();
 
         while start + width < self.width {
-            let mut cell = col.get_cell(row);
+            let cell = col.get_cell(row);
             let take = cell.width.min(cell.len() - cell.text_offset);
             let content = &cell.content;
             let visible: String = content
@@ -738,14 +731,12 @@ impl WinInfo {
         for i in 1..self.height - 1 {
             // move cursor to beginning of line
             self.push_str_to_frame(&format!("\x1b[{i};1H\x1b[2K"));
-
+            let start = 6usize;
             if i == 1 {
                 self.push_str_to_frame("\x1b[4m    |");
-                let mut start = 6usize;
                 self.print_col_ids(cells, id, start);
             } else if i == 2 {
                 self.push_str_to_frame("\x1b[1;30;47mHEAD|\x1b[22;39;49m");
-                let mut start = 6usize;
                 id = self.w_offset;
                 self.print_header(cells, id, start);
             } else {
@@ -759,7 +750,6 @@ impl WinInfo {
                 );
                 self.push_str_to_frame(&row_num);
 
-                let start = 6usize;
                 id = self.w_offset;
                 self.print_row(cells, &mut id, row_id, start);
             }
@@ -837,7 +827,7 @@ impl WinInfo {
 
         let prev_start = cells.columns[wc_c].start;
         let cur_start = cells.columns[self.w_pointer].start;
-        let mut start = prev_start.min(cur_start);
+        let start = prev_start.min(cur_start);
         let prev_l = 3 + wc_l.saturating_sub(self.h_offset); 
         let beg = format!("\x1b[{};{}H\x1b[K\x1b[4m", prev_l, start);
         self.push_str_to_frame(&beg);
@@ -879,26 +869,25 @@ impl WinInfo {
             offset + max_take
         );
 
-        let mut c: char = ' ';
         for i in 0..take_1 {
-            c = self.write_buffer.data[i];
+            let c = self.write_buffer.data[i];
             if i >= offset {
                 self.push_to_frame(c);
             }
-            self.focused_content.push(c.clone());
+            self.focused_content.push(c);
         }
         
         // take after gap
         let mut post_gap = self.write_buffer.gap_start + self.write_buffer.gap_len;
         let take_2 = post_gap + col.width.saturating_sub(take_1.saturating_sub(offset));
         for i in post_gap..self.write_buffer.data.len() {
-            c = self.write_buffer.data[i];
+            let c = self.write_buffer.data[i];
             if i < take_2 {
-                self.push_to_frame(c.clone());
+                self.push_to_frame(c);
                 post_gap += 1;
             }
             if self.focused_content.len() < self.width {
-                self.focused_content.push(c.clone());
+                self.focused_content.push(c);
             }
         }
         // pad end with whitespace
@@ -984,7 +973,7 @@ impl WinInfo {
         }
         
         let mut out = std::io::stdout();
-        write!(out, "{}", self.frame);
+        let _ = write!(out, "{}", self.frame);
         out.flush().unwrap();
 
         self.frame = String::new();
@@ -1122,7 +1111,7 @@ impl WinInfo {
 
     pub fn process_command(&mut self, csvs: &mut Csvs) -> SigFlag {
         let input = self.write_buffer.as_string();
-        let mut tokens = Self::tokenize(&input, ' ');
+        let tokens = Self::tokenize(&input, ' ');
         match tokens[0] {
             // quit
             "q" | "quit" => return SigFlag::Quit,
@@ -1400,7 +1389,7 @@ impl WinInfo {
                     Some(num) => {
                         match num.parse::<usize>() {
                             Ok(u) => u,
-                            Err(e) => {
+                            Err(_) => {
                                 cmd_err::print(
                                     CmdErr::InvalidDec(num),
                                     self.height
@@ -1469,7 +1458,7 @@ impl WinInfo {
         match subcmd {
             "s" | "sortby" => {
                 let mut tokens = tokens.into_iter();
-                for i in 0..2 {
+                for _ in 0..2 {
                     let _ = tokens.next();
                 }
                 match tokens.next() {
@@ -1506,7 +1495,7 @@ impl WinInfo {
             }
             "sf" | "siftby" => {
                 let mut tokens = tokens.into_iter();
-                for i in 0..2 {
+                for _ in 0..2 {
                     let _ = tokens.next();
                 }
                 match tokens.next() {
@@ -1571,7 +1560,7 @@ impl WinInfo {
         let name = Self::trim_quotes(name);
         let header = &cells.header;
         let mut next = self.w_pointer;
-        for i in 0..header.len() {
+        for _ in 0..header.len() {
             if header[next].content.contains(&name) {
                 let name = header[next].content.clone();
                 self.set_w_pointer(next);
@@ -1600,7 +1589,7 @@ impl WinInfo {
     }
 
     fn move_columns(&mut self, cells: &mut Cells, range: &str, loc: &str) {
-        let (mut tokens, delim) = Self::tokenize_range(range); 
+        let (tokens, delim) = Self::tokenize_range(range); 
         
         let ida = match tokens[0] {
             "" => 0,
@@ -1674,7 +1663,7 @@ impl WinInfo {
             }
         };
 
-        let mut idx = match cells.get_col_idx(loc) {
+        let idx = match cells.get_col_idx(loc) {
             Ok(id) => id,
             Err(e) => {
                 cmd_err::print(e, self.height);
@@ -1685,11 +1674,10 @@ impl WinInfo {
         cells.w_cell().is_focused = false;
         let is_behind = (ida > idx) as usize;
         let is_ahead = (idx > ida) as usize;
-        let mut x = 0usize;
         let diff = idb - ida;
         for i in 0..=diff {
             let a = ida + i * is_behind;
-            x = idx + diff * is_ahead + i * is_behind;
+            let x = idx + diff * is_ahead + i * is_behind;
             let col = cells.columns.remove(a);
             let col_name = cells.header.remove(a);
             let w = col.width;
@@ -1756,7 +1744,7 @@ impl WinInfo {
         let mut idx = {
             // start with the closest example of the value
             let mut i = 0usize;
-            let mut idx = indices[i];
+            let idx = indices[i];
             let mut diff = self.h_pointer.max(idx) - self.h_pointer.min(idx);
             for _ in 1..indices.len() {
                 let idx = indices[i + 1];
@@ -1773,8 +1761,6 @@ impl WinInfo {
         };
         self.draw_col_find(cells, idx, &indices, "");
 
-        drop(cells);
-
         let mut buf = [0u8; 1];
         loop {
             match poll_stdin(&mut buf) {
@@ -1786,7 +1772,7 @@ impl WinInfo {
                     }
                 }
                 Ok(PollEvent::Data(0)) => continue,
-                Ok(PollEvent::Data(n)) => {
+                Ok(PollEvent::Data(_)) => {
                     match buf {
                         [b'n'] => {
                             idx = (idx + 1) % indices.len();
@@ -1831,12 +1817,12 @@ impl WinInfo {
     }
 
     fn new_column(&mut self, cells: &mut Cells, name: &str) {
-        let name = Self::trim_quotes(name);;
+        let name = Self::trim_quotes(name);
        
         let loc = self.w_pointer + 1;
 
         let mut new_col = Column::new();
-        for i in 0..self.num_rows {
+        for _ in 0..self.num_rows {
             new_col.push_cell(Cell::new(""));
         }
         cells.insert_column(loc, new_col);
@@ -1944,7 +1930,7 @@ impl WinInfo {
         // columns.next() for sure has a value here
         let p_col_name = columns.next().unwrap();
 
-        let mut p_col_idx = match cells.get_col_idx(p_col_name) {
+        let p_col_idx = match cells.get_col_idx(p_col_name) {
             Ok(idx) => idx,
             Err(e)      => {
                 cmd_err::print(
@@ -2169,7 +2155,7 @@ impl WinInfo {
 
     fn revert_focused_column(&mut self, cells: &mut Cells) {
         cells.w_cell().is_focused = false;
-        let mut col = &mut cells.columns[self.w_pointer];
+        let col = &mut cells.columns[self.w_pointer];
         col.revert();
         cells.set_w_cell(self.w_pointer, self.h_pointer);
         cells.written = true;
@@ -2180,7 +2166,7 @@ impl WinInfo {
 
     fn col_fillna(&mut self, cells: &mut Cells, val: &str) {
         let val = Self::trim_quotes(val);
-        let mut col = &mut cells.columns[self.w_pointer];
+        let col = &mut cells.columns[self.w_pointer];
         for cell in &mut col.cells {
             if &cell.content == "" {
                 cell.content.push_str(&val);
@@ -2196,7 +2182,7 @@ impl WinInfo {
         let t = Self::trim_quotes(targ);
         let n = Self::trim_quotes(new);
 
-        let mut col = &mut cells.columns[self.w_pointer];
+        let col = &mut cells.columns[self.w_pointer];
         for cell in &mut col.cells {
             // Check if the cell content contains the target substring
             if cell.content.contains(&t) {
@@ -2260,7 +2246,6 @@ impl WinInfo {
                 other_values.push(cell.content.clone());
             }
         }
-        drop(other_col);
 
         let cur_col = cells.get_column(self.w_pointer);
         let mut cur_values = Vec::<(usize, &str)>::new();
@@ -2297,9 +2282,6 @@ impl WinInfo {
                 }
             }
         }
-        drop(cur_col);
-        
-        drop(cells);
 
         // get value closest to focus
         let mut diff_idx = {
@@ -2526,21 +2508,21 @@ impl WinInfo {
         Err(CmdErr::InvalidHex(c))
     }
 
-    fn hex_to_dec(hex: &str) -> Result<usize, CmdErr> {
+    fn hex_to_dec<'a>(hex: &'a str) -> Result<usize, CmdErr<'a>> {
         let hex = Self::trim_quotes(hex);
         let len = hex.len();
         let mut hex = hex.chars();
         let mut num = 0usize;
         for i in (0..len).rev() {
             match Self::compute_valid_hex(hex.nth(0).unwrap()) {
-                Ok(d) => num += (d * (16usize.pow(i as u32))),
+                Ok(d) => num += d * (16usize.pow(i as u32)),
                 Err(e) => return Err(e),
             }
         }
         Ok(num)
     }
 
-    fn str_to_dec(s: &str) -> Result<usize, CmdErr> {
+    fn str_to_dec<'a>(s: &'a str) -> Result<usize, CmdErr<'a>> {
         match s.chars().nth(0).unwrap() {
             '\'' | '"' => Self::hex_to_dec(s),
             _       => {
@@ -2558,7 +2540,7 @@ impl WinInfo {
         // - two indices separated by a hyphen (e.g. '104D'-'105F')
         // - an index, a '+', and how many rows to include (e.g. 'A7'+10)
         // quotes refer to printed indices
-        let (mut tokens, delim) = Self::tokenize_range(range);
+        let (tokens, delim) = Self::tokenize_range(range);
 
         // if token is empty str, start at first row;
         // if token is _, start at focused row
@@ -2610,7 +2592,7 @@ impl WinInfo {
         let lo = t_lo.min(t_hi);
         let hi = t_hi.max(t_lo);
 
-        if lo < 0 || lo >= self.num_rows {
+        if lo >= self.num_rows {
             cmd_err::print(CmdErr::InvalidIndex(lo), self.height);
             return;
         }
@@ -2768,7 +2750,7 @@ impl WinInfo {
                 cells.w_cell().is_focused = false;
                 let orig_len = self.num_rows;
                 {
-                    let mut col = &mut cells.columns[col_idx];
+                    let col = &mut cells.columns[col_idx];
                     self.num_rows = col.make_unique();
                 }
 
@@ -2821,7 +2803,7 @@ impl WinInfo {
 
     fn slice(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
         let mut tokens = tokens.into_iter();
-        for i in 0..2 {
+        for _ in 0..2 {
             let _ = tokens.next();
         }
         let or = match tokens.next() {
@@ -2973,8 +2955,6 @@ impl WinInfo {
             eprintln!("cells.w_cell.0 = {}", cells.w_cell.0);
         }
         
-        drop(cells);
-        
         let new_id = csvs.num_contexts();
         let new_context = Context::new(
                             new_id.clone(),
@@ -3039,7 +3019,6 @@ impl WinInfo {
         }
         cells.written = true;
         new_cells.written = true;
-        drop(cells);
 
         self.num_rows = self.num_rows.saturating_sub(
             end.saturating_sub(st)
@@ -3048,7 +3027,7 @@ impl WinInfo {
             self.h_pointer = self.num_rows - 2;
             self.h_offset = (self.num_rows - 1).saturating_sub(self.h_page);
             csvs.get_cells().w_cell = (self.w_pointer, self.h_pointer);
-            let mut con = csvs.get_context();
+            let con = csvs.get_context();
             con.h_pointer = self.h_pointer;
             con.h_offset = self.h_offset;
         }
@@ -3069,7 +3048,7 @@ impl WinInfo {
 
     fn splice(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
         let mut tokens = tokens.into_iter();
-        for i in 0..2 {
+        for _ in 0..2 {
             let _ = tokens.next();
         }
         let or = match tokens.next() {
@@ -3143,9 +3122,9 @@ impl WinInfo {
         // insert columns from csvs.context[at_col]
         // after the focused column
         let mut src_con = csvs.remove_context(con_id);
-        let mut src_cells = src_con.cells();
+        let src_cells = src_con.cells();
         src_cells.w_cell().is_focused = false;
-        let mut dest_cells = csvs.get_cells();
+        let dest_cells = csvs.get_cells();
         
         let num_cols = src_cells.num_cols();
         let max_rows = dest_cells
@@ -3184,8 +3163,6 @@ impl WinInfo {
         self.num_rows = max_rows;
         self.draw_screen(dest_cells);
 
-        drop(dest_cells);
-        
         self.print_context(csvs);
         self.draw_focused_content();
         self.flush();
@@ -3197,15 +3174,15 @@ impl WinInfo {
         // if the column names are different,
         // create new columns
         let mut src_con = csvs.remove_context(con_id);
-        let mut src_cells = src_con.cells();
+        let src_cells = src_con.cells();
         src_cells.w_cell().is_focused = false;
-        let mut dest_cells = csvs.get_cells();
+        let dest_cells = csvs.get_cells();
        
         let num_rows = src_cells.num_rows();
         let st = at_row + 1;
         let end = st + num_rows;
         for i in 0..dest_cells.num_cols() {
-            let mut col = &mut dest_cells.columns[i];
+            let col = &mut dest_cells.columns[i];
             col.reindex();
             let dest_name = &dest_cells.header[i].content;
             let mut j = 0usize;
@@ -3258,14 +3235,14 @@ impl WinInfo {
             let mut dest_col = Column::new();
             let mut src_col = src_cells.columns.remove(0);
             src_col.reindex();
-            let mut src_name = src_cells.header.remove(0);
+            let src_name = src_cells.header.remove(0);
             dest_cells.header.push(src_name);
             dest_cells.increment_col_ids();
-            for i in 0..st {
+            for _ in 0..st {
                 dest_col.push_cell(Cell::new(""));
             }
             dest_col.cells.append(&mut src_col.cells);
-            for i in end + 1..dest_cells.num_rows() {
+            for _ in end + 1..dest_cells.num_rows() {
                 dest_col.push_cell(Cell::new(""));
             }
             dest_col.indices = (0..dest_col.len()).collect();
@@ -3278,8 +3255,6 @@ impl WinInfo {
         self.num_rows += num_rows;
         self.draw_rows(dest_cells);
 
-        drop(dest_cells);
-        
         self.print_context(csvs);
         self.draw_focused_content();
         self.flush();

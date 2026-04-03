@@ -1,5 +1,5 @@
 use crate::{
-    cells::{Cells, Context, Csvs},
+    cells::Csvs,
     csv_io::{save_backup, write_to_file},
     terminal::{InputMode, ScrollMode, SigFlag, WinChange, WinInfo},
 };
@@ -97,7 +97,7 @@ pub fn process_input(
                                 match w_info.scroll_mode {
                                     ScrollMode::Text => {
                                         let cells = csvs.get_cells();
-                                        let mut w_cell = cells.w_cell();
+                                        let w_cell = cells.w_cell();
                                         w_cell.set_text_offset(
                                             w_cell.text_offset + 1
                                         );
@@ -130,7 +130,7 @@ pub fn process_input(
                                 match w_info.scroll_mode {
                                     ScrollMode::Text => {
                                         let cells = csvs.get_cells();
-                                        let mut w_cell = cells.w_cell();
+                                        let w_cell = cells.w_cell();
                                         w_cell.set_text_offset(
                                             w_cell.text_offset.saturating_sub(1)
                                         );
@@ -157,7 +157,7 @@ pub fn process_input(
                 [19] => {
                     let cells = csvs.get_cells();
                     match save_backup(&cells.filename) {
-                        Ok(b) => {
+                        Ok(_) => {
                             match write_to_file(cells) {
                                 Ok(s) => {
                                     cells.written = false;
@@ -211,7 +211,6 @@ pub fn process_input(
                             w_info.height, w_info.yanked
                         )
                     );
-                    drop(cell);
                     w_info.draw_focus(csvs.get_cells());
                     w_info.flush();
                 }
@@ -305,13 +304,13 @@ pub fn process_input(
                 [23] | [1] => {
                     let cells = csvs.get_cells();
                     w_info.set_write_mode(false);
-                    let mut w_cell = cells.w_cell();
+                    let w_cell = cells.w_cell();
                     w_info.write_to_cell(w_cell);
                 }
                 [1..=22] | [24..=26] | [31] => {
                     // ignore other control characters
                 }
-                [8] | [127] => { /* backspace */ 
+                [127] => { /* backspace */ 
                     let cells = csvs.get_cells();
                     w_info.delete_from_write_buffer();
                     w_info.changed = WinChange::Write;
@@ -323,8 +322,6 @@ pub fn process_input(
                 [27, 91, 72] => { /* home */ }
                 [27, 91, 50, 59, 53, 126] => { /* ctrl + insert */ }
                 [27, 91, 51, 59, 53, 126] => { /* ctrl + delete */ }
-                [27, 91, 49, 59, 53, 70] => { /* ctrl + end */ }
-                [27, 91, 49, 59, 53, 72] => { /* ctrl + home */ }
                 _ => {
                     let c = match str::from_utf8(input) {
                         Ok(valid) => valid,
@@ -401,10 +398,10 @@ pub fn process_input(
                         _ => (),
                     }
                 }
-                [1..10] | [11..13] | [14..26] | [31] => {
+                [1..10] | [11..13] | [14..=26] | [31] => {
                     // ignore other control characters
                 }
-                [8] | [127] => { /* backspace */ 
+                [127] => { /* backspace */ 
                     w_info.delete_from_write_buffer();
                     w_info.changed = WinChange::Command;
                 }
@@ -434,8 +431,6 @@ pub fn process_input(
                 [27, 91, 72] => { /* home */ }
                 [27, 91, 50, 59, 53, 126] => { /* ctrl + insert */ }
                 [27, 91, 51, 59, 53, 126] => { /* ctrl + delete */ }
-                [27, 91, 49, 59, 53, 70] => { /* ctrl + end */ }
-                [27, 91, 49, 59, 53, 72] => { /* ctrl + home */ }
                 _ => {
                     let c = match str::from_utf8(input) {
                         Ok(valid) => valid,

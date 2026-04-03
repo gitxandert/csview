@@ -1,7 +1,6 @@
 use std::{
     env,
-    ptr,
-    io::{self, Read, Write, stdin},
+    io::{self, Write},
 };
 
 mod cells;
@@ -11,7 +10,7 @@ mod input;
 mod terminal;
 
 use crate::{
-    cells::{Cells, Context, Csvs},
+    cells::{Context, Csvs},
     input::process_input,
     terminal::{check_flags, SigFlag, WinInfo},
     csv_io::{
