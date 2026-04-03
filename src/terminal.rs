@@ -279,7 +279,7 @@ impl WinInfo {
             }
             false => {
                 self.input_mode = InputMode::Scroll;
-                let _ = write!(out, "\x1b[?25l");
+                print_bottom!(self, "\x1b[?25l{}", self.focused_content);
             }
         }
         out.flush().unwrap();
@@ -565,9 +565,23 @@ impl WinInfo {
     }
 
     pub fn draw_focused_content(&mut self) {
-        print_bottom!(
-            self, "{}", self.focused_content
-        );
+        match self.input_mode {
+            InputMode::Write => {
+                let len = self.focused_content.len();
+                let hil_st = self.write_buffer.gap_start.min(len.saturating_sub(1));
+                let hil_end = (hil_st + 1).min(len);
+                let content = format!(
+                    "{}\x1b[7m{}\x1b[27m{}",
+                    &self.focused_content[0..hil_st],
+                    &self.focused_content[hil_st..hil_end],
+                    &self.focused_content[hil_end..len]
+                );
+                print_bottom!(self, "{}", content);
+            }
+            _ => {
+                print_bottom!(self, "{}", &self.focused_content);
+            }
+        }
     }
     
     fn print_col_ids(&mut self, cells: &mut Cells, mut i: usize, mut start: usize) {
