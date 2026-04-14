@@ -205,6 +205,7 @@ pub fn process_input(
                     let cell = csvs.get_cells().w_cell();
                     w_info.set_yanked(cell);
                     cell.content.clear();
+                    csvs.get_cells().written = true;
                     w_info.push_str_to_frame(
                         &format!(
                             "\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
