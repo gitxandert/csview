@@ -1422,6 +1422,7 @@ impl WinInfo {
                     }
                 }
             },
+            "dup" | "duplicate" => self.col_dup(csvs.get_cells()),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd),
                     self.height
@@ -2467,6 +2468,28 @@ impl WinInfo {
         self.draw_focused_content();
         self.flush();
     }
+
+    fn col_dup(&mut self, cells: &mut Cells) {
+        let col_name = cells.header[self.w_pointer].content.clone();
+        let col = cells.get_column(self.w_pointer);
+        let new_col = col.clone();
+        let next = self.w_pointer + 1;
+        
+        cells.insert_column(next, new_col);
+        cells.insert_col_name(next, Cell::new(&col_name));
+        cells.increment_col_ids();
+        cells.written = true;
+
+        self.num_cols += 1;
+        self.draw_from_column(cells);
+        print_bottom!(
+            self,
+            "Duplicated column '{}'",
+            self.num_rows
+        );
+        self.flush();
+    }
+    
     // row functions
     //
     fn print_row_count(&mut self) {
