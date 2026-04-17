@@ -2446,6 +2446,7 @@ impl WinInfo {
         }
         cells.written = true;
         self.draw_from_column(cells);
+        self.draw_focused_content();
         self.flush();
     }
 
@@ -2463,6 +2464,7 @@ impl WinInfo {
         }
         cells.written = true;
         self.draw_from_column(cells);
+        self.draw_focused_content();
         self.flush();
     }
     // row functions
