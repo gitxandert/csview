@@ -2433,6 +2433,7 @@ impl WinInfo {
     }
 
     fn col_pre(&mut self, cells: &mut Cells, pre: &str, nonblank: bool) {
+        let pre = Self::trim_quotes(pre);
         let col = cells.get_column(self.w_pointer);
         for i in 0..col.len() {
             let cell = col.get_cell(i);
@@ -2449,6 +2450,7 @@ impl WinInfo {
     }
 
     fn col_app(&mut self, cells: &mut Cells, app: &str, nonblank: bool) {
+        let app = Self::trim_quotes(app);
         let col = cells.get_column(self.w_pointer);
         for i in 0..col.len() {
             let cell = col.get_cell(i);
