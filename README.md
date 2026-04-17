@@ -111,6 +111,12 @@ csview also has a command mode, accessed through ':' :
     - `col si {other}` | `col sim {other}`
         - shows similarities between all unique values in the focused column and all unique values in the other column
 - **row**: row functions
+    - `col pre {string} {nb}` | `col prepend {string} {nonblank}`
+        - prepends the string to cells in the focused column
+        - optional flag `nb`/`nonblank` prepends the string only to cells with content
+    - `col app {string} {nb}` | `col append {string} {nonblank}`
+        - appends the string to cells in the focused column
+        - optional flag `nb`/`nonblank` appends the string only to cells with content
     - `row c` | `row count`
         - prints how many rows there are
     - `row i {count}` | `row insert {count}`
