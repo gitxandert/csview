@@ -117,6 +117,8 @@ csview also has a command mode, accessed through ':' :
     - `col app {string} {nb}` | `col append {string} {nonblank}`
         - appends the string to cells in the focused column
         - optional flag `nb`/`nonblank` appends the string only to cells with content
+    - `col dup` | `col duplicate`
+        - duplicates the focused column
     - `row c` | `row count`
         - prints how many rows there are
     - `row i {count}` | `row insert {count}`
