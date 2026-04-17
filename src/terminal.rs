@@ -936,12 +936,11 @@ impl WinInfo {
         }
         
         // take after gap
-        let mut post_gap = self.write_buffer.gap_start + self.write_buffer.gap_len;
+        let post_gap = self.write_buffer.gap_start + self.write_buffer.gap_len;
         let take_2 = post_gap + self.width.saturating_sub(take_1.saturating_sub(offset));
         for i in post_gap..self.write_buffer.data.len() {
             if i < take_2 {
                 self.push_to_frame(self.write_buffer.data[i]);
-                post_gap += 1;
             }
         }
     }
@@ -1373,6 +1372,54 @@ impl WinInfo {
                                             &other,
                                             false
                                         ),
+                }
+            },
+            "pre" | "prepend" => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingValue(subcmd),
+                                self.height
+                            ),
+                    Some(pre) => {
+                        let nonblank: bool = match tokens.next() {
+                            Some(b) => {
+                                match b {
+                                    "nb" | "nonblank" => true,
+                                    _ => false,
+                                }
+                            }
+                            None => false
+                        };
+                        self.col_pre(
+                            csvs.get_cells(),
+                            &pre,
+                            nonblank
+                        );
+                    }
+                }
+            },
+            "app" | "apppend" => {
+                match tokens.next() {
+                    None => cmd_err::print(
+                                CmdErr::MissingValue(subcmd),
+                                self.height
+                            ),
+                    Some(app) => {
+                        let nonblank: bool = match tokens.next() {
+                            Some(b) => {
+                                match b {
+                                    "nb" | "nonblank" => true,
+                                    _ => false,
+                                }
+                            }
+                            None => false
+                        };
+                        self.col_app(
+                            csvs.get_cells(),
+                            &app,
+                            nonblank
+                        );
+                    }
                 }
             },
             _ => cmd_err::print(
@@ -2385,6 +2432,37 @@ impl WinInfo {
         self.flush();
     }
 
+    fn col_pre(&mut self, cells: &mut Cells, pre: &str, nonblank: bool) {
+        let col = cells.get_column(self.w_pointer);
+        for i in 0..col.len() {
+            let cell = col.get_cell(i);
+            if nonblank {
+                if cell.content == "" {
+                    continue;
+                }
+            }
+            cell.content = format!("{}{}", pre, cell.content);
+        }
+        cells.written = true;
+        self.draw_from_column(cells);
+        self.flush();
+    }
+
+    fn col_app(&mut self, cells: &mut Cells, app: &str, nonblank: bool) {
+        let col = cells.get_column(self.w_pointer);
+        for i in 0..col.len() {
+            let cell = col.get_cell(i);
+            if nonblank {
+                if cell.content == "" {
+                    continue;
+                }
+            }
+            cell.content = format!("{}{}", cell.content, app);
+        }
+        cells.written = true;
+        self.draw_from_column(cells);
+        self.flush();
+    }
     // row functions
     //
     fn print_row_count(&mut self) {
@@ -3412,21 +3490,21 @@ pub fn install_sig_handlers() {
     unsafe {
         //SIGWINCH
         let mut sa_winch: libc::sigaction = std::mem::zeroed();
-        sa_winch.sa_sigaction = sig_winch as usize;
+        sa_winch.sa_sigaction = sig_winch as *const () as usize;
         libc::sigemptyset(&mut sa_winch.sa_mask);
         sa_winch.sa_flags = 0;
         libc::sigaction(libc::SIGWINCH, &sa_winch, std::ptr::null_mut());
 
         //SIGINT
         let mut sa_int: libc::sigaction = std::mem::zeroed();
-        sa_int.sa_sigaction = sig_int as usize;
+        sa_int.sa_sigaction = sig_int as *const () as usize;
         libc::sigemptyset(&mut sa_int.sa_mask);
         sa_int.sa_flags = 0;
         libc::sigaction(libc::SIGINT, &sa_int, std::ptr::null_mut());
         
         //SIGQUIT
         let mut sa_quit: libc::sigaction = std::mem::zeroed();
-        sa_quit.sa_sigaction = sig_quit as usize;
+        sa_quit.sa_sigaction = sig_quit as *const () as usize;
         libc::sigemptyset(&mut sa_quit.sa_mask);
         sa_quit.sa_flags = 0;
         libc::sigaction(libc::SIGQUIT, &sa_quit, std::ptr::null_mut());
