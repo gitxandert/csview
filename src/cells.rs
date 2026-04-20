@@ -4,7 +4,7 @@ use crate::{
     terminal::WinInfo,
 };
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct EscSeq {
     pub seq: String,
     pub start: usize,
@@ -38,7 +38,7 @@ impl EscSeq {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Cell {
     pub content: String,
     pub escape_sequences: Vec<EscSeq>,
@@ -175,6 +175,18 @@ impl Column {
             indices: Vec::<usize>::new(),
             padding: 0usize,
         }
+    }
+
+    pub fn clone(&self) -> Self {
+        let mut cells = self.cells.clone();
+        for cell in &mut cells {
+            cell.is_focused = false;
+        }
+        let indices = self.indices.clone();
+        let start = self.start;
+        let width = self.width;
+        let padding = self.padding;
+        Self { cells, start, width, indices, padding }
     }
 
     pub fn push_cell(&mut self, cell: Cell) {
