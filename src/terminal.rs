@@ -1423,6 +1423,15 @@ impl WinInfo {
                 }
             },
             "dup" | "duplicate" => self.col_dup(csvs.get_cells()),
+            "fb"  | "filterby"  => {
+                match tokens.next() {
+                    Some(col) => self.col_filterby(csvs.get_cells(), &col),
+                    None => cmd_err::print(
+                                CmdErr::MissingValue(subcmd),
+                                self.height
+                            ),
+                }
+            }
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd),
                     self.height
@@ -2486,6 +2495,54 @@ impl WinInfo {
             self,
             "Duplicated column '{}'",
             self.num_rows
+        );
+        self.flush();
+    }
+
+    fn col_filterby(&mut self, cells: &mut Cells, cols: &str) {
+        let col_idx = match cells.get_col_idx(cols) {
+            Err(e) => {
+                cmd_err::print(
+                    e, self.height
+                );
+                return;
+            }
+            Ok(i) => i,
+        };
+        let col = cells.get_column(col_idx);
+        let mut u_vals = Vec::<String>::new();
+        for i in 0..col.len() {
+            let cell = col.get_cell(i);
+            let mut u = true;
+            for uv in &u_vals {
+                if uv == &cell.content {
+                    u = false;
+                    break;
+                }
+            }
+            if u {
+                u_vals.push(cell.content.clone());
+            }
+        }
+        
+        let mut num_filt = 0;
+        let cur = cells.get_column(self.w_pointer);
+        for i in 0..cur.len() {
+            let cell = cur.get_cell(i);
+            for uv in &u_vals {
+                if uv == &cell.content {
+                    cell.content.clear();
+                    num_filt += 1;
+                }
+            }
+        }
+
+        cells.written = true;
+        self.draw_from_column(cells);
+        print_bottom!(
+            self,
+            "Filtered {} rows",
+            num_filt
         );
         self.flush();
     }
