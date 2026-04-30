@@ -210,8 +210,9 @@ macro_rules! print_bottom {
             $self.height,
             $($args),*
         );
+        let fit: String = formatted_string.chars().take($self.width).collect();
         
-        $self.push_str_to_frame(&formatted_string);
+        $self.push_str_to_frame(&fit);
     };
 }
 
