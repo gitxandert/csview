@@ -206,12 +206,22 @@ pub fn process_input(
                     w_info.set_yanked(cell);
                     cell.content.clear();
                     csvs.get_cells().written = true;
-                    w_info.push_str_to_frame(
-                        &format!(
-                            "\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
-                            w_info.height, w_info.yanked
-                        )
-                    );
+
+                    let max_shown = w_info.width.saturating_sub(9);
+                    let yank_str = match w_info.yanked.len() > max_shown {
+                        true => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}...'",
+                                    w_info.height, 
+                                    w_info.yanked
+                                        .chars()
+                                        .take(max_shown.saturating_sub(3))
+                                        .collect::<String>()
+                                ),
+                        false => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
+                                    w_info.height, 
+                                    w_info.yanked
+                                ),
+                    };
+                    w_info.push_str_to_frame(&yank_str);
                     w_info.draw_focus(csvs.get_cells());
                     w_info.flush();
                 }
@@ -219,12 +229,21 @@ pub fn process_input(
                 [121] => {
                     let cell = csvs.get_cells().w_cell();
                     w_info.set_yanked(cell);
-                    w_info.push_str_to_frame(
-                        &format!(
-                            "\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
-                            w_info.height, cell.content
-                        )
-                    );
+                    let max_shown = w_info.width.saturating_sub(9);
+                    let yank_str = match w_info.yanked.len() > max_shown {
+                        true => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}...'",
+                                    w_info.height, 
+                                    w_info.yanked
+                                        .chars()
+                                        .take(max_shown.saturating_sub(3))
+                                        .collect::<String>()
+                                ),
+                        false => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
+                                    w_info.height, 
+                                    w_info.yanked
+                                ),
+                    };
+                    w_info.push_str_to_frame(&yank_str);
                     w_info.flush();
                 }
                 // p (paste)
@@ -238,12 +257,21 @@ pub fn process_input(
                         );
                     } else {
                         w_info.paste(csvs.get_cells());
-                        w_info.push_str_to_frame(
-                            &format!(
-                                "\x1b[{};1H\x1b[2K\x1b[0mpasted '{}' to cell",
-                                w_info.height, csvs.get_cells().w_cell().content
-                            )
-                        );
+                        let max_shown = w_info.width.saturating_sub(9);
+                        let paste_str = match w_info.yanked.len() > max_shown {
+                            true => format!("\x1b[{};1H\x1b[2K\x1b[0mpasted '{}...'",
+                                        w_info.height, 
+                                        w_info.yanked
+                                            .chars()
+                                            .take(max_shown.saturating_sub(3))
+                                            .collect::<String>()
+                                    ),
+                            false => format!("\x1b[{};1H\x1b[2K\x1b[0mpasted '{}'",
+                                        w_info.height, 
+                                        w_info.yanked
+                                    ),
+                        };
+                        w_info.push_str_to_frame(&paste_str);
                     }
                     w_info.flush();
                 }
