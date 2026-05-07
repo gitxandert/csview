@@ -1433,6 +1433,8 @@ impl WinInfo {
                             ),
                 }
             }
+            "up"  | "upper" => self.col_up(csvs.get_cells()),
+            "lo"  | "lower" => self.col_lo(csvs.get_cells()),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd),
                     self.height
@@ -2547,7 +2549,30 @@ impl WinInfo {
         );
         self.flush();
     }
+
+    fn col_up(&mut self, cells: &mut Cells) {
+        let col = cells.get_column(self.w_pointer);
+        for i in 0..col.len() {
+            let cell = col.get_cell(i);
+            cell.content = cell.content.to_uppercase();
+        }
+        cells.written = true;
+        self.draw_from_column(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
     
+    fn col_lo(&mut self, cells: &mut Cells) {
+        let col = cells.get_column(self.w_pointer);
+        for i in 0..col.len() {
+            let cell = col.get_cell(i);
+            cell.content = cell.content.to_lowercase();
+        }
+        cells.written = true;
+        self.draw_from_column(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
     // row functions
     //
     fn print_row_count(&mut self) {
