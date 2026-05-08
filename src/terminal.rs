@@ -1500,11 +1500,8 @@ impl WinInfo {
             }
             "g" | "goto" => {
                 match tokens.next() {
-                    None => cmd_err::print(
-                                CmdErr::MissingLocation(subcmd),
-                                self.height
-                            ),
-                    Some(loc) => self.goto_row(csvs.get_cells(), &loc),
+                    None => self.goto_row(csvs.get_cells(), None),
+                    Some(loc) => self.goto_row(csvs.get_cells(), Some(&loc)),
                 }
             }
             "n" | "num" => self.show_row_num(),
@@ -2860,21 +2857,30 @@ impl WinInfo {
         self.flush();
     }
 
-    fn goto_row(&mut self, cells: &mut Cells, loc: &str) {
-        let i = match Self::str_to_dec(loc) {
-            Ok(index) => index,
-            Err(e) => {
-                cmd_err::print(e, self.height);
-                return;
-            }
+    fn goto_row(&mut self, cells: &mut Cells, loc: Option<&str>) {
+        let i = {
+            match loc {
+                Some(l) => {
+                    match Self::str_to_dec(l) {
+                        Ok(index) => {
+                            if index >= self.num_rows {
+                                cmd_err::print(
+                                    CmdErr::InvalidIndex(index),
+                                    self.height
+                                );
+                                return;
+                            }
+                            index
+                        }
+                        Err(e) => {
+                            cmd_err::print(e, self.height);
+                            return;
+                        }
+                    }
+                }
+                None => self.num_rows.saturating_sub(1),
+            } 
         };
-        if i >= self.num_rows {
-            cmd_err::print(
-                CmdErr::InvalidIndex(i),
-                self.height
-            );
-            return;
-        }
         self.set_h_pointer(i);
         self.draw_screen(cells);
         self.draw_focused_content();
