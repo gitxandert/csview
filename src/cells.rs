@@ -30,6 +30,7 @@ impl EscSeq {
 
     pub fn push_seq(&mut self, c: char) {
         self.seq.push(c);
+        self.len = self.seq.len();
     }
 
     pub fn set_start(&mut self, c: char, i: usize) {
@@ -81,7 +82,9 @@ impl Cell {
                     continue;
                 }
                 '\n' => {
-                    // skip new lines
+                    let mut nl = EscSeq::new();
+                    nl.set_start(c, i);
+                    esq.push(nl);
                     continue;
                 }
                 _ => {
@@ -129,6 +132,28 @@ impl Cell {
         &self.content[..]
     }
 
+    pub fn raw_content(&self) -> String {
+        let mut raw = String::new();
+        let mut escapes = self.escape_sequences.clone();
+        escapes.sort_by_key(|esc| esc.start);
+
+        let mut escape_idx = 0usize;
+        for (content_idx, c) in self.content.chars().enumerate() {
+            while escape_idx < escapes.len() && escapes[escape_idx].start == content_idx {
+                raw.push_str(&escapes[escape_idx].seq);
+                escape_idx += 1;
+            }
+            raw.push(c);
+        }
+
+        while escape_idx < escapes.len() {
+            raw.push_str(&escapes[escape_idx].seq);
+            escape_idx += 1;
+        }
+
+        raw
+    }
+
     pub fn clone(&self) -> Self {
         Self { 
             content: self.content.clone(),
@@ -154,6 +179,30 @@ impl Cell {
 
     pub fn set_width(&mut self, w: usize) {
         self.width = w;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cell;
+
+    #[test]
+    fn cell_new_stores_newline_as_hidden_escape() {
+        let cell = Cell::new("a\nb");
+
+        assert_eq!(cell.content, "ab");
+        assert_eq!(cell.escape_sequences.len(), 1);
+        assert_eq!(cell.escape_sequences[0].seq, "\n");
+        assert_eq!(cell.escape_sequences[0].start, 1);
+        assert_eq!(cell.escape_sequences[0].len, 1);
+    }
+
+    #[test]
+    fn raw_content_reinserts_hidden_escapes() {
+        let cell = Cell::new("a\nb\x1b[31mc");
+
+        assert_eq!(cell.content, "abc");
+        assert_eq!(cell.raw_content(), "a\nb\x1b[31mc");
     }
 }
 

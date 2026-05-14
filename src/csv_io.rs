@@ -15,9 +15,15 @@ fn parse_by_newline(block: &str) -> Vec<String> {
     let mut line = String::new();
     let mut is_quoted = false;
     
-    for c in block.chars() {
+    let mut chars = block.chars().peekable();
+    while let Some(c) = chars.next() {
         match c {
             '"' => {
+                if is_quoted && chars.peek() == Some(&'"') {
+                    line.push(c);
+                    line.push(chars.next().unwrap());
+                    continue;
+                }
                 is_quoted = !is_quoted;
                 line.push(c);
             }
@@ -26,6 +32,8 @@ fn parse_by_newline(block: &str) -> Vec<String> {
                 if !is_quoted {
                     parsed.push(line.clone());
                     line.clear();
+                } else {
+                    line.push(c);
                 }
             }
             _ => {
@@ -50,9 +58,15 @@ fn parse_by_delim(line: &str, delim: char) -> Vec<Cell> {
         _ => delim
     };
 
-    for c in line.chars() {
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
         match c {
             '"' => {
+                if is_quoted && chars.peek() == Some(&'"') {
+                    cell_str.push(c);
+                    chars.next();
+                    continue;
+                }
                 is_quoted = !is_quoted;
             }
             ch if ch == delim && ch != '"' && !is_quoted => {
@@ -67,6 +81,19 @@ fn parse_by_delim(line: &str, delim: char) -> Vec<Cell> {
     let cell = Cell::new(&cell_str);
     parsed.push(cell);
     parsed
+}
+
+fn serialize_cell(cell: &Cell, delim: char) -> String {
+    let content = cell.raw_content();
+    let should_quote = content.contains(delim)
+        || content.contains('\n')
+        || content.contains('"');
+
+    if should_quote {
+        format!("\"{}\"", content.replace('"', "\"\""))
+    } else {
+        content
+    }
 }
 
 const POWERS_OF_26: [u32; 7] = [
@@ -322,11 +349,7 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
         let header = &cells.header;
         for i in 0..header.len() {
             let cell = header.get(i).unwrap();
-            if cell.content.contains(delim) {
-                sheet.push_str(&format!("\"{}\"", cell.content));
-            } else {
-                sheet.push_str(&cell.content);
-            }
+            sheet.push_str(&serialize_cell(cell, delim));
 
             if i != header.len() - 1 {
                 sheet.push(delim);
@@ -340,11 +363,7 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
         for j in 0..cells.num_cols() {
             let column = cells.get_column(j);
             let cell = column.get_cell(i);
-            if cell.content.contains(delim) {
-                row.push_str(&format!("\"{}\"", cell.content));
-            } else {
-                row.push_str(&cell.content);
-            }
+            row.push_str(&serialize_cell(cell, delim));
             if j != cells.num_cols() - 1 {
                 row.push(delim);
             }
@@ -362,6 +381,79 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
             Ok(format!("Wrote {} to file", cells.filename))
         }
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{load_csv, parse_csv_into_cells, write_to_file};
+    use crate::cells::{Cell, Cells, Column};
+    use std::{
+        env, fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn test_path(name: &str) -> String {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        env::temp_dir()
+            .join(format!("csview_{name}_{}_{}.csv", std::process::id(), nonce))
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn one_cell_sheet(filename: String, cell: Cell) -> Cells {
+        let header = vec![Cell::new("col")];
+        let col_ids = vec![Cell::new("A")];
+        let mut cells = Cells::new(filename, ',', header, col_ids, 1);
+        let mut col = Column::new();
+        col.push_cell(cell);
+        cells.push_column(col);
+        cells.set_w_cell(0, 0);
+        cells
+    }
+
+    #[test]
+    fn quoted_newlines_are_loaded_as_hidden_escapes() {
+        let mut cells = parse_csv_into_cells(
+            "test.csv".to_string(),
+            "col\n\"a\nb\"".to_string(),
+            ',',
+        )
+        .unwrap();
+
+        let cell = cells.get_column(0).get_cell(0);
+        assert_eq!(cell.content, "ab");
+        assert_eq!(cell.raw_content(), "a\nb");
+    }
+
+    #[test]
+    fn save_quotes_hidden_newlines_and_embedded_quotes() {
+        let path = test_path("save_quotes");
+        let mut cells = one_cell_sheet(path.clone(), Cell::new("a\n\"b\""));
+
+        write_to_file(&mut cells).unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(saved, "col\n\"a\n\"\"b\"\"\"");
+    }
+
+    #[test]
+    fn multiline_cell_round_trips_through_file() {
+        let path = test_path("round_trip");
+        fs::write(&path, "col\n\"a\nb\"").unwrap();
+
+        let mut cells = load_csv(path.clone(), ',').unwrap();
+        write_to_file(&mut cells).unwrap();
+        let mut reloaded = load_csv(path.clone(), ',').unwrap();
+        let _ = fs::remove_file(&path);
+
+        let cell = reloaded.get_column(0).get_cell(0);
+        assert_eq!(cell.content, "ab");
+        assert_eq!(cell.raw_content(), "a\nb");
     }
 }
 
