@@ -153,6 +153,8 @@ pub fn process_input(
                         _ => (),
                     }
                 }
+                // ctrl + r (rename)
+                // [18] => {
                 // ctrl + s (save)
                 [19] => {
                     let cells = csvs.get_cells();

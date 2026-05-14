@@ -2357,7 +2357,18 @@ impl WinInfo {
         // get value closest to focus
         let mut diff_idx = {
             let mut i = 0usize;
-            let mut dv = cmp_values[i];
+            let mut dv = match cmp_values.get(i) {
+                Some(value) => *value,
+                None => {
+                    print_bottom!(
+                        self,
+                        "No matching cells"
+                    );
+                    self.flush();
+                    return;
+                }
+            };
+
             let mut diff = dv.max(self.h_pointer) - dv.min(self.h_pointer);
             for _ in 1..cmp_values.len() {
                 dv = cmp_values[i + 1];
