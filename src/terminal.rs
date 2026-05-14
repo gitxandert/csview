@@ -337,6 +337,7 @@ impl WinInfo {
     pub fn paste(&mut self, cells: &mut Cells) {
         let cell = cells.w_cell();
         cell.content = self.yanked.clone();
+        cell.escape_sequences.clear();
         self.set_focused(&cell.content);
         self.draw_focus(cells);
         cells.written = true;
@@ -351,6 +352,7 @@ impl WinInfo {
         for i in (buf.gap_start + buf.gap_len)..buf.data.len() {
             cell.content.push(buf.data[i]);
         }
+        cell.escape_sequences.clear();
         cell.text_offset = 0;
         self.changed = WinChange::Cell;
     }
@@ -3649,4 +3651,3 @@ pub fn install_panic_hook() {
         std::process::exit(130);
     }));
 }
-
