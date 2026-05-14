@@ -210,8 +210,9 @@ macro_rules! print_bottom {
             $self.height,
             $($args),*
         );
+        let fit: String = formatted_string.chars().take($self.width).collect();
         
-        $self.push_str_to_frame(&formatted_string);
+        $self.push_str_to_frame(&fit);
     };
 }
 
@@ -1425,6 +1426,17 @@ impl WinInfo {
                 }
             },
             "dup" | "duplicate" => self.col_dup(csvs.get_cells()),
+            "fb"  | "filterby"  => {
+                match tokens.next() {
+                    Some(col) => self.col_filterby(csvs.get_cells(), &col),
+                    None => cmd_err::print(
+                                CmdErr::MissingValue(subcmd),
+                                self.height
+                            ),
+                }
+            }
+            "up"  | "upper" => self.col_up(csvs.get_cells()),
+            "lo"  | "lower" => self.col_lo(csvs.get_cells()),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd),
                     self.height
@@ -1490,11 +1502,8 @@ impl WinInfo {
             }
             "g" | "goto" => {
                 match tokens.next() {
-                    None => cmd_err::print(
-                                CmdErr::MissingLocation(subcmd),
-                                self.height
-                            ),
-                    Some(loc) => self.goto_row(csvs.get_cells(), &loc),
+                    None => self.goto_row(csvs.get_cells(), None),
+                    Some(loc) => self.goto_row(csvs.get_cells(), Some(&loc)),
                 }
             }
             "n" | "num" => self.show_row_num(),
@@ -2491,7 +2500,78 @@ impl WinInfo {
         );
         self.flush();
     }
+
+    fn col_filterby(&mut self, cells: &mut Cells, cols: &str) {
+        let col_idx = match cells.get_col_idx(cols) {
+            Err(e) => {
+                cmd_err::print(
+                    e, self.height
+                );
+                return;
+            }
+            Ok(i) => i,
+        };
+        let col = cells.get_column(col_idx);
+        let mut u_vals = Vec::<String>::new();
+        for i in 0..col.len() {
+            let cell = col.get_cell(i);
+            let mut u = true;
+            for uv in &u_vals {
+                if uv == &cell.content {
+                    u = false;
+                    break;
+                }
+            }
+            if u {
+                u_vals.push(cell.content.clone());
+            }
+        }
+        
+        let mut num_filt = 0;
+        let cur = cells.get_column(self.w_pointer);
+        for i in 0..cur.len() {
+            let cell = cur.get_cell(i);
+            for uv in &u_vals {
+                if uv == &cell.content {
+                    cell.content.clear();
+                    num_filt += 1;
+                }
+            }
+        }
+
+        cells.written = true;
+        self.draw_from_column(cells);
+        print_bottom!(
+            self,
+            "Filtered {} rows",
+            num_filt
+        );
+        self.flush();
+    }
+
+    fn col_up(&mut self, cells: &mut Cells) {
+        let col = cells.get_column(self.w_pointer);
+        for i in 0..col.len() {
+            let cell = col.get_cell(i);
+            cell.content = cell.content.to_uppercase();
+        }
+        cells.written = true;
+        self.draw_from_column(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
     
+    fn col_lo(&mut self, cells: &mut Cells) {
+        let col = cells.get_column(self.w_pointer);
+        for i in 0..col.len() {
+            let cell = col.get_cell(i);
+            cell.content = cell.content.to_lowercase();
+        }
+        cells.written = true;
+        self.draw_from_column(cells);
+        self.draw_focused_content();
+        self.flush();
+    }
     // row functions
     //
     fn print_row_count(&mut self) {
@@ -2779,21 +2859,30 @@ impl WinInfo {
         self.flush();
     }
 
-    fn goto_row(&mut self, cells: &mut Cells, loc: &str) {
-        let i = match Self::str_to_dec(loc) {
-            Ok(index) => index,
-            Err(e) => {
-                cmd_err::print(e, self.height);
-                return;
-            }
+    fn goto_row(&mut self, cells: &mut Cells, loc: Option<&str>) {
+        let i = {
+            match loc {
+                Some(l) => {
+                    match Self::str_to_dec(l) {
+                        Ok(index) => {
+                            if index >= self.num_rows {
+                                cmd_err::print(
+                                    CmdErr::InvalidIndex(index),
+                                    self.height
+                                );
+                                return;
+                            }
+                            index
+                        }
+                        Err(e) => {
+                            cmd_err::print(e, self.height);
+                            return;
+                        }
+                    }
+                }
+                None => self.num_rows.saturating_sub(1),
+            } 
         };
-        if i >= self.num_rows {
-            cmd_err::print(
-                CmdErr::InvalidIndex(i),
-                self.height
-            );
-            return;
-        }
         self.set_h_pointer(i);
         self.draw_screen(cells);
         self.draw_focused_content();
