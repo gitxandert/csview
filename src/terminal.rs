@@ -619,7 +619,7 @@ impl WinInfo {
         let mut col_width = col_name.width + 3; // + 3 for formatting
         while start + col_width < self.width {
             let take = col_name.text_offset + col_name.width.min(col_name.len());
-            let content = &col_name.content[col_name.text_offset..take];
+            let content = col_name.content.chars().skip(col_name.text_offset).take(take).collect::<String>();
             let positioned = format!(
                 "\x1b[30;47m {:<width$} |\x1b[39;49m", 
                 content, width = col_name.width
