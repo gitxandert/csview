@@ -190,7 +190,7 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
 pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
     let mut file = fs::read_to_string(filename.clone())?;
     // don't parse carriage returns
-    file = file.replace("\r", "\n");
+    file = file.replace("\r", " ");
 
     let cells = parse_csv_into_cells(filename, file, delim)?;
 
