@@ -587,6 +587,130 @@ impl WinInfo {
         }
     }
     
+    fn build_focused_content_rows(&self, raw_content: &str) -> Vec<String> {
+        let width = self.width.max(1);
+        let mut rows = Vec::<String>::new();
+        let mut current_row = String::new();
+        let mut active_formatting = String::new();
+        let mut col = 0usize;
+        let mut chars = raw_content.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            match c {
+                '\x1b' => {
+                    let mut seq = String::from(c);
+                    while let Some(next) = chars.next() {
+                        seq.push(next);
+                        if ('@'..='~').contains(&next) {
+                            break;
+                        }
+                    }
+
+                    if seq.ends_with('m') {
+                        if seq == "\x1b[m" || seq == "\x1b[0m" {
+                            active_formatting.clear();
+                        } else {
+                            active_formatting.push_str(&seq);
+                        }
+                    }
+
+                    current_row.push_str(&seq);
+                }
+                '\n' => {
+                    rows.push(current_row);
+                    current_row = active_formatting.clone();
+                    col = 0;
+                }
+                _ => {
+                    current_row.push(c);
+                    col += 1;
+                    if col >= width {
+                        rows.push(current_row);
+                        current_row = active_formatting.clone();
+                        col = 0;
+                    }
+                }
+            }
+        }
+
+        rows.push(current_row);
+        rows
+    }
+
+    fn draw_focused_content_page(&mut self, rows: &[String], row_offset: usize) {
+        let mut display_content = String::new();
+
+        for (i, row) in rows.iter().skip(row_offset).take(self.height).enumerate() {
+            if i > 0 {
+                display_content.push('\r');
+                display_content.push('\n');
+            }
+            display_content.push_str(row);
+        }
+
+        self.push_str_to_frame(&format!("\x1b[1;1H\x1b[2J{}", display_content));
+        self.flush();
+    }
+
+    pub fn display_focused_content(&mut self, csvs: &mut Csvs) {
+        let raw_content = csvs.get_cells().w_cell().raw_content();
+        let mut rows = self.build_focused_content_rows(&raw_content);
+        let mut row_offset = 0usize;
+
+        self.draw_focused_content_page(&rows, row_offset);
+
+        let mut buf = [0u8; 3];
+        loop {
+            match poll_stdin(&mut buf) {
+                Ok(PollEvent::Sig) => {
+                    match check_flags() {
+                        SigFlag::Winch => {
+                            unsafe {
+                                let mut ws: winsize = mem::zeroed();
+                                if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
+                                    self.width = ws.ws_col as usize;
+                                    self.height = ws.ws_row as usize;
+                                }
+                            }
+                            rows = self.build_focused_content_rows(&raw_content);
+                            row_offset = row_offset.min(rows.len().saturating_sub(1));
+                            self.draw_focused_content_page(&rows, row_offset);
+                        }
+                        SigFlag::Int | SigFlag::Quit => continue, // will never catch
+                        SigFlag::Non => break, // must've been quit/int
+                    }
+                }
+                Ok(PollEvent::Data(0)) => continue,
+                Ok(PollEvent::Data(n)) => {
+                    match &buf[..n] {
+                        [27, 91, 65] => {
+                            row_offset = row_offset.saturating_sub(1);
+                            self.draw_focused_content_page(&rows, row_offset);
+                        }
+                        [27, 91, 66] => {
+                            row_offset = (row_offset + 1).min(rows.len().saturating_sub(1));
+                            self.draw_focused_content_page(&rows, row_offset);
+                        }
+                        _ => break,
+                    }
+                }
+                Err(e) => {
+                    print_bottom!(
+                        self,
+                        "ERR: {}",
+                        e
+                    );
+                    self.flush();
+                }
+            }
+        }
+        
+        self.print_context(csvs);
+        self.draw_screen(csvs.get_cells());
+        self.draw_focused_content();
+        self.flush();
+    }
+    
     fn print_col_ids(&mut self, cells: &mut Cells, mut i: usize, mut start: usize) {
         let col_ids = &cells.col_ids;
         let mut col_id = &col_ids[i];
@@ -685,7 +809,6 @@ impl WinInfo {
         }
         pad_num + con.cells().filename.len()
     }
-
 
     pub fn print_context(&mut self, csvs: &mut Csvs) {
         self.push_str_to_frame(
