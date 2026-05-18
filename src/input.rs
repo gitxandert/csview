@@ -277,6 +277,10 @@ pub fn process_input(
                     }
                     w_info.flush();
                 }
+                // o (open [displays all content of a cell])
+                [111] => {
+                    w_info.display_focused_content(csvs);
+                }
                 // : (command)
                 [58] => {
                     let cells = csvs.get_cells();
