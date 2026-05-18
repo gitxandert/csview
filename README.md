@@ -51,6 +51,8 @@ csview currently admits the following key bindings:
     - paste yanked content to focused cell
 - **ctrl + p**
     - (write mode) paste yanked content at the cursor
+- **o**
+    - display full content of focused cell to the screen
 - **number keys**
     - switch between different files
 
