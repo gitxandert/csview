@@ -510,7 +510,12 @@ impl WinInfo {
     pub fn set_focused(&mut self, focused: &str) {
         self.focused_content.clear();
         let take = focused.len().min(self.width);
-        self.focused_content.push_str(&focused[..take]);
+        let byte_end = focused
+            .char_indices()
+            .nth(take)
+            .map(|(idx, _)| idx)
+            .unwrap_or(take);
+        self.focused_content.push_str(&focused[..byte_end]);
     }
 
     pub fn add_to_write_buffer(&mut self, content: &str) {
@@ -3296,7 +3301,6 @@ impl WinInfo {
 
         if cells.w_cell.0 >= cells.num_cols() {
             cells.w_cell.0 = cells.num_cols().saturating_sub(1);
-            eprintln!("cells.w_cell.0 = {}", cells.w_cell.0);
         }
         
         let new_id = csvs.num_contexts();
