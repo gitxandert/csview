@@ -322,20 +322,20 @@ impl Column {
         let mut u_idx = Vec::<usize>::new();
         for i in 0..self.indices.len() {
             let cur = self.indices[i];
-            if &self.cells[i].content == "" { 
+            if &self.cells[cur].content == "" { 
                 seen_idx.push(cur);
                 continue; 
             }
             
             let mut s = 0;
             for _ in 0..seen.len() {
-                if &self.cells[i].content == &seen[s] {
+                if &self.cells[cur].content == &seen[s] {
                     break;
                 }
                 s += 1;
             }
             if s == seen.len() {
-                seen.push(&self.cells[i].content);
+                seen.push(&self.cells[cur].content);
                 u_idx.push(cur);
             } else {
                 seen_idx.push(cur);
