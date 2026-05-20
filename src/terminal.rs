@@ -3421,7 +3421,7 @@ impl WinInfo {
                             );
                             return;
                         }
-                        if num > csvs.num_contexts() {
+                        if num >= csvs.num_contexts() {
 
                             cmd_err::print(
                                 CmdErr::InvalidConId(r),
@@ -3516,39 +3516,22 @@ impl WinInfo {
         self.flush();
     }
 
-    fn splice_rows(&mut self, con_id: usize, at_row: usize, csvs: &mut Csvs) {
-        // insert rows from csvs.context[[con_id]
-        // after the focused column;
-        // if the column names are different,
-        // create new columns
-        let mut src_con = csvs.remove_context(con_id);
-        let src_cells = src_con.cells();
-        src_cells.w_cell().is_focused = false;
-        let dest_cells = csvs.get_cells();
-       
+    fn splice_rows_into(dest_cells: &mut Cells, src_cells: &mut Cells, at_row: usize) {
         let num_rows = src_cells.num_rows();
         let st = at_row + 1;
-        let end = st + num_rows;
+        let dest_num_rows = dest_cells.num_rows();
         for i in 0..dest_cells.num_cols() {
             let col = &mut dest_cells.columns[i];
             col.reindex();
-            let dest_name = &dest_cells.header[i].content;
+            let dest_name = dest_cells.header[i].content.clone();
             let mut j = 0usize;
-            let mut found = false;
-            loop {
-                // loop through src column names
-                let src_name = match src_cells.header.get(j) {
-                    Some(name) => {
-                        if !found { found = true; }
-                        &name.content
-                    }
-                    None => break,
-                };
-                if src_name == dest_name {
+            let mut matched = false;
+            while j < src_cells.num_cols() {
+                if src_cells.header[j].content == dest_name {
                     let mut src_col = src_cells.columns.remove(j);
                     src_col.reindex();
                     let _ = src_cells.header.remove(j);
-                    if st >= self.num_rows {
+                    if st >= dest_num_rows {
                         col.cells.append(&mut src_col.cells);
                     } else {
                         let mut end_of_col = col.cells.split_off(st);
@@ -3556,20 +3539,21 @@ impl WinInfo {
                         col.cells.append(&mut end_of_col);
                     }
                     col.indices = (0..col.len()).collect();
+                    matched = true;
                     break;
                 }
                 j += 1;
             }
 
             // if no matching src_col, then we still need to pad dest_col
-            if j == src_cells.num_cols() && !found {
-                if st >= self.num_rows {
-                    for _ in st..end {
+            if !matched {
+                if st >= dest_num_rows {
+                    for _ in 0..num_rows {
                         col.push_cell(Cell::new(""));
                     }
                 } else {
                     let mut end_of_col = col.cells.split_off(st);
-                    for _ in st..end {
+                    for _ in 0..num_rows {
                         col.push_cell(Cell::new(""));
                     }
                     col.cells.append(&mut end_of_col);
@@ -3590,18 +3574,49 @@ impl WinInfo {
                 dest_col.push_cell(Cell::new(""));
             }
             dest_col.cells.append(&mut src_col.cells);
-            for _ in end + 1..dest_cells.num_rows() {
+            while dest_col.len() < dest_cells.num_rows() {
                 dest_col.push_cell(Cell::new(""));
             }
             dest_col.indices = (0..dest_col.len()).collect();
             dest_cells.push_column(dest_col);
-            self.num_cols += 1
         }
+
+        Self::pad_columns_to_same_row_count(dest_cells);
+    }
+
+    fn pad_columns_to_same_row_count(cells: &mut Cells) {
+        let row_count = cells
+            .columns
+            .iter()
+            .map(|col| col.len())
+            .max()
+            .unwrap_or(0);
+
+        for col in &mut cells.columns {
+            while col.len() < row_count {
+                col.push_cell(Cell::new(""));
+            }
+            col.indices = (0..col.len()).collect();
+        }
+    }
+
+    fn splice_rows(&mut self, con_id: usize, at_row: usize, csvs: &mut Csvs) {
+        // insert rows from csvs.context[[con_id]
+        // after the focused column;
+        // if the column names are different,
+        // create new columns
+        let mut src_con = csvs.remove_context(con_id);
+        let src_cells = src_con.cells();
+        src_cells.w_cell().is_focused = false;
+        let dest_cells = csvs.get_cells();
+       
+        Self::splice_rows_into(dest_cells, src_cells, at_row);
         
         dest_cells.written = true;
         
-        self.num_rows += num_rows;
-        self.draw_rows(dest_cells);
+        self.num_rows = dest_cells.num_rows();
+        self.num_cols = dest_cells.num_cols();
+        self.draw_screen(dest_cells);
 
         self.print_context(csvs);
         self.draw_focused_content();
@@ -3693,6 +3708,143 @@ pub fn raw_mode(switch: bool) {
         };
         write!(out, "{}", outstring).unwrap();
         out.flush().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cells_with_rows(filename: &str, headers: Vec<&str>, rows: Vec<Vec<&str>>) -> Cells {
+        let num_cols = headers.len();
+        let header = headers
+            .into_iter()
+            .map(Cell::new)
+            .collect::<Vec<Cell>>();
+        let col_ids = make_col_ids(num_cols);
+        let mut cells = Cells::new(filename.to_string(), ',', header, col_ids, num_cols);
+
+        for _ in 0..num_cols {
+            cells.push_column(Column::new());
+        }
+
+        for row in rows {
+            for col_idx in 0..num_cols {
+                let content = row.get(col_idx).copied().unwrap_or("");
+                cells.push_to_col(col_idx, Cell::new(content));
+            }
+        }
+
+        cells.set_w_cell(0, 0);
+        cells
+    }
+
+    fn cells_with_generated_rows(filename: &str, headers: Vec<&str>, row_count: usize) -> Cells {
+        let num_cols = headers.len();
+        let header = headers
+            .iter()
+            .map(|name| Cell::new(name))
+            .collect::<Vec<Cell>>();
+        let col_ids = make_col_ids(num_cols);
+        let mut cells = Cells::new(filename.to_string(), ',', header, col_ids, num_cols);
+
+        for _ in 0..num_cols {
+            cells.push_column(Column::new());
+        }
+
+        for row_idx in 0..row_count {
+            for col_idx in 0..num_cols {
+                let content = format!("{}-{row_idx}", headers[col_idx]);
+                cells.push_to_col(col_idx, Cell::new(&content));
+            }
+        }
+
+        cells.set_w_cell(0, 0);
+        cells
+    }
+
+    fn column_values(cells: &Cells, idx: usize) -> Vec<&str> {
+        (0..cells.columns[idx].len())
+            .map(|row| cells.columns[idx].view_cell(row))
+            .collect()
+    }
+
+    #[test]
+    fn splice_rows_pads_columns_when_headers_do_not_match() {
+        let mut dest = cells_with_rows(
+            "dest.csv",
+            vec!["A", "B"],
+            vec![vec!["a0", "b0"], vec!["a1", "b1"]],
+        );
+        let mut src = cells_with_rows(
+            "src.csv",
+            vec!["A", "C"],
+            vec![vec!["a2", "c2"], vec!["a3", "c3"]],
+        );
+
+        WinInfo::splice_rows_into(&mut dest, &mut src, 0);
+
+        assert_eq!(dest.num_rows(), 4);
+        assert_eq!(dest.num_cols(), 3);
+        assert!(dest.columns.iter().all(|col| col.len() == 4));
+        assert_eq!(column_values(&dest, 0), vec!["a0", "a2", "a3", "a1"]);
+        assert_eq!(column_values(&dest, 1), vec!["b0", "", "", "b1"]);
+        assert_eq!(column_values(&dest, 2), vec!["", "c2", "c3", ""]);
+    }
+
+    #[test]
+    fn splice_rows_handles_wider_source_when_match_is_not_first_column() {
+        let mut dest = cells_with_rows(
+            "dest.csv",
+            vec!["B"],
+            vec![vec!["b0"], vec!["b1"]],
+        );
+        let mut src = cells_with_rows(
+            "src.csv",
+            vec!["A", "B", "C"],
+            vec![vec!["a2", "b2", "c2"], vec!["a3", "b3", "c3"]],
+        );
+
+        WinInfo::splice_rows_into(&mut dest, &mut src, 0);
+
+        assert_eq!(dest.num_rows(), 4);
+        assert_eq!(dest.num_cols(), 3);
+        assert!(dest.columns.iter().all(|col| col.len() == 4));
+        assert_eq!(column_values(&dest, 0), vec!["b0", "b2", "b3", "b1"]);
+        assert_eq!(column_values(&dest, 1), vec!["", "a2", "a3", ""]);
+        assert_eq!(column_values(&dest, 2), vec!["", "c2", "c3", ""]);
+    }
+
+    #[test]
+    fn splice_rows_can_draw_after_wider_source_with_many_rows() {
+        let mut dest = cells_with_generated_rows(
+            "dest.csv",
+            vec!["PID", "MRN", "StudyDateTime"],
+            65,
+        );
+        let mut src = cells_with_generated_rows(
+            "src.csv",
+            vec!["pid", "timepoint", "accession_date", "report", "summary"],
+            381,
+        );
+
+        WinInfo::splice_rows_into(&mut dest, &mut src, 0);
+
+        let rows = dest.num_rows();
+        assert_eq!(rows, 446);
+        assert_eq!(dest.num_cols(), 8);
+        for (idx, col) in dest.columns.iter().enumerate() {
+            assert_eq!(col.len(), rows, "column {idx} has mismatched length");
+            assert_eq!(col.indices.len(), rows, "column {idx} has mismatched indices");
+        }
+
+        let mut win = WinInfo::new();
+        win.width = 200;
+        win.height = 24;
+        win.num_cols = dest.num_cols();
+        win.num_rows = rows;
+        win.set_h_pointer(378);
+        win.draw_screen(&mut dest);
     }
 }
 
