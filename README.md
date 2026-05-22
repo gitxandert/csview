@@ -170,5 +170,10 @@ csview also has a command mode, accessed through ':' :
         - loc is the column name/id or row index/id of the focused sheet to splice at
     - `sh r {target} {new}` | `sheet replace {target} {new}`
         - replaces the target value with a new one across the entire sheet
+    - `sh f {term} {arguments}` | `sheet find {term} {arguments}`
+        - finds the provided term across the entire sheet
+        - arguments are preceded by dashes and include:
+            - -i/--case-insensitive: case-insensitive search
+            - -f/--filter: filters the sheet to only the rows that contain the term
 - **ctrl + q**
     - quits command mode
