@@ -3109,9 +3109,7 @@ impl WinInfo {
     fn sift_by(&mut self, cells: &mut Cells, col_name: &str) {
          match cells.get_col_idx(col_name) {
             Err(e) => {
-                cmd_err::print(
-                    e, self.height
-                );
+                cmd_err::print(e, self.height);
                 return;
             }
             Ok(col_idx) => {
@@ -3754,9 +3752,29 @@ impl WinInfo {
 
             cells.w_cell().is_focused = false;
             self.num_rows = new_indices.len();
+            
+            let mut hidden = Vec::<usize>::new();
+            let mut cur = 0;
+            for i in 0..cells.num_rows() {
+                match new_indices.get(cur) {
+                    Some(val) => {
+                        if *val == i {
+                            cur += 1;
+                            continue;
+                        }
+                    }
+                    _ => (),
+                }
+                hidden.push(i);
+            }
+            let padding = hidden.len();
+            let cell_len = cells.num_rows();
+            for i in 0..padding {
+                new_indices.push(cell_len + i);
+            }
+            new_indices.append(&mut hidden);
 
             for col in &mut cells.columns {
-                let padding = col.len() - self.num_rows;
                 for _ in 0..padding {
                     col.push_cell(Cell::new(""));
                 }
