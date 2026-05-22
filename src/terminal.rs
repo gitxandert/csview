@@ -1658,20 +1658,16 @@ impl WinInfo {
         
         match subcmd {
             "s" | "sortby" => {
-                let mut tokens = tokens.into_iter();
-                for _ in 0..2 {
-                    let _ = tokens.next();
-                }
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingName(tok),
                                 self.height
                             ),
                     Some(col) => {
-                        let s_dir = match tokens.next() {
+                        let s_dir = match tokens.get(3) {
                             None => Sort::AscAlph,
                             Some(dir) => {
-                                match dir {
+                                match *dir {
                                     "a" => Sort::AscAlph,
                                     "r" | "ar" => Sort::DescAlph,
                                     "n" => Sort::AscNum,
@@ -1695,22 +1691,31 @@ impl WinInfo {
                 }
             }
             "sf" | "siftby" => {
-                let mut tokens = tokens.into_iter();
-                for _ in 0..2 {
-                    let _ = tokens.next();
-                }
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingName(tok),
                                 self.height
                             ),
-                    Some(col) => self.sift_by(csvs.get_cells(), &col),
+                    Some(col) => self.sift_by(csvs.get_cells(), col),
                 }
             }
             "rv" | "revert" => self.revert_sheet(csvs.get_cells()),
             "sl" | "slice" => self.slice(tokens, csvs),
             "sp" | "splice" => self.splice(tokens, csvs),
             "r"  | "replace" => self.replace_in_sheet(tokens, csvs.get_cells()),
+            "f"  | "find" => {
+                match tokens.get(2) {
+                    None => cmd_err::print(
+                                CmdErr::MissingValue(tok),
+                                self.height
+                            ),
+                    Some(term) => self.find_in_sheet(
+                                    csvs.get_cells(),
+                                    term,
+                                    tokens
+                                )
+                }
+            }
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd), 
                     self.height
@@ -1899,6 +1904,20 @@ impl WinInfo {
     fn draw_col_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<usize>, mess: &str) {
         self.set_h_pointer(indices[idx]);
         self.show_csv(cells);
+        print_bottom!(
+            self, 
+            "{}/{} {}",
+            idx + 1, 
+            indices.len(),
+            mess
+        );
+        self.flush();
+    }
+    
+    fn draw_sheet_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<(usize, usize)>, mess: &str) {
+        self.set_w_pointer(indices[idx].0);
+        self.set_h_pointer(indices[idx].1);
+        self.draw_screen(cells);
         print_bottom!(
             self, 
             "{}/{} {}",
@@ -3662,6 +3681,162 @@ impl WinInfo {
         self.draw_from_column(cells);
         self.draw_focused_content();
         self.flush();
+    }
+
+    fn find_in_sheet(&mut self, cells: &mut Cells, term: &str, options: Vec<&str>) {
+        let mut term = Self::trim_quotes(term);
+        let mut filter = false;
+        let mut insensitive = true;
+      
+        for i in 3..options.len() {
+            match options[i] {
+                "-f" | "--filter" => filter = true,
+                "-i" | "--case-insensitive" => {
+                    term = term.to_lowercase();
+                    insensitive = true;
+                }
+                _ => {
+                    cmd_err::print(
+                        CmdErr::InvalidOption(options[i]),
+                        self.height
+                    );
+                    return;
+                }
+            }
+        }
+
+        let mut cols_rows = Vec::<(usize, usize)>::new();
+        for i in 0..cells.num_cols() {
+            let col = cells.get_column(i);
+            for j in 0..col.len() {
+                let cell = col.get_cell(j);
+                match insensitive {
+                    true => {
+                        if cell.content.to_lowercase().contains(&term) {
+                            cols_rows.push((i,j));
+                        }
+                    }
+                    false => {
+                        if cell.content.contains(&term) {
+                            cols_rows.push((i,j));
+                        }
+                    }
+                };
+            }
+        }
+
+        if cols_rows.len() == 0 {
+            print_bottom!(
+                self,
+                "'{}' not found in sheet",
+                term
+            );
+            return;
+        }
+
+        if filter {
+            let mut new_indices = Vec::with_capacity(cols_rows.len());
+            let mut new_idx = 0usize;
+            let mut prev_idx = cols_rows[0].1;
+            for i in 0..cols_rows.len() {
+                let cur_idx = cols_rows[i].1;
+                new_indices.push(cur_idx);
+                if cur_idx != prev_idx {
+                    new_idx += 1;
+                }
+                cols_rows[i].1 = new_idx;
+                prev_idx = cur_idx;
+            }
+
+            new_indices.sort();
+            new_indices.dedup();
+
+            self.num_rows = new_indices.len();
+
+            for col in &mut cells.columns {
+                let padding = col.len() - self.num_rows;
+                for _ in 0..padding {
+                    col.push_cell(Cell::new(""));
+                }
+                col.padding = padding;
+                col.indices = new_indices.clone();
+            }
+            cells.set_w_cell(cols_rows[0].0, cols_rows[0].1);
+            cells.written = true;
+        }
+                
+        // hide cursor
+        self.push_str_to_frame("\x1b[?25l");
+
+        let mut idx = 0;
+        self.draw_sheet_find(
+            cells, 
+            idx, 
+            &cols_rows,
+            ""
+        );
+        let mut buf = [0u8; 1];
+        loop {
+            match poll_stdin(&mut buf) {
+                Ok(PollEvent::Sig) => {
+                    match check_flags() {
+                        SigFlag::Winch => {
+                            unsafe {
+                                let mut ws: winsize = mem::zeroed();
+                                if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
+                                    self.width = ws.ws_col as usize;
+                                    self.height = ws.ws_row as usize;
+                                }
+                            }
+                        }
+                        SigFlag::Int | SigFlag::Quit => continue, // will never catch
+                        SigFlag::Non => break, // must've been quit/int
+                    }
+                }
+                Ok(PollEvent::Data(0)) => continue,
+                Ok(PollEvent::Data(n)) => {
+                    match &buf[..n] {
+                        [b'n'] => {
+                            idx = (idx + 1) % cols_rows.len();
+                            self.draw_sheet_find(
+                                cells, 
+                                idx, 
+                                &cols_rows,
+                                ""
+                            );
+                            buf = [0u8];
+                        }
+                        [b'b'] => {
+                            if idx == 0 {
+                                idx = cols_rows.len() - 1;
+                            } else {
+                                idx -= 1;
+                            }
+                            self.draw_sheet_find(
+                                cells, 
+                                idx, 
+                                &cols_rows,
+                                ""
+                            );
+                            buf = [0u8];
+                        }
+                        _ => {
+                            self.draw_focused_content();
+                            self.flush();
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    print_bottom!(
+                        self,
+                        "ERR: {}",
+                        e
+                    );
+                    self.flush();
+                }
+            }
+        }
     }
 }
 
