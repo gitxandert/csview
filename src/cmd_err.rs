@@ -7,6 +7,7 @@ pub enum CmdErr<'a> {
     InvalidDec(&'a str),
     InvalidHex(char),
     InvalidIndex(usize),
+    InvalidOption(&'a str),
     // InvalidRange(&'a str),
     InvalidSubCmd(&'a str),
     MissingConId(&'a str),
@@ -58,6 +59,11 @@ pub fn print(err: CmdErr, line: usize) {
 
             CmdErr::InvalidIndex(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: index '{}' is out of bounds",
+                    line, t
+                ),
+            
+            CmdErr::InvalidOption(t) => format!(
+                    "\x1b[{};1H\x1b[2KERR: invalid option '{}'",
                     line, t
                 ),
 
