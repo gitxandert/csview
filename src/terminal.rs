@@ -3736,21 +3736,23 @@ impl WinInfo {
 
         if filter {
             let mut new_indices = Vec::with_capacity(cols_rows.len());
-            let mut new_idx = 0usize;
-            let mut prev_idx = cols_rows[0].1;
             for i in 0..cols_rows.len() {
-                let cur_idx = cols_rows[i].1;
-                new_indices.push(cur_idx);
-                if cur_idx != prev_idx {
-                    new_idx += 1;
-                }
-                cols_rows[i].1 = new_idx;
-                prev_idx = cur_idx;
+                new_indices.push(cols_rows[i].1);
             }
 
             new_indices.sort();
             new_indices.dedup();
 
+            for i in 0..cols_rows.len() {
+                for j in 0..new_indices.len() {
+                    if cols_rows[i].1 == new_indices[j] {
+                        cols_rows[i].1 = j;
+                        break;
+                    }
+                }
+            }
+
+            cells.w_cell().is_focused = false;
             self.num_rows = new_indices.len();
 
             for col in &mut cells.columns {
@@ -3820,11 +3822,7 @@ impl WinInfo {
                             );
                             buf = [0u8];
                         }
-                        _ => {
-                            self.draw_focused_content();
-                            self.flush();
-                            break;
-                        }
+                        _ => break,
                     }
                 }
                 Err(e) => {
@@ -3837,6 +3835,8 @@ impl WinInfo {
                 }
             }
         }
+        self.draw_focused_content();
+        self.flush();
     }
 }
 
