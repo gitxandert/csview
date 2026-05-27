@@ -264,13 +264,22 @@ impl Column {
     pub fn remove_cell(&mut self, idx: usize) -> Cell {
         let real_idx = self.indices[idx];
         let cell = self.cells.remove(real_idx);
+
         for i in 0..idx {
-            self.indices[i] -= (self.indices[i] >= real_idx) as usize;
+            if self.indices[i] > real_idx {
+                self.indices[i] -= 1;
+            }
         }
-        for i in ((idx + 1)..self.indices.len()).rev() {
-            self.indices[i - 1] = self.indices[i];
-            self.indices[i - 1] -= (self.indices[i - 1] >= real_idx) as usize;
+
+        for i in idx + 1..self.indices.len() {
+            let shifted = self.indices[i];
+            self.indices[i - 1] = if shifted > real_idx {
+                shifted - 1
+            } else {
+                shifted
+            };
         }
+
         self.indices.pop();
         cell
     }
