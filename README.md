@@ -175,5 +175,7 @@ csview also has a command mode, accessed through ':' :
         - arguments are preceded by dashes and include:
             - -i/--case-insensitive: case-insensitive search
             - -f/--filter: filters the sheet to only the rows that contain the term
+    - `sh rn {new_name}` | `sheet rename {new_name}`
+        - renames the current sheet to the provided new_name
 - **ctrl + q**
     - quits command mode
