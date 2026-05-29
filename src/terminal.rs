@@ -410,7 +410,7 @@ impl WinInfo {
                 self.height = ws.ws_row as usize;
             }
             self.draw_screen(csvs.get_cells());
-            self.print_context(csvs);
+            self.draw_context(csvs);
             self.draw_focused_content();
             self.flush();
         }
@@ -710,7 +710,7 @@ impl WinInfo {
             }
         }
         
-        self.print_context(csvs);
+        self.draw_context(csvs);
         self.draw_screen(csvs.get_cells());
         self.draw_focused_content();
         self.flush();
@@ -815,7 +815,7 @@ impl WinInfo {
         pad_num + con.cells().filename.len()
     }
 
-    pub fn print_context(&mut self, csvs: &mut Csvs) {
+    pub fn draw_context(&mut self, csvs: &mut Csvs) {
         self.push_str_to_frame(
             &format!(
                 "\x1b[{};1H\x1b[2K\x1b[0m\x1b[30;47m",
@@ -1714,6 +1714,15 @@ impl WinInfo {
                                     term,
                                     tokens
                                 )
+                }
+            }
+            "rn" | "rename" => {
+                match tokens.get(2) {
+                    None => cmd_err::print(
+                                CmdErr::MissingName(tok),
+                                self.height
+                            ),
+                    Some(name) => self.rename_sheet(csvs, name)
                 }
             }
             _ => cmd_err::print(
@@ -2914,6 +2923,7 @@ impl WinInfo {
             Some(val) => {
                 match *val {
                     "" => self.num_rows - 1,
+                    "_" => self.h_pointer,
                     _ => {
                         match Self::str_to_dec(val) {
                             Ok(v) => {
@@ -3329,7 +3339,7 @@ impl WinInfo {
         csvs.set_handle(new_id);
 
         self.set_context(csvs.get_context());
-        self.print_context(csvs);
+        self.draw_context(csvs);
         self.changed = WinChange::Screen;
         self.show_csv(csvs.get_cells());
     }
@@ -3407,7 +3417,7 @@ impl WinInfo {
         csvs.set_handle(new_id);
 
         self.set_context(csvs.get_context());
-        self.print_context(csvs);
+        self.draw_context(csvs);
         self.changed = WinChange::Screen;
         self.show_csv(csvs.get_cells());
     }
@@ -3529,7 +3539,7 @@ impl WinInfo {
         self.num_rows = max_rows;
         self.draw_screen(dest_cells);
 
-        self.print_context(csvs);
+        self.draw_context(csvs);
         self.draw_focused_content();
         self.flush();
     }
@@ -3636,7 +3646,7 @@ impl WinInfo {
         self.num_cols = dest_cells.num_cols();
         self.draw_screen(dest_cells);
 
-        self.print_context(csvs);
+        self.draw_context(csvs);
         self.draw_focused_content();
         self.flush();
     }
@@ -3855,6 +3865,23 @@ impl WinInfo {
             }
         }
         self.draw_focused_content();
+        self.flush();
+    }
+
+    fn rename_sheet(&mut self, csvs: &mut Csvs, new_name: &str) {
+        let new_name = Self::trim_quotes(new_name);
+        let cells = csvs.get_cells();
+        let old_name = cells.filename.clone();
+        cells.filename = new_name.clone();
+        cells.written = true;
+        
+        self.draw_context(csvs);
+        print_bottom!(
+            self,
+            "Renamed {} to {}",
+            old_name,
+            new_name
+        );
         self.flush();
     }
 }
