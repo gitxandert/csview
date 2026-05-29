@@ -3224,17 +3224,19 @@ impl WinInfo {
         //
         let cells = csvs.get_cells();
         cells.w_cell().is_focused = false;
-        let mut first = cols[0];
-        if first == "" {
-            first = "A";
-        }
-        let ida = match cells.get_col_idx(first) {
-            Ok(id) => id,
-            Err(e) => {
-                cmd_err::print(
-                    e, self.height
-                );
-                return;
+        let ida = match cols[0] {
+            "" => 0,
+            "_" => self.w_pointer,
+            _ => {
+                match cells.get_col_idx(cols[0]) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        cmd_err::print(
+                            e, self.height
+                        );
+                        return;
+                    }
+                }
             }
         };
         let idb = match cols.get(1) {
@@ -3254,7 +3256,7 @@ impl WinInfo {
                                             );
                                             return;
                                         }
-                                        &cells.header[num].content
+                                        &cells.col_ids[num].content
                                     }
                                     Err(e) => {
                                         cmd_err::print(
