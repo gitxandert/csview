@@ -22,7 +22,7 @@ pub fn process_input(
                             csvs.get_context()
                         );
                         w_info.draw_screen(csvs.get_cells());
-                        w_info.print_context(csvs);
+                        w_info.draw_context(csvs);
                         w_info.draw_focused_content();
                         w_info.flush();
                     }
@@ -153,35 +153,20 @@ pub fn process_input(
                         _ => (),
                     }
                 }
-                // ctrl + r (rename)
-                // [18] => {
                 // ctrl + s (save)
                 [19] => {
                     let cells = csvs.get_cells();
-                    match save_backup(&cells.filename) {
-                        Ok(_) => {
-                            match write_to_file(cells) {
-                                Ok(s) => {
-                                    cells.written = false;
-                                    w_info.push_str_to_frame(
-                                        &format!(
-                                            "\x1b[{};1H\x1b[2K\x1b[0m{}", 
-                                            w_info.height, s.chars().take(w_info.width).collect::<String>()
-                                        )
-                                    );
-                                    w_info.flush();
-                                }
-                                Err(e) => {
-                                    let es = e.to_string();
-                                    w_info.push_str_to_frame(
-                                        &format!(
-                                            "\x1b[{};1H\x1b[2K\x1b[0m{}",
-                                            w_info.height, es.chars().take(w_info.width).collect::<String>()
-                                        )
-                                    );
-                                    w_info.flush();
-                                }
-                            }
+                    let _ = save_backup(&cells.filename);
+                    match write_to_file(cells) {
+                        Ok(s) => {
+                            cells.written = false;
+                            w_info.push_str_to_frame(
+                                &format!(
+                                    "\x1b[{};1H\x1b[2K\x1b[0m{}", 
+                                    w_info.height, s.chars().take(w_info.width).collect::<String>()
+                                )
+                            );
+                            w_info.flush();
                         }
                         Err(e) => {
                             let es = e.to_string();
