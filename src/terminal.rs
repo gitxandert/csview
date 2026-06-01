@@ -1331,9 +1331,8 @@ impl WinInfo {
     }
     
     fn col_cmd(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
-        let mut tokens = tokens.into_iter();
-        let tok = tokens.next().unwrap();
-        let subcmd = match tokens.next() {
+        let tok = tokens[0];
+        let subcmd = match tokens.get(1) {
             None => {
                 cmd_err::print(
                     CmdErr::MissingSubCmd(tok), 
@@ -1341,19 +1340,19 @@ impl WinInfo {
                 );
                 return;
             }
-            Some(sc) => sc,
+            Some(sc) => *sc,
         };
 
         match subcmd {
             "c"  | "count"   => self.print_col_count(),
             "mv" | "move"    => {
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingRange(subcmd), 
                                 self.height
                             ),
                     Some(range) => {
-                        match tokens.next() {
+                        match tokens.get(2) {
                             None => cmd_err::print(
                                         CmdErr::MissingLocation(subcmd),
                                         self.height
@@ -1368,20 +1367,21 @@ impl WinInfo {
                 }
             }
             "f"  | "find"    => {
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingValue(subcmd), 
                                 self.height
                             ),
                     Some(val) => self.find_value_in_col(
                                     csvs, 
-                                    &val
+                                    &val,
+                                    tokens
                                 ),
                                 
                 }
             }
             "n"  | "new"     => {
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingName(subcmd), 
                                 self.height
@@ -1393,7 +1393,7 @@ impl WinInfo {
                 }
             }
             "rm" | "remove"  => {
-                match tokens.next() {
+                match tokens.get(2) {
                     Some(_) => cmd_err::print(
                                     CmdErr::TooManyArgs(subcmd), 
                                     self.height
@@ -1402,7 +1402,7 @@ impl WinInfo {
                 }
             }
             "g"  | "group"   => {
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingList(subcmd), 
                                 self.height
@@ -1416,13 +1416,13 @@ impl WinInfo {
             "u"  | "unique"  => self.show_unique_column_values(csvs),
             "s"  | "sort"    => {
                 let mut s_dir = Sort::AscAlph;
-                match tokens.next() {
+                match tokens.get(2) {
                     None => self.sort_focused_column(
                                             csvs.get_cells(), 
                                             s_dir
                                         ),
                     Some(spec) => {
-                        match spec {
+                        match *spec {
                             "a" => (),
                             "r" | "ar" => s_dir = Sort::DescAlph,
                             "n" => s_dir = Sort::AscNum,
@@ -1446,7 +1446,7 @@ impl WinInfo {
                                     csvs.get_cells()
                                 ),
             "fn" | "fillna" => {
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingValue(subcmd),
                                 self.height
@@ -1458,13 +1458,13 @@ impl WinInfo {
                 }
             }
             "r"  | "replace" => {
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingValue(subcmd),
                                 self.height
                             ),
                     Some(targ) => {
-                        match tokens.next() {
+                        match tokens.get(2) {
                             None => cmd_err::print(
                                         CmdErr::MissingValue(subcmd),
                                         self.height
@@ -1480,7 +1480,7 @@ impl WinInfo {
             }
             "a" | "add" => self.add_vals_in_col(csvs.get_cells()),
             "d" | "diff" => {
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingValue(subcmd),
                                 self.height
@@ -1493,7 +1493,7 @@ impl WinInfo {
                 }
             },
             "si" | "sim" => {
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingValue(subcmd),
                                 self.height
@@ -1506,15 +1506,15 @@ impl WinInfo {
                 }
             },
             "pre" | "prepend" => {
-                match tokens.next() {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingValue(subcmd),
                                 self.height
                             ),
                     Some(pre) => {
-                        let nonblank: bool = match tokens.next() {
+                        let nonblank: bool = match tokens.get(3) {
                             Some(b) => {
-                                match b {
+                                match *b {
                                     "nb" | "nonblank" => true,
                                     _ => false,
                                 }
@@ -1529,16 +1529,16 @@ impl WinInfo {
                     }
                 }
             },
-            "app" | "apppend" => {
-                match tokens.next() {
+            "app" | "append" => {
+                match tokens.get(2) {
                     None => cmd_err::print(
                                 CmdErr::MissingValue(subcmd),
                                 self.height
                             ),
                     Some(app) => {
-                        let nonblank: bool = match tokens.next() {
+                        let nonblank: bool = match tokens.get(3) {
                             Some(b) => {
-                                match b {
+                                match *b {
                                     "nb" | "nonblank" => true,
                                     _ => false,
                                 }
@@ -1555,7 +1555,7 @@ impl WinInfo {
             },
             "dup" | "duplicate" => self.col_dup(csvs.get_cells()),
             "fb"  | "filterby"  => {
-                match tokens.next() {
+                match tokens.get(2) {
                     Some(col) => self.col_filterby(csvs.get_cells(), &col),
                     None => cmd_err::print(
                                 CmdErr::MissingValue(subcmd),
@@ -1937,21 +1937,50 @@ impl WinInfo {
         self.flush();
     }
 
-    fn find_value_in_col(&mut self, csvs: &mut Csvs, val: &str) {
+    fn find_value_in_col(&mut self, csvs: &mut Csvs, val: &str, options: Vec<&str>) {
         if val == "" {
             print_bottom!(self, "Specify a value for 'col f'");
             return;
         }
 
-        let val = Self::trim_quotes(val);
+        let mut val = Self::trim_quotes(val);
+        let mut filter = false;
+        let mut insensitive = false;
+
+        for i in 3..options.len() {
+            match options[i] {
+                "-f" | "--filter" => filter = true,
+                "-i" | "--case-insensitive" => {
+                    val = val.to_lowercase();
+                    insensitive = true;
+                }
+                _ => {
+                    cmd_err::print(
+                        CmdErr::InvalidOption(options[i]),
+                        self.height
+                    );
+                    return;
+                }
+            }
+        }
+
         let cells = csvs.get_cells();
         let col = &mut cells.columns[self.w_pointer];
 
         let mut indices = Vec::<usize>::new();
         for i in 0..col.len() {
             let cell = col.get_cell(i);
-            if cell.content.contains(&val) {
-                indices.push(i);
+            match insensitive {
+                true => {
+                    if cell.content.to_lowercase().contains(&val) {
+                        indices.push(i);
+                    }
+                }
+                false => {
+                    if cell.content.contains(&val) {
+                        indices.push(i);
+                    }
+                }
             }
         }
 
@@ -1963,6 +1992,39 @@ impl WinInfo {
             );
             return;
         }
+
+        if filter {
+            let mut hidden = Vec::<usize>::new();
+            let mut cur = 0;
+            for i in 0..col.len() {
+                match indices.get(cur) {
+                    Some(val) => {
+                        if *val == i {
+                            cur += 1;
+                            continue;
+                        }
+                    }
+                    _ => hidden.push(i),
+                }
+            }
+            let padding = hidden.len();
+            col.padding += padding;
+            col.indices = indices.clone();
+            for _ in 0..padding {
+                col.indices.push(col.cells.len());
+                col.cells.push(Cell::new(""));
+            }
+            col.indices.append(&mut hidden);
+
+            for i in 0..indices.len() {
+                indices[i] = i;
+            }
+
+            cells.set_w_cell(self.w_pointer, 0);
+            cells.written = true;
+            self.draw_screen(cells);
+        }
+
         // hide cursor
         self.push_str_to_frame("\x1b[?25l");
 
@@ -3697,7 +3759,7 @@ impl WinInfo {
     fn find_in_sheet(&mut self, cells: &mut Cells, term: &str, options: Vec<&str>) {
         let mut term = Self::trim_quotes(term);
         let mut filter = false;
-        let mut insensitive = true;
+        let mut insensitive = false;
       
         for i in 3..options.len() {
             match options[i] {
@@ -3776,9 +3838,8 @@ impl WinInfo {
                             continue;
                         }
                     }
-                    _ => (),
+                    _ => hidden.push(i),
                 }
-                hidden.push(i);
             }
             let padding = hidden.len();
             let cell_len = cells.num_rows();
