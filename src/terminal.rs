@@ -1969,16 +1969,17 @@ impl WinInfo {
 
         let mut indices = Vec::<usize>::new();
         for i in 0..col.len() {
-            let cell = col.get_cell(i);
+            let real_idx = col.indices[i];
+            let cell = &col.cells[real_idx];
             match insensitive {
                 true => {
                     if cell.content.to_lowercase().contains(&val) {
-                        indices.push(i);
+                        indices.push(real_idx);
                     }
                 }
                 false => {
                     if cell.content.contains(&val) {
-                        indices.push(i);
+                        indices.push(real_idx);
                     }
                 }
             }
@@ -1997,17 +1998,23 @@ impl WinInfo {
             let mut hidden = Vec::<usize>::new();
             let mut cur = 0;
             for i in 0..col.len() {
-                match indices.get(cur) {
-                    Some(val) => {
-                        if *val == i {
-                            cur += 1;
-                            continue;
+                if let Some(index) = col.indices.get(i) {
+                    match indices.get(cur) {
+                        Some(val) => {
+                            eprintln!("val = {}, index = {}", *val, *index);
+                            if *val == *index {
+                                cur += 1;
+                            } else {
+                                hidden.push(*index);
+                            }
                         }
+                        _ => break,
                     }
-                    _ => hidden.push(i),
+                } else {
+                    break;
                 }
             }
-            let padding = hidden.len();
+            let padding = col.len().saturating_sub(indices.len());
             col.padding += padding;
             col.indices = indices.clone();
             for _ in 0..padding {
@@ -2015,7 +2022,6 @@ impl WinInfo {
                 col.cells.push(Cell::new(""));
             }
             col.indices.append(&mut hidden);
-
             for i in 0..indices.len() {
                 indices[i] = i;
             }
