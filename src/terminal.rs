@@ -1464,7 +1464,7 @@ impl WinInfo {
                                 self.height
                             ),
                     Some(targ) => {
-                        match tokens.get(2) {
+                        match tokens.get(3) {
                             None => cmd_err::print(
                                         CmdErr::MissingValue(subcmd),
                                         self.height
