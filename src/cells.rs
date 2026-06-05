@@ -165,7 +165,7 @@ impl Cell {
     }
 
     pub fn len(&self) -> usize {
-        self.content.len()
+        self.content.chars().count()
     }
 
     pub fn set_focused(&mut self, focused: bool) {
