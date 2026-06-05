@@ -4105,6 +4105,24 @@ mod tests {
     }
 
     #[test]
+    fn paste_uses_latest_yanked_content() {
+        let mut cells = cells_with_rows("paste.csv", vec!["report"], vec![vec![""]]);
+        let mut win = WinInfo::new();
+        win.width = 80;
+        win.height = 10;
+        win.num_cols = cells.num_cols();
+        win.num_rows = cells.num_rows();
+
+        win.set_yanked(&Cell::new("first"));
+        win.paste(&mut cells);
+        assert_eq!(cells.columns[0].view_cell(0), "first");
+
+        win.set_yanked(&Cell::new("second\tvalue"));
+        win.paste(&mut cells);
+        assert_eq!(cells.columns[0].view_cell(0), "second\tvalue");
+    }
+
+    #[test]
     fn splice_rows_pads_columns_when_headers_do_not_match() {
         let mut dest = cells_with_rows(
             "dest.csv",
