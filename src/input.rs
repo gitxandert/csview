@@ -4,6 +4,16 @@ use crate::{
     terminal::{InputMode, ScrollMode, SigFlag, WinChange, WinInfo},
 };
 
+fn bottom_preview(content: &str, max_shown: usize) -> (String, bool) {
+    let truncated = content.chars().count() > max_shown;
+    let take = match truncated {
+        true => max_shown.saturating_sub(3),
+        false => max_shown,
+    };
+
+    (WinInfo::terminal_safe_prefix(content, take), truncated)
+}
+
 pub fn process_input(
     input: &[u8], 
     w_info: &mut WinInfo, 
@@ -195,17 +205,15 @@ pub fn process_input(
                     csvs.get_cells().written = true;
 
                     let max_shown = w_info.width.saturating_sub(9);
-                    let yank_str = match w_info.yanked.len() > max_shown {
+                    let (preview, truncated) = bottom_preview(&w_info.yanked, max_shown);
+                    let yank_str = match truncated {
                         true => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}...'",
                                     w_info.height, 
-                                    w_info.yanked
-                                        .chars()
-                                        .take(max_shown.saturating_sub(3))
-                                        .collect::<String>()
+                                    preview
                                 ),
                         false => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
                                     w_info.height, 
-                                    w_info.yanked
+                                    preview
                                 ),
                     };
                     w_info.push_str_to_frame(&yank_str);
@@ -217,17 +225,15 @@ pub fn process_input(
                     let cell = csvs.get_cells().w_cell();
                     w_info.set_yanked(cell);
                     let max_shown = w_info.width.saturating_sub(9);
-                    let yank_str = match w_info.yanked.len() > max_shown {
+                    let (preview, truncated) = bottom_preview(&w_info.yanked, max_shown);
+                    let yank_str = match truncated {
                         true => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}...'",
                                     w_info.height, 
-                                    w_info.yanked
-                                        .chars()
-                                        .take(max_shown.saturating_sub(3))
-                                        .collect::<String>()
+                                    preview
                                 ),
                         false => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
                                     w_info.height, 
-                                    w_info.yanked
+                                    preview
                                 ),
                     };
                     w_info.push_str_to_frame(&yank_str);
@@ -245,17 +251,15 @@ pub fn process_input(
                     } else {
                         w_info.paste(csvs.get_cells());
                         let max_shown = w_info.width.saturating_sub(9);
-                        let paste_str = match w_info.yanked.len() > max_shown {
+                        let (preview, truncated) = bottom_preview(&w_info.yanked, max_shown);
+                        let paste_str = match truncated {
                             true => format!("\x1b[{};1H\x1b[2K\x1b[0mpasted '{}...'",
                                         w_info.height, 
-                                        w_info.yanked
-                                            .chars()
-                                            .take(max_shown.saturating_sub(3))
-                                            .collect::<String>()
+                                        preview
                                     ),
                             false => format!("\x1b[{};1H\x1b[2K\x1b[0mpasted '{}'",
                                         w_info.height, 
-                                        w_info.yanked
+                                        preview
                                     ),
                         };
                         w_info.push_str_to_frame(&paste_str);
@@ -473,4 +477,29 @@ pub fn process_input(
         }
     }
     SigFlag::Non
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cells::Cell;
+
+    #[test]
+    fn bottom_preview_sanitizes_tabs_without_changing_stored_content() {
+        let (preview, truncated) = bottom_preview("a\tb", 10);
+
+        assert_eq!(preview, "a b");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn yank_replaces_existing_yank_buffer() {
+        let mut win = WinInfo::new();
+
+        win.set_yanked(&Cell::new("first"));
+        assert_eq!(win.yanked, "first");
+
+        win.set_yanked(&Cell::new("second\tvalue"));
+        assert_eq!(win.yanked, "second\tvalue");
+    }
 }
