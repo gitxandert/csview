@@ -508,18 +508,11 @@ impl WinInfo {
     }
 
     pub fn set_focused(&mut self, focused: &str) {
-        self.focused_content.clear();
-        let take = focused.len().min(self.width);
-        let byte_end = focused
-            .char_indices()
-            .nth(take)
-            .map(|(idx, _)| idx)
-            .unwrap_or(take);
-        self.focused_content.push_str(&focused[..byte_end]);
+        self.focused_content = Self::terminal_safe_prefix(focused, self.width);
     }
 
     pub fn add_to_write_buffer(&mut self, content: &str) {
-        let add = content.len();
+        let add = content.chars().count();
         for c in content.chars() {
             self.write_buffer.insert(c);
             
@@ -531,7 +524,7 @@ impl WinInfo {
     }
 
     pub fn paste_yanked_to_write_buffer(&mut self) {
-        let add = self.yanked.len();
+        let add = self.yanked.chars().count();
         for c in self.yanked.chars() {
             self.write_buffer.insert(c);
         }
@@ -575,21 +568,44 @@ impl WinInfo {
     pub fn draw_focused_content(&mut self) {
         match self.input_mode {
             InputMode::Write => {
-                let len = self.focused_content.len();
+                let focused_chars = self.focused_content.chars().collect::<Vec<char>>();
+                let len = focused_chars.len();
                 let hil_st = self.write_buffer.gap_start.min(len.saturating_sub(1));
                 let hil_end = (hil_st + 1).min(len);
-                let content = format!(
-                    "{}\x1b[7m{}\x1b[27m{}",
-                    &self.focused_content[0..hil_st],
-                    &self.focused_content[hil_st..hil_end],
-                    &self.focused_content[hil_end..len]
-                );
+                let before = focused_chars[..hil_st].iter().collect::<String>();
+                let highlighted = focused_chars[hil_st..hil_end].iter().collect::<String>();
+                let after = focused_chars[hil_end..len].iter().collect::<String>();
+                let content = format!("{before}\x1b[7m{highlighted}\x1b[27m{after}");
                 print_bottom!(self, "{}", content);
             }
             _ => {
                 print_bottom!(self, "{}", &self.focused_content);
             }
         }
+    }
+
+    fn terminal_safe_char(c: char) -> char {
+        match c.is_control() {
+            true => ' ',
+            false => c,
+        }
+    }
+
+    pub(crate) fn terminal_safe_prefix(content: &str, width: usize) -> String {
+        content
+            .chars()
+            .map(Self::terminal_safe_char)
+            .take(width)
+            .collect()
+    }
+
+    fn terminal_safe_window(content: &str, offset: usize, width: usize) -> String {
+        content
+            .chars()
+            .skip(offset)
+            .map(Self::terminal_safe_char)
+            .take(width)
+            .collect()
     }
     
     fn build_focused_content_rows(&self, raw_content: &str) -> Vec<String> {
@@ -747,8 +763,11 @@ impl WinInfo {
         let mut col_name = &header[i];
         let mut col_width = col_name.width + 3; // + 3 for formatting
         while start + col_width < self.width {
-            let take = col_name.text_offset + col_name.width.min(col_name.len());
-            let content = col_name.content.chars().skip(col_name.text_offset).take(take).collect::<String>();
+            let content = Self::terminal_safe_window(
+                &col_name.content,
+                col_name.text_offset,
+                col_name.width
+            );
             let positioned = format!(
                 "\x1b[30;47m {:<width$} |\x1b[39;49m", 
                 content, width = col_name.width
@@ -772,13 +791,12 @@ impl WinInfo {
 
         while start + width < self.width {
             let cell = col.get_cell(row);
-            let take = cell.width.min(cell.len() - cell.text_offset);
             let content = &cell.content;
-            let visible: String = content
-                .chars()
-                .skip(cell.text_offset)
-                .take(take)
-                .collect();
+            let visible = Self::terminal_safe_window(
+                content,
+                cell.text_offset,
+                cell.width
+            );
             let formatted = {
                 if cell.is_focused {
                     self.set_focused(&content);
@@ -1016,10 +1034,11 @@ impl WinInfo {
 
         for i in 0..take_1 {
             let c = self.write_buffer.data[i];
+            let display_c = Self::terminal_safe_char(c);
             if i >= offset {
-                self.push_to_frame(c);
+                self.push_to_frame(display_c);
             }
-            self.focused_content.push(c);
+            self.focused_content.push(display_c);
         }
         
         // take after gap
@@ -1027,12 +1046,13 @@ impl WinInfo {
         let take_2 = post_gap + col.width.saturating_sub(take_1.saturating_sub(offset));
         for i in post_gap..self.write_buffer.data.len() {
             let c = self.write_buffer.data[i];
+            let display_c = Self::terminal_safe_char(c);
             if i < take_2 {
-                self.push_to_frame(c);
+                self.push_to_frame(display_c);
                 post_gap += 1;
             }
-            if self.focused_content.len() < self.width {
-                self.focused_content.push(c);
+            if self.focused_content.chars().count() < self.width {
+                self.focused_content.push(display_c);
             }
         }
         // pad end with whitespace
@@ -4057,6 +4077,31 @@ mod tests {
         (0..cells.columns[idx].len())
             .map(|row| cells.columns[idx].view_cell(row))
             .collect()
+    }
+
+    #[test]
+    fn focused_preview_renders_tabs_as_spaces() {
+        let mut win = WinInfo::new();
+        win.width = 20;
+
+        win.set_focused("a\tb");
+
+        assert_eq!(win.focused_content, "a b");
+    }
+
+    #[test]
+    fn table_rendering_does_not_write_raw_tabs_to_frame() {
+        let mut cells = cells_with_rows("tabbed.csv", vec!["report"], vec![vec!["a\tb"]]);
+        let mut win = WinInfo::new();
+        win.width = 80;
+        win.height = 10;
+        win.num_cols = cells.num_cols();
+        win.num_rows = cells.num_rows();
+
+        win.draw_screen(&mut cells);
+
+        assert!(!win.frame.contains('\t'));
+        assert!(win.frame.contains("a b"));
     }
 
     #[test]
