@@ -2895,12 +2895,7 @@ impl WinInfo {
                            
                             self.num_rows -= 1;
                            
-                            if self.h_offset < self.num_rows.saturating_sub(self.h_page) {
-                                self.draw_rows(cells);
-                            } else {
-                                self.h_offset = self.h_offset.saturating_sub(1);
-                                self.draw_screen(cells);
-                            }
+                            self.draw_screen(cells);
                             
                             print_bottom!(
                                 self,
