@@ -2859,24 +2859,20 @@ impl WinInfo {
         let start = self.h_pointer + 1;
         let end = start + count;
 
-        let mut insert = Vec::<Cell>::with_capacity(end);
-        for _ in start..start + count {
-            let cell = Cell::new("");
-            insert.push(cell);
-        }
-
         let new_row_len = self.num_rows + count;
-        let mut index_insert = (self.num_rows..new_row_len).collect::<Vec<usize>>();
         
         for col in &mut cells.columns {
-            col.cells.append(&mut insert);
+            for _ in start..start + count {
+                col.push_cell(Cell::new(""));
+            }
 
             let mut idx_split = col.indices.split_off(start);
+            let mut index_insert = (self.num_rows..new_row_len).collect::<Vec<usize>>();
             col.indices.append(&mut index_insert);
             col.indices.append(&mut idx_split);
         }
         cells.written = true;
-        self.num_rows += count;
+        self.num_rows = new_row_len;
         self.changed = WinChange::Rows;
         self.show_csv(cells);
     }
