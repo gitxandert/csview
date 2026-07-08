@@ -125,6 +125,8 @@ csview also has a command mode, accessed through ':' :
         - prints how many rows there are
     - `row i {count}` | `row insert {count}`
         - inserts count rows below the focused row (default 1 row)
+    - `row dup {count}` | `row duplicate {count}`
+        - duplicates the focused row count times (default once)
     - `row d` | `row delete`
         - deletes the focused row after confirmation
     - `row mv {range} {index}` | `row move {range} {index}`

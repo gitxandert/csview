@@ -1626,6 +1626,24 @@ impl WinInfo {
                 };
                 self.insert_row(csvs.get_cells(), count);
             }
+            "dup"  | "duplicate" => {
+                let count = match tokens.next() {
+                    Some(num) => {
+                        match num.parse::<usize>() {
+                            Ok(u) => u,
+                            Err(_) => {
+                                cmd_err::print(
+                                    CmdErr::InvalidDec(num),
+                                    self.height
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    None => 1usize,
+                };
+                self.duplicate_row(csvs.get_cells(), count);
+            }
             "d"  | "delete" => self.delete_row(csvs),
             "mv" | "move"   => {
                 match tokens.next() {
@@ -2843,7 +2861,7 @@ impl WinInfo {
 
         let mut insert = Vec::<Cell>::with_capacity(end);
         for _ in start..start + count {
-            let mut cell = Cell::new("");
+            let cell = Cell::new("");
             insert.push(cell);
         }
 
@@ -2857,14 +2875,35 @@ impl WinInfo {
             col.indices.append(&mut index_insert);
             col.indices.append(&mut idx_split);
         }
-        cells
-            .columns[self.w_pointer]
-            .cells[self.h_pointer + count]
-            .is_focused = false;
-        cells.set_w_cell(self.w_pointer, self.h_pointer);
         cells.written = true;
         self.num_rows += count;
         self.changed = WinChange::Rows;
+        self.show_csv(cells);
+    }
+
+    fn duplicate_row(&mut self, cells: &mut Cells, count: usize) {
+        let start = self.h_pointer + 1;
+        let end = start + count;
+
+        let new_row_len = self.num_rows + count;
+        
+        for col in &mut cells.columns {
+            let mut clone = col.get_cell(self.h_pointer).clone();
+            clone.is_focused = false;
+            for _ in start..end {
+                col.cells.push(clone.clone());
+            }
+
+            let mut index_insert = (self.num_rows..new_row_len).collect::<Vec<usize>>();
+            let mut idx_split = col.indices.split_off(start);
+            col.indices.append(&mut index_insert);
+            col.indices.append(&mut idx_split);
+        }
+
+        cells.written = true;
+        self.num_rows += count;
+        self.changed = WinChange::Rows;
+
         self.show_csv(cells);
     }
 
