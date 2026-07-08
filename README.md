@@ -112,7 +112,6 @@ csview also has a command mode, accessed through ':' :
         - shows differences between all unique values in the focused column and all unique values in the other column
     - `col si {other}` | `col sim {other}`
         - shows similarities between all unique values in the focused column and all unique values in the other column
-- **row**: row functions
     - `col pre {string} {nb}` | `col prepend {string} {nonblank}`
         - prepends the string to cells in the focused column
         - optional flag `nb`/`nonblank` prepends the string only to cells with content
@@ -121,6 +120,7 @@ csview also has a command mode, accessed through ':' :
         - optional flag `nb`/`nonblank` appends the string only to cells with content
     - `col dup` | `col duplicate`
         - duplicates the focused column
+- **row**: row functions
     - `row c` | `row count`
         - prints how many rows there are
     - `row i {count}` | `row insert {count}`

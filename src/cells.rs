@@ -217,11 +217,16 @@ pub struct Column {
 
 impl Column {
     pub fn new() -> Self {
+        let mut cells = Vec::<Cell>::with_capacity(256);
+        for _ in 0..256 {
+            cells.push(Cell::new(""));
+        }
+        let indices = (0..256).collect::<Vec<usize>>();
         Self {
-            cells: Vec::<Cell>::new(),
+            cells,
             start: 0usize,
             width: 12usize,
-            indices: Vec::<usize>::new(),
+            indices,
             padding: 0usize,
         }
     }

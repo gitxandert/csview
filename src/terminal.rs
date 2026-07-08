@@ -2839,12 +2839,23 @@ impl WinInfo {
 
     fn insert_row(&mut self, cells: &mut Cells, count: usize) {
         let start = self.h_pointer + 1;
+        let end = start + count;
+
+        let mut insert = Vec::<Cell>::with_capacity(end);
+        for _ in start..start + count {
+            let mut cell = Cell::new("");
+            insert.push(cell);
+        }
+
+        let new_row_len = self.num_rows + count;
+        let mut index_insert = (self.num_rows..new_row_len).collect::<Vec<usize>>();
+        
         for col in &mut cells.columns {
-            for i in start..start + count {
-                let mut cell = Cell::new("");
-                cell.width = col.width;
-                col.insert_cell(i, cell);
-            }
+            col.cells.append(&mut insert);
+
+            let mut idx_split = col.indices.split_off(start);
+            col.indices.append(&mut index_insert);
+            col.indices.append(&mut idx_split);
         }
         cells
             .columns[self.w_pointer]
