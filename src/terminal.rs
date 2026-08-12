@@ -1975,6 +1975,58 @@ impl WinInfo {
         self.flush();
     }
 
+    fn matching_column_rows(col: &Column, val: &str, insensitive: bool) -> Vec<usize> {
+        (0..col.len())
+            .filter(|&row| {
+                let content = col.view_cell(row);
+                if insensitive {
+                    content.to_lowercase().contains(val)
+                } else {
+                    content.contains(val)
+                }
+            })
+            .collect()
+    }
+
+    fn apply_column_filter(col: &mut Column, visible_rows: &[usize]) {
+        let row_count = col.len();
+        let previous_indices = col.indices.clone();
+        let mut is_visible = vec![false; row_count];
+        for &row in visible_rows {
+            if row < row_count {
+                is_visible[row] = true;
+            }
+        }
+
+        let hidden_rows = (0..row_count)
+            .filter(|&row| !is_visible[row])
+            .collect::<Vec<usize>>();
+        let padding = hidden_rows.len();
+        let mut new_indices = Vec::with_capacity(previous_indices.len() + padding);
+
+        new_indices.extend(
+            visible_rows
+                .iter()
+                .filter_map(|&row| previous_indices.get(row).copied()),
+        );
+
+        let padding_start = col.cells.len();
+        for offset in 0..padding {
+            new_indices.push(padding_start + offset);
+            col.cells.push(Cell::new(""));
+        }
+
+        new_indices.extend(
+            hidden_rows
+                .iter()
+                .filter_map(|&row| previous_indices.get(row).copied()),
+        );
+        new_indices.extend(previous_indices.into_iter().skip(row_count));
+
+        col.padding += padding;
+        col.indices = new_indices;
+    }
+
     fn find_value_in_col(&mut self, csvs: &mut Csvs, val: &str, options: Vec<&str>) {
         if val == "" {
             print_bottom!(self, "Specify a value for 'col f'");
@@ -2005,23 +2057,7 @@ impl WinInfo {
         let cells = csvs.get_cells();
         let col = &mut cells.columns[self.w_pointer];
 
-        let mut indices = Vec::<usize>::new();
-        for i in 0..col.len() {
-            let real_idx = col.indices[i];
-            let cell = &col.cells[real_idx];
-            match insensitive {
-                true => {
-                    if cell.content.to_lowercase().contains(&val) {
-                        indices.push(real_idx);
-                    }
-                }
-                false => {
-                    if cell.content.contains(&val) {
-                        indices.push(real_idx);
-                    }
-                }
-            }
-        }
+        let mut indices = Self::matching_column_rows(col, &val, insensitive);
 
         if indices.len() == 0 {
             print_bottom!(
@@ -2033,36 +2069,8 @@ impl WinInfo {
         }
 
         if filter {
-            let mut hidden = Vec::<usize>::new();
-            let mut cur = 0;
-            for i in 0..col.len() {
-                if let Some(index) = col.indices.get(i) {
-                    match indices.get(cur) {
-                        Some(val) => {
-                            eprintln!("val = {}, index = {}", *val, *index);
-                            if *val == *index {
-                                cur += 1;
-                            } else {
-                                hidden.push(*index);
-                            }
-                        }
-                        _ => break,
-                    }
-                } else {
-                    break;
-                }
-            }
-            let padding = col.len().saturating_sub(indices.len());
-            col.padding += padding;
-            col.indices = indices.clone();
-            for _ in 0..padding {
-                col.indices.push(col.cells.len());
-                col.cells.push(Cell::new(""));
-            }
-            col.indices.append(&mut hidden);
-            for i in 0..indices.len() {
-                indices[i] = i;
-            }
+            Self::apply_column_filter(col, &indices);
+            indices = (0..indices.len()).collect();
 
             cells.set_w_cell(self.w_pointer, 0);
             cells.written = true;
@@ -3823,6 +3831,73 @@ impl WinInfo {
         self.flush();
     }
 
+    fn apply_sheet_filter(cells: &mut Cells, visible_rows: &[usize]) {
+        let row_count = cells.num_rows();
+        let mut is_visible = vec![false; row_count];
+        for &row in visible_rows {
+            if row < row_count {
+                is_visible[row] = true;
+            }
+        }
+
+        let hidden_rows = (0..row_count)
+            .filter(|&row| !is_visible[row])
+            .collect::<Vec<usize>>();
+        let padding = hidden_rows.len();
+
+        for col in &mut cells.columns {
+            let previous_indices = col.indices.clone();
+            let mut new_indices = Vec::with_capacity(row_count + padding);
+
+            new_indices.extend(
+                visible_rows
+                    .iter()
+                    .filter_map(|&row| previous_indices.get(row).copied()),
+            );
+
+            let padding_start = col.cells.len();
+            for offset in 0..padding {
+                new_indices.push(padding_start + offset);
+                col.cells.push(Cell::new(""));
+            }
+
+            new_indices.extend(
+                hidden_rows
+                    .iter()
+                    .filter_map(|&row| previous_indices.get(row).copied()),
+            );
+
+            col.padding += padding;
+            col.indices = new_indices;
+        }
+    }
+
+    fn matching_sheet_cells(cells: &Cells, term: &str, insensitive: bool) -> Vec<(usize, usize)> {
+        let mut matches = Vec::new();
+        for (col_idx, col) in cells.columns.iter().enumerate() {
+            for row in 0..col.len() {
+                let content = col.view_cell(row);
+                let found = if insensitive {
+                    content.to_lowercase().contains(term)
+                } else {
+                    content.contains(term)
+                };
+                if found {
+                    matches.push((col_idx, row));
+                }
+            }
+        }
+        matches
+    }
+
+    fn remap_sheet_matches(matches: &mut [(usize, usize)], visible_rows: &[usize]) {
+        for (_, row) in matches {
+            if let Ok(filtered_row) = visible_rows.binary_search(row) {
+                *row = filtered_row;
+            }
+        }
+    }
+
     fn find_in_sheet(&mut self, cells: &mut Cells, term: &str, options: Vec<&str>) {
         let mut term = Self::trim_quotes(term);
         let mut filter = false;
@@ -3845,25 +3920,7 @@ impl WinInfo {
             }
         }
 
-        let mut cols_rows = Vec::<(usize, usize)>::new();
-        for i in 0..cells.num_cols() {
-            let col = cells.get_column(i);
-            for j in 0..col.len() {
-                let cell = col.get_cell(j);
-                match insensitive {
-                    true => {
-                        if cell.content.to_lowercase().contains(&term) {
-                            cols_rows.push((i,j));
-                        }
-                    }
-                    false => {
-                        if cell.content.contains(&term) {
-                            cols_rows.push((i,j));
-                        }
-                    }
-                };
-            }
-        }
+        let mut cols_rows = Self::matching_sheet_cells(cells, &term, insensitive);
 
         if cols_rows.len() == 0 {
             print_bottom!(
@@ -3883,45 +3940,11 @@ impl WinInfo {
             new_indices.sort();
             new_indices.dedup();
 
-            for i in 0..cols_rows.len() {
-                for j in 0..new_indices.len() {
-                    if cols_rows[i].1 == new_indices[j] {
-                        cols_rows[i].1 = j;
-                        break;
-                    }
-                }
-            }
+            Self::remap_sheet_matches(&mut cols_rows, &new_indices);
 
             cells.w_cell().is_focused = false;
             self.num_rows = new_indices.len();
-            
-            let mut hidden = Vec::<usize>::new();
-            let mut cur = 0;
-            for i in 0..cells.num_rows() {
-                match new_indices.get(cur) {
-                    Some(val) => {
-                        if *val == i {
-                            cur += 1;
-                            continue;
-                        }
-                    }
-                    _ => hidden.push(i),
-                }
-            }
-            let padding = hidden.len();
-            let cell_len = cells.num_rows();
-            for i in 0..padding {
-                new_indices.push(cell_len + i);
-            }
-            new_indices.append(&mut hidden);
-
-            for col in &mut cells.columns {
-                for _ in 0..padding {
-                    col.push_cell(Cell::new(""));
-                }
-                col.padding = padding;
-                col.indices = new_indices.clone();
-            }
+            Self::apply_sheet_filter(cells, &new_indices);
             cells.set_w_cell(cols_rows[0].0, cols_rows[0].1);
             cells.written = true;
         }
@@ -4065,6 +4088,11 @@ pub fn raw_mode(switch: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::csv_io::write_to_file;
+    use std::{
+        env, fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn cells_with_rows(filename: &str, headers: Vec<&str>, rows: Vec<Vec<&str>>) -> Cells {
         let num_cols = headers.len();
@@ -4120,6 +4148,17 @@ mod tests {
             .collect()
     }
 
+    fn test_path(name: &str) -> String {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        env::temp_dir()
+            .join(format!("csview_{name}_{}_{}.csv", std::process::id(), nonce))
+            .to_string_lossy()
+            .into_owned()
+    }
+
     #[test]
     fn focused_preview_renders_tabs_as_spaces() {
         let mut win = WinInfo::new();
@@ -4143,6 +4182,160 @@ mod tests {
 
         assert!(!win.frame.contains('\t'));
         assert!(win.frame.contains("a b"));
+    }
+
+    #[test]
+    fn filtered_sheet_with_late_match_can_be_saved() {
+        let path = test_path("filtered_sheet_save");
+        let mut cells = cells_with_rows(
+            &path,
+            vec!["A", "B"],
+            vec![
+                vec!["a0", "b0"],
+                vec!["a1", "b1"],
+                vec!["match", "b2"],
+                vec!["a3", "b3"],
+            ],
+        );
+
+        WinInfo::apply_sheet_filter(&mut cells, &[2]);
+        write_to_file(&mut cells).unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(saved, "A,B\nmatch,b2\n,\n,\n,");
+        for col in &cells.columns {
+            assert!(col.indices.iter().all(|&idx| idx < col.cells.len()));
+        }
+    }
+
+    #[test]
+    fn filtered_sheet_partitions_noncontiguous_matches() {
+        let mut cells = cells_with_rows(
+            "filtered.csv",
+            vec!["A", "B"],
+            vec![
+                vec!["a0", "b0"],
+                vec!["a1", "b1"],
+                vec!["a2", "b2"],
+                vec!["a3", "b3"],
+                vec!["a4", "b4"],
+            ],
+        );
+
+        WinInfo::apply_sheet_filter(&mut cells, &[1, 3]);
+
+        assert_eq!(cells.columns[0].view_cell(0), "a1");
+        assert_eq!(cells.columns[0].view_cell(1), "a3");
+        assert_eq!(cells.columns[1].view_cell(0), "b1");
+        assert_eq!(cells.columns[1].view_cell(1), "b3");
+        for col in &cells.columns {
+            assert_eq!(col.len(), 5);
+            assert!(col.indices.iter().all(|&idx| idx < col.cells.len()));
+        }
+
+        for col in &mut cells.columns {
+            col.revert();
+        }
+        assert_eq!(column_values(&cells, 0), vec!["a0", "a1", "a2", "a3", "a4"]);
+        assert_eq!(column_values(&cells, 1), vec!["b0", "b1", "b2", "b3", "b4"]);
+    }
+
+    #[test]
+    fn column_find_uses_display_rows_after_sort() {
+        let mut cells = cells_with_rows(
+            "sorted_column.csv",
+            vec!["A"],
+            vec![vec!["match-z"], vec!["other"], vec!["match-a"]],
+        );
+
+        WinInfo::sort_indices(&mut cells.columns[0], Sort::AscAlph);
+
+        assert_eq!(column_values(&cells, 0), vec!["match-a", "match-z", "other"]);
+        assert_eq!(
+            WinInfo::matching_column_rows(&cells.columns[0], "match", false),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn filtered_column_preserves_sorted_match_order() {
+        let mut cells = cells_with_rows(
+            "filtered_sorted_column.csv",
+            vec!["A"],
+            vec![
+                vec!["match-z"],
+                vec!["other-b"],
+                vec!["match-a"],
+                vec!["other-a"],
+            ],
+        );
+        let col = &mut cells.columns[0];
+        WinInfo::sort_indices(col, Sort::AscAlph);
+        let matches = WinInfo::matching_column_rows(col, "match", false);
+
+        WinInfo::apply_column_filter(col, &matches);
+
+        assert_eq!(matches, vec![0, 1]);
+        assert_eq!(col.view_cell(0), "match-a");
+        assert_eq!(col.view_cell(1), "match-z");
+        assert!(col.indices.iter().all(|&idx| idx < col.cells.len()));
+
+        col.revert();
+        assert_eq!(column_values(&cells, 0), vec!["match-z", "other-b", "match-a", "other-a"]);
+    }
+
+    #[test]
+    fn sheet_find_uses_display_rows_after_sort() {
+        let mut cells = cells_with_rows(
+            "sorted_sheet.csv",
+            vec!["A", "B"],
+            vec![
+                vec!["z", "match-z"],
+                vec!["m", "other"],
+                vec!["a", "match-a"],
+            ],
+        );
+
+        WinInfo::sort_indices(&mut cells.columns[0], Sort::AscAlph);
+        let sorted_indices = cells.columns[0].indices.clone();
+        cells.columns[1].indices = sorted_indices;
+
+        assert_eq!(column_values(&cells, 1), vec!["match-a", "other", "match-z"]);
+        assert_eq!(
+            WinInfo::matching_sheet_cells(&cells, "match", false),
+            vec![(1, 0), (1, 2)]
+        );
+    }
+
+    #[test]
+    fn filtered_sheet_preserves_sorted_rows_and_column_alignment() {
+        let mut cells = cells_with_rows(
+            "filtered_sorted_sheet.csv",
+            vec!["A", "B"],
+            vec![
+                vec!["z", "match-z"],
+                vec!["m", "other"],
+                vec!["a", "match-a"],
+            ],
+        );
+        WinInfo::sort_indices(&mut cells.columns[0], Sort::AscAlph);
+        let sorted_indices = cells.columns[0].indices.clone();
+        cells.columns[1].indices = sorted_indices;
+        let mut matches = WinInfo::matching_sheet_cells(&cells, "match", false);
+        let visible_rows = matches.iter().map(|(_, row)| *row).collect::<Vec<_>>();
+
+        WinInfo::apply_sheet_filter(&mut cells, &visible_rows);
+        WinInfo::remap_sheet_matches(&mut matches, &visible_rows);
+
+        assert_eq!(matches, vec![(1, 0), (1, 1)]);
+        assert_eq!(cells.columns[0].view_cell(0), "a");
+        assert_eq!(cells.columns[1].view_cell(0), "match-a");
+        assert_eq!(cells.columns[0].view_cell(1), "z");
+        assert_eq!(cells.columns[1].view_cell(1), "match-z");
+        for col in &cells.columns {
+            assert!(col.indices.iter().all(|&idx| idx < col.cells.len()));
+        }
     }
 
     #[test]
