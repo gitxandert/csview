@@ -217,7 +217,7 @@ pub struct Column {
 
 impl Column {
     pub fn new() -> Self {
-        let mut cells = Vec::<Cell>::with_capacity(256);
+        let cells = Vec::<Cell>::with_capacity(256);
         let indices = Vec::<usize>::with_capacity(256);
         Self {
             cells,
@@ -505,7 +505,6 @@ impl Cells {
 
     pub fn increment_col_ids(&mut self) {
         let len = self.col_ids.len() as u32; 
-        
         self.col_ids.push(Cell::new(&int_to_base_26(len)));
     }
 
