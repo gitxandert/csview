@@ -2762,14 +2762,16 @@ impl WinInfo {
     }
 
     fn col_dup(&mut self, cells: &mut Cells) {
-        let col_name = cells.header[self.w_pointer].content.clone();
+        let col_name = cells.header[self.w_pointer].clone();
         let col = cells.get_column(self.w_pointer);
+        let id_width = col.width;
         let new_col = col.clone();
         let next = self.w_pointer + 1;
         
         cells.insert_column(next, new_col);
-        cells.insert_col_name(next, Cell::new(&col_name));
+        cells.insert_col_name(next, col_name);
         cells.increment_col_ids();
+        cells.col_ids[next].width = id_width;
         cells.written = true;
 
         self.num_cols += 1;
@@ -2865,7 +2867,6 @@ impl WinInfo {
 
     fn insert_row(&mut self, cells: &mut Cells, count: usize) {
         let start = self.h_pointer + 1;
-        let end = start + count;
 
         let new_row_len = self.num_rows + count;
         
