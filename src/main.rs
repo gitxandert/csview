@@ -6,6 +6,7 @@ use std::{
 mod cells;
 mod cmd_err;
 mod csv_io;
+mod history;
 mod input;
 mod terminal;
 

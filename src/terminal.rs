@@ -12,6 +12,7 @@ use crate::{
     cells::*,
     cmd_err::{self, CmdErr},
     csv_io::{make_col_ids, poll_stdin, PollEvent},
+    history::Checkpoint,
 };
 
 #[derive(Debug, PartialEq)]
@@ -1276,6 +1277,7 @@ impl WinInfo {
     pub fn process_command(&mut self, csvs: &mut Csvs) -> SigFlag {
         let input = self.write_buffer.as_string();
         let tokens = Self::tokenize(&input, ' ');
+        let checkpoint = Checkpoint::take(csvs, self, &tokens);
         match tokens[0] {
             // quit
             "q" | "quit" => return SigFlag::Quit,
@@ -1309,6 +1311,7 @@ impl WinInfo {
                     self.height
                 ),
         }
+        checkpoint.commit(csvs);
         SigFlag::Non
     }
 

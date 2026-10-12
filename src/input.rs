@@ -1,6 +1,7 @@
 use crate::{
     cells::Csvs,
     csv_io::{save_backup, write_to_file},
+    history,
     terminal::{InputMode, ScrollMode, SigFlag, WinChange, WinInfo},
 };
 
@@ -200,8 +201,10 @@ pub fn process_input(
                 // d (delete [also yanks])
                 [100] => {
                     let cell = csvs.get_cells().w_cell();
+                    let old = cell.clone();
                     w_info.set_yanked(cell);
                     cell.content.clear();
+                    history::record_cell(csvs, old);
                     csvs.get_cells().written = true;
 
                     let max_shown = w_info.width.saturating_sub(9);
@@ -249,7 +252,9 @@ pub fn process_input(
                             )
                         );
                     } else {
+                        let old = csvs.get_cells().w_cell().clone();
                         w_info.paste(csvs.get_cells());
+                        history::record_cell(csvs, old);
                         let max_shown = w_info.width.saturating_sub(9);
                         let (preview, truncated) = bottom_preview(&w_info.yanked, max_shown);
                         let paste_str = match truncated {
@@ -264,6 +269,35 @@ pub fn process_input(
                         };
                         w_info.push_str_to_frame(&paste_str);
                     }
+                    w_info.flush();
+                }
+                // u (undo) | ctrl + r (redo)
+                [117] | [18] => {
+                    let is_undo = input[0] == 117;
+                    let applied = match is_undo {
+                        true => history::undo(csvs, w_info),
+                        false => history::redo(csvs, w_info),
+                    };
+                    let msg = match (is_undo, applied) {
+                        (true, true) => format!(
+                            "undo ({} more)", history::undo_len(csvs)
+                        ),
+                        (false, true) => format!(
+                            "redo ({} more)", history::redo_len(csvs)
+                        ),
+                        (true, false) => "Nothing to undo".to_string(),
+                        (false, false) => "Nothing to redo".to_string(),
+                    };
+                    if applied {
+                        w_info.draw_screen(csvs.get_cells());
+                        w_info.draw_context(csvs);
+                    }
+                    w_info.push_str_to_frame(
+                        &format!(
+                            "\x1b[{};1H\x1b[2K\x1b[0m{}",
+                            w_info.height, msg
+                        )
+                    );
                     w_info.flush();
                 }
                 // o (open [displays all content of a cell])
@@ -329,7 +363,9 @@ pub fn process_input(
                     let cells = csvs.get_cells();
                     w_info.set_write_mode(false);
                     let w_cell = cells.w_cell();
+                    let old = w_cell.clone();
                     w_info.write_to_cell(w_cell);
+                    history::record_cell(csvs, old);
                 }
                 [1..=22] | [24..=26] | [31] => {
                     // ignore other control characters

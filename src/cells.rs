@@ -1,6 +1,7 @@
 use crate::{
     csv_io::int_to_base_26,
     cmd_err::CmdErr,
+    history::History,
     terminal::WinInfo,
 };
 
@@ -440,6 +441,20 @@ impl Cells {
         }
     }
 
+    pub fn clone(&self) -> Self {
+        Self {
+            filename: self.filename.clone(),
+            delim: self.delim,
+            header: Self::clone_cell_row(&self.header),
+            col_ids: Self::clone_cell_row(&self.col_ids),
+            columns: self.columns.iter().map(|col| col.clone()).collect(),
+            w_cell: self.w_cell,
+            changed: self.changed,
+            written: self.written,
+            slices: self.slices,
+        }
+    }
+
     pub fn clone_cell_row(row: &Vec<Cell>) -> Vec<Cell> {
         let mut new_row = Vec::<Cell>::new();
         for cell in row {
@@ -563,11 +578,32 @@ impl Context {
     pub fn cells(&mut self) -> &mut Cells {
         &mut self.cells
     }
+
+    pub fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            cells: self.cells.clone(),
+            w_pointer: self.w_pointer,
+            h_pointer: self.h_pointer,
+            w_offset: self.w_offset,
+            h_offset: self.h_offset,
+        }
+    }
+
+    // exchange everything but the id with another context
+    pub fn swap_state(&mut self, other: &mut Context) {
+        std::mem::swap(&mut self.cells, &mut other.cells);
+        std::mem::swap(&mut self.w_pointer, &mut other.w_pointer);
+        std::mem::swap(&mut self.h_pointer, &mut other.h_pointer);
+        std::mem::swap(&mut self.w_offset, &mut other.w_offset);
+        std::mem::swap(&mut self.h_offset, &mut other.h_offset);
+    }
 }
 
 pub struct Csvs {
     pub contexts: Vec<Context>,
     pub handle: usize,
+    pub history: History,
 }
 
 impl Csvs {
@@ -575,6 +611,7 @@ impl Csvs {
         Self {
             contexts,
             handle: 0usize,
+            history: History::new(),
         }
     }
 

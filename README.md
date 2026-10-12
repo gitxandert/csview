@@ -51,6 +51,11 @@ csview currently admits the following key bindings:
     - paste yanked content to focused cell
 - **ctrl + p**
     - (write mode) paste yanked content at the cursor
+- **u**
+    - undo the last edit (cell edits, deletes, pastes, and any command that changes a sheet)
+    - keeps the last 50 edits across all open sheets
+- **ctrl + r**
+    - redo the last undone edit
 - **o**
     - display full content of focused cell to the screen
 - **number keys**
