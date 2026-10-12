@@ -138,12 +138,12 @@ pub fn print(err: CmdErr, line: usize) {
                 ),
 
             CmdErr::StdinErr(t) => format!(
-                    "x1b[{};1H\x1b[2KERR: stdin error while processing '{}'",
+                    "\x1b[{};1H\x1b[2KERR: stdin error while processing '{}'",
                     line, t
                 ),
 
             CmdErr::TooManyArgs(t) => format!(
-                    "x1b[{};1H\x1b[2KERR: too many argumentss for '{}'",
+                    "\x1b[{};1H\x1b[2KERR: too many arguments for '{}'",
                     line, t
                 ),
 

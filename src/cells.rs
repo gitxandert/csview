@@ -242,6 +242,12 @@ impl Column {
     }
 
     pub fn push_cell(&mut self, cell: Cell) {
+        if self.padding > 0 {
+            // add it as the last shown row, ahead of the padding
+            let at = self.len().saturating_sub(self.padding);
+            self.insert_new_cells(at, vec![cell]);
+            return;
+        }
         self.cells.push(cell);
         self.indices.push(self.indices.len());
     }
@@ -262,6 +268,21 @@ impl Column {
             self.cells.push(cell);
             self.indices.insert(idx, self.indices.len());
         }
+    }
+
+    // insert new cells at display row idx;
+    // they go before any padding, which revert() expects at the end
+    pub fn insert_new_cells(&mut self, idx: usize, new_cells: Vec<Cell>) {
+        let count = new_cells.len();
+        let pos = self.cells.len() - self.padding;
+        self.cells.splice(pos..pos, new_cells);
+        for real in &mut self.indices {
+            if *real >= pos {
+                *real += count;
+            }
+        }
+        let idx = idx.min(self.indices.len());
+        self.indices.splice(idx..idx, pos..pos + count);
     }
 
     pub fn remove_cell(&mut self, idx: usize) -> Cell {
@@ -289,9 +310,13 @@ impl Column {
 
     pub fn reindex(&mut self) {
         let mut reindexed = Vec::<Cell>::with_capacity(self.cells.len());
-       
-        for i in 0..self.len() {
-            reindexed.push(self.cells.get(self.indices[i]).unwrap().clone());
+        // padding blanks sit at the end of cells;
+        // keep every real cell (shown or hidden) in display order
+        let real_len = self.len();
+        for &real_idx in &self.indices {
+            if real_idx < real_len {
+                reindexed.push(self.cells[real_idx].clone());
+            }
         }
         self.cells = reindexed;
         self.indices = (0..self.cells.len()).collect();
@@ -303,7 +328,12 @@ impl Column {
         let end = *range.end();
 
         self.reindex();
-        
+
+        // columns can be shorter than the range
+        if start >= self.cells.len() {
+            return Vec::<Cell>::new();
+        }
+        let end = end.min(self.cells.len() - 1);
         let drained_cells = self.cells.drain(start..=end).collect();
         self.indices = (0..self.cells.len()).collect();
 
@@ -329,33 +359,25 @@ impl Column {
     }
 
     pub fn make_unique(&mut self) -> usize {
+        // only rows currently shown take part;
+        // rows hidden by an earlier filter/unique stay hidden
+        let visible = self.visible_len();
         let mut seen = Vec::<&str>::new();
         let mut seen_idx = Vec::<usize>::new();
         let mut u_idx = Vec::<usize>::new();
-        for i in 0..self.indices.len() {
+        for i in 0..visible {
             let cur = self.indices[i];
-            if &self.cells[cur].content == "" { 
+            let content = &self.cells[cur].content;
+            if content == "" || seen.contains(&content.as_str()) {
                 seen_idx.push(cur);
-                continue; 
-            }
-            
-            let mut s = 0;
-            for _ in 0..seen.len() {
-                if &self.cells[cur].content == &seen[s] {
-                    break;
-                }
-                s += 1;
-            }
-            if s == seen.len() {
-                seen.push(&self.cells[cur].content);
-                u_idx.push(cur);
             } else {
-                seen_idx.push(cur);
+                seen.push(content);
+                u_idx.push(cur);
             }
         }
         // save num unique to return
         let uq_len = u_idx.len();
-        if uq_len != self.len() - self.padding {
+        if !seen_idx.is_empty() {
             let seen_len = seen_idx.len();
             self.padding += seen_len;
             
@@ -364,6 +386,7 @@ impl Column {
                 self.cells.push(Cell::new(""));
             }
             u_idx.append(&mut seen_idx);
+            u_idx.extend_from_slice(&self.indices[visible..]);
             
             self.indices = u_idx;
         }
@@ -404,6 +427,11 @@ impl Column {
 
     pub fn len(&self) -> usize {
         self.cells.len() - self.padding
+    }
+
+    // rows currently shown; filters, sifts and uniques hide the rest
+    pub fn visible_len(&self) -> usize {
+        self.len().saturating_sub(self.padding).min(self.indices.len())
     }
 }
 
@@ -477,12 +505,20 @@ impl Cells {
     }
 
     pub fn set_w_cell(&mut self, col: usize, row: usize) {
-        // first unfocus the previous w_cell
-        let mut w_cell = self.w_cell();
-        w_cell.set_focused(false);
+        // first unfocus the previous w_cell,
+        // which may no longer exist if the sheet shrank
+        if let Some(prev) = self.try_w_cell() {
+            prev.set_focused(false);
+        }
         self.w_cell = (col, row);
-        w_cell = self.w_cell();
-        w_cell.set_focused(true);
+        self.w_cell().set_focused(true);
+    }
+
+    fn try_w_cell(&mut self) -> Option<&mut Cell> {
+        let (col, row) = self.w_cell;
+        let column = self.columns.get_mut(col)?;
+        let real_idx = *column.indices.get(row)?;
+        column.cells.get_mut(real_idx)
     }
 
     pub fn push_column(&mut self, col: Column) {
@@ -513,6 +549,13 @@ impl Cells {
         self.columns[0].len()
     }
 
+    // rows currently shown; filters, sifts and uniques hide the rest.
+    // column-only ops (col u, col f -f) shorten just one column,
+    // so the sheet shows as many rows as its longest column
+    pub fn visible_rows(&self) -> usize {
+        self.columns.iter().map(|col| col.visible_len()).max().unwrap_or(0)
+    }
+
     pub fn w_cell(&mut self) -> &mut Cell {
         let col = self.columns.get_mut(self.w_cell.0).unwrap();
         col.get_cell(self.w_cell.1)
@@ -524,12 +567,13 @@ impl Cells {
     }
 
     pub fn get_col_idx<'a>(&self, id: &'a str) -> Result<usize, CmdErr<'a>> {
-        let mut id_chars = id.chars();
-        let first = id_chars.nth(0).unwrap();
+        let first = match id.chars().next() {
+            Some(c) => c,
+            None => return Err(CmdErr::NoId(id)),
+        };
         if first == '\'' || first == '"' {
-            let name: String = id_chars
-                .take(id.len() - 2)
-                .collect();
+            let inner = &id[first.len_utf8()..];
+            let name = inner.strip_suffix(first).unwrap_or(inner);
             for i in 0..self.header.len() {
                 if self.header[i].content == name {
                     return Ok(i);

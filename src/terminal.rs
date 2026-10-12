@@ -113,6 +113,8 @@ impl WriteBuf {
 
     // moves with cursor
     pub fn move_gap(&mut self, pos: usize) {
+        // the gap can't move past the end of the content
+        let pos = pos.min(self.content_len);
         while pos < self.gap_start {
             self.gap_start -= 1;
             self.data[self.gap_start + self.gap_len] = self.data[self.gap_start];
@@ -155,7 +157,7 @@ impl WriteBuf {
 
     fn grow(&mut self) {
         let old_cap = self.data.len();
-        let new_cap = old_cap * 2;
+        let new_cap = (old_cap * 2).max(1);
 
         let mut new_data = vec![' '; new_cap];
 
@@ -163,22 +165,18 @@ impl WriteBuf {
             new_data[i] = self.data[i];
         }
 
-        let new_gap_len = old_cap.saturating_sub(
-            self.gap_start + self.gap_len
-        );
-        let new_gap_start = new_cap.saturating_sub(
-            new_gap_len
-        );
+        // content after the gap moves to the end of the new buffer
+        let post_len = old_cap - (self.gap_start + self.gap_len);
+        let old_post_start = self.gap_start + self.gap_len;
+        let new_post_start = new_cap - post_len;
 
-        for i in 0..new_gap_len {
-            new_data[new_gap_start + i] = self.data[self.gap_start + self.gap_len + i];
+        for i in 0..post_len {
+            new_data[new_post_start + i] = self.data[old_post_start + i];
         }
 
         self.data = new_data;
         self.capacity = new_cap;
-        self.gap_len = new_cap.saturating_sub(
-            self.gap_start.saturating_sub(new_gap_len)
-        );
+        self.gap_len = new_post_start - self.gap_start;
     }
 }
 
@@ -268,7 +266,7 @@ impl WinInfo {
 
     pub fn set_context(&mut self, con: &mut Context) {
         self.num_cols = con.cells.num_cols();
-        self.num_rows = con.cells.num_rows();
+        self.num_rows = con.cells.visible_rows();
         self.w_pointer = con.w_pointer;
         self.h_pointer = con.h_pointer;
         self.w_offset = con.w_offset;
@@ -280,7 +278,16 @@ impl WinInfo {
         self.w_page = end.saturating_sub(beg);
     }
     pub fn set_h_page(&mut self, end: usize, beg: usize) {
-        self.h_page = end.saturating_sub(beg) - 1;
+        self.h_page = end.saturating_sub(beg).saturating_sub(1);
+    }
+
+    // keep the focus inside the sheet and the offsets at or before the focus;
+    // row/column counts can shrink under the pointers (deleting, slicing, undo)
+    pub fn clamp_view(&mut self) {
+        self.w_pointer = self.w_pointer.min(self.num_cols.saturating_sub(1));
+        self.h_pointer = self.h_pointer.min(self.num_rows.saturating_sub(1));
+        self.w_offset = self.w_offset.min(self.w_pointer);
+        self.h_offset = self.h_offset.min(self.h_pointer);
     }
 
     pub fn set_write_mode(&mut self, w: bool) {
@@ -321,7 +328,7 @@ impl WinInfo {
                 IN_COMMAND.store(false, Ordering::SeqCst);
                 // reset cursor
                 self.set_cursor(
-                    self.h_pointer - self.h_offset + 3,
+                    self.h_pointer.saturating_sub(self.h_offset) + 3,
                     col.start + 1,
                     col.width
                 );
@@ -453,7 +460,7 @@ impl WinInfo {
         } else if w >= self.num_cols {
             if self.w_pointer != self.num_cols.saturating_sub(1) {
                 self.w_pointer = self.num_cols.saturating_sub(1);
-                self.w_offset = self.num_cols.saturating_sub(self.w_page);
+                self.w_offset = self.num_cols.saturating_sub(self.w_page.max(1));
                 self.changed = WinChange::Columns;
             }
         }
@@ -471,14 +478,16 @@ impl WinInfo {
                 self.changed = WinChange::Columns;
             } else if old_w < self.w_offset {
                 let diff = self.w_offset.saturating_sub(old_w);
-                self.w_pointer += diff;
+                self.w_pointer = (self.w_pointer + diff).min(
+                    self.num_cols.saturating_sub(1)
+                );
                 self.changed = WinChange::Columns;
             }
         }
     }
     
     pub fn set_h_pointer(&mut self, h: usize) {
-        if h < self.num_rows - 1 {
+        if h < self.num_rows.saturating_sub(1) {
             let old_h = self.h_pointer;
             self.h_pointer = h;
             self.changed = WinChange::Focus;
@@ -498,14 +507,14 @@ impl WinInfo {
         } else {
             if self.h_pointer != self.num_rows.saturating_sub(1) {
                 self.h_pointer = self.num_rows.saturating_sub(1);
-                self.h_offset = self.num_rows.saturating_sub(self.h_page);
+                self.h_offset = self.num_rows.saturating_sub(self.h_page.max(1));
                 self.changed = WinChange::Screen;
             }
         }
     }
 
     pub fn set_h_offset(&mut self, h: usize) {
-        if h <= (self.num_rows - 1).saturating_sub(self.h_page + 1) {
+        if h <= self.num_rows.saturating_sub(1).saturating_sub(self.h_page + 1) {
             let old_h = self.h_offset;
             self.h_offset = h;
 
@@ -516,7 +525,9 @@ impl WinInfo {
                 self.changed = WinChange::Rows;
             } else if self.h_offset > old_h {
                 let diff = self.h_offset.saturating_sub(old_h);
-                self.h_pointer += diff;
+                self.h_pointer = (self.h_pointer + diff).min(
+                    self.num_rows.saturating_sub(1)
+                );
                 self.changed = WinChange::Rows;
             }
         }
@@ -857,6 +868,19 @@ impl WinInfo {
         let mut width = col.col_width();
 
         while start + width < self.width {
+            // a column shorter than the sheet draws as blank
+            if row >= col.indices.len() {
+                self.push_str_to_frame(&format!(" {:<width$} |", "", width = width - 3));
+                col.set_start(start);
+                start += width;
+                *i += 1;
+                if *i < self.num_cols {
+                    col = &mut cells.columns[*i];
+                    width = col.col_width();
+                    continue;
+                }
+                break;
+            }
             let cell = col.get_cell(row);
             let content = &cell.content;
             let visible = Self::terminal_safe_window(
@@ -868,7 +892,7 @@ impl WinInfo {
                 if cell.is_focused {
                     self.set_focused(&content);
                     self.set_cursor(
-                        row - self.h_offset + 3, start + 1, cell.width
+                        row.saturating_sub(self.h_offset) + 3, start + 1, cell.width
                     );
                     format!("\x1b[7;36;47m {:<width$} \x1b[27;39;49m|",
                         visible, width = width - 3
@@ -951,14 +975,11 @@ impl WinInfo {
 
     pub fn draw_screen(&mut self, cells: &mut Cells) {
         // reset focused cell
-        if self.h_pointer < self.num_rows {
-            cells.set_w_cell(self.w_pointer, self.h_pointer);
-        } else {
-            self.h_pointer = self.num_rows.saturating_sub(1);
-        }
+        self.clamp_view();
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
         
         let mut id = self.w_offset;
-        for i in 1..self.height - 1 {
+        for i in 1..self.height.saturating_sub(1) {
             // move cursor to beginning of line
             self.push_str_to_frame(&format!("\x1b[{i};1H\x1b[2K"));
             let start = 6usize;
@@ -995,11 +1016,14 @@ impl WinInfo {
     }
 
     pub fn draw_from_column(&mut self, cells: &mut Cells) {
+        self.clamp_view();
         let col_id = self.w_pointer;
         let start = cells.columns[col_id].start;
 
         let mut c = col_id;
-        let lim = (self.height - 1).min(self.num_rows - self.h_offset + 3);
+        let lim = self.height.saturating_sub(1).min(
+            self.num_rows.saturating_sub(self.h_offset) + 3
+        );
         for row in 1..lim {
             let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
                 row, start
@@ -1024,16 +1048,21 @@ impl WinInfo {
     }
 
     pub fn draw_rows(&mut self, cells: &mut Cells) {
+        self.clamp_view();
         let (_, prev_row) = cells.w_cell;
         cells.set_w_cell(self.w_pointer, self.h_pointer);
 
-        let st_row = prev_row.min(self.h_pointer);
+        // redraw from the earlier of the two rows, or from the top
+        // if that row has scrolled out of view
+        let st_row = prev_row.min(self.h_pointer).max(self.h_offset);
         let term_row = st_row - self.h_offset + 3;
         self.push_str_to_frame(
             &format!("\x1b[{};1H\x1b[4m", term_row)
         );
 
-        let lim = (self.height - 1).min(self.num_rows - self.h_offset + 3);
+        let lim = self.height.saturating_sub(1).min(
+            self.num_rows.saturating_sub(self.h_offset) + 3
+        );
         for row in term_row..lim {
             let row_id = row - 3 + self.h_offset;
             self.push_str_to_frame(
@@ -1052,7 +1081,11 @@ impl WinInfo {
     pub fn draw_focus(&mut self, cells: &mut Cells) {
         // erase the previously-focused cell
         // and whatever follows it
+        self.clamp_view();
         let (wc_c, wc_l) = cells.w_cell;
+        // the previous focus may be gone if the sheet shrank
+        let wc_c = wc_c.min(cells.num_cols().saturating_sub(1));
+        let wc_l = wc_l.min(self.num_rows.saturating_sub(1));
         cells.set_w_cell(self.w_pointer, self.h_pointer);
 
         let prev_start = cells.columns[wc_c].start;
@@ -1130,7 +1163,7 @@ impl WinInfo {
         self.push_str_to_frame(" \x1b[27;39;49m|");
         
         // only print rest of row if not editing last cell
-        if id < self.w_offset + self.w_page - 1 {
+        if id + 1 < self.w_offset + self.w_page {
             id += 1;
             let start = cells.columns[id].start;
             self.print_row(cells, &mut id, row, start); 
@@ -1283,26 +1316,21 @@ impl WinInfo {
     fn tokenize(input: &str, delim: char) -> Vec<&str> {
         let mut tokens = Vec::<&str>::new();
         let mut start = 0usize;
-        let mut end = 0usize;
         let mut quote: Option<char> = None;
         
-        for c in input.chars() {
+        // track byte offsets, since input may hold multi-byte chars
+        for (end, c) in input.char_indices() {
             match c {
                 ch if ch == delim => {
                     // only push if not quoting
-                    match quote {
-                        None => {
-                            tokens.push(&input[start..end]);
-                            end += 1;
-                            start = end;
-                        }
-                        Some(_) => end += 1,
+                    if quote.is_none() {
+                        tokens.push(&input[start..end]);
+                        start = end + c.len_utf8();
                     }
                 }
                 '"' | '\'' => {
                     // if not quoting, start;
-                    // if quoting, stop;
-                    // increment end regardless
+                    // if quoting, stop
                     match quote {
                         Some(q) => {
                             if q == c {
@@ -1313,13 +1341,12 @@ impl WinInfo {
                             quote = Some(c);
                         }
                     }
-                    end += 1;
                 }
-                _ => end += 1,
+                _ => (),
             }
         }
 
-        tokens.push(&input[start..end]);
+        tokens.push(&input[start..]);
 
         tokens
     }
@@ -1841,15 +1868,13 @@ impl WinInfo {
     }
 
     fn trim_quotes(q: &str) -> String {
-        let mut chars = q.chars();
-        let first = chars.nth(0).unwrap();
-        if first == '\'' || first == '"' {
-            let ret: String = chars
-                .take(q.len().saturating_sub(2))
-                .collect();
-            return ret;
+        match q.chars().next() {
+            Some(first) if first == '\'' || first == '"' => {
+                let inner = &q[first.len_utf8()..];
+                inner.strip_suffix(first).unwrap_or(inner).to_string()
+            }
+            _ => q.to_string(),
         }
-        q.to_string()
     }
 
     // cn functions
@@ -1960,7 +1985,7 @@ impl WinInfo {
                                         match Self::str_to_dec(t) {
                                             Ok(d) => {
                                                 let i = ida + d;
-                                                if i > cells.num_cols() {
+                                                if i >= cells.num_cols() {
                                                     cmd_err::print(
                                                         CmdErr::InvalidIndex(ida + d),
                                                         self.height
@@ -1994,10 +2019,18 @@ impl WinInfo {
             }
         };
 
+        // accept ranges written in either order
+        let (ida, idb) = (ida.min(idb), ida.max(idb));
+        let diff = idb - ida;
+        // a block moved ahead starts at idx, so it must fit before the end
+        if idx > ida && idx + diff >= cells.num_cols() {
+            cmd_err::print(CmdErr::InvalidIndex(idx + diff), self.height);
+            return;
+        }
+
         cells.w_cell().is_focused = false;
         let is_behind = (ida > idx) as usize;
         let is_ahead = (idx > ida) as usize;
-        let diff = idb - ida;
         for i in 0..=diff {
             let a = ida + i * is_behind;
             let x = idx + diff * is_ahead + i * is_behind;
@@ -2046,7 +2079,7 @@ impl WinInfo {
     }
 
     fn matching_column_rows(col: &Column, val: &str, insensitive: bool) -> Vec<usize> {
-        (0..col.len())
+        (0..col.visible_len())
             .filter(|&row| {
                 let content = col.view_cell(row);
                 if insensitive {
@@ -2059,7 +2092,8 @@ impl WinInfo {
     }
 
     fn apply_column_filter(col: &mut Column, visible_rows: &[usize]) {
-        let row_count = col.len();
+        // rows hidden by an earlier filter stay hidden, after the new ones
+        let row_count = col.visible_len();
         let previous_indices = col.indices.clone();
         let mut is_visible = vec![false; row_count];
         for &row in visible_rows {
@@ -2234,10 +2268,13 @@ impl WinInfo {
        
         let loc = self.w_pointer + 1;
 
+        // mirror the focused column's layout, so hidden and padding
+        // rows (from a filter, sift or unique) line up with the new column
         let mut new_col = Column::new();
-        for _ in 0..self.num_rows {
-            new_col.push_cell(Cell::new(""));
-        }
+        let focused = &cells.columns[self.w_pointer];
+        new_col.cells = (0..focused.cells.len()).map(|_| Cell::new("")).collect();
+        new_col.indices = focused.indices.clone();
+        new_col.padding = focused.padding;
         cells.insert_column(loc, new_col);
         
         let col_name = Cell::new(&name);
@@ -2369,30 +2406,42 @@ impl WinInfo {
             }
         }
             
-        let mut i = 1usize;
-        let mut dec = 0usize;
+        // a column can only be grouped once, and not with itself
+        let mut seen = Vec::<usize>::with_capacity(ids.len());
         for idx in ids {
-            let idx = {
-                if idx < p_col_idx {
-                    dec += 1;
-                    idx - (dec - 1)
-                } else {
-                    idx
-                }
-            };
-            let mut col = cells.columns.remove(idx);
-            col.get_cell(self.h_pointer).set_focused(false);
+            if idx != p_col_idx && !seen.contains(&idx) {
+                seen.push(idx);
+            }
+        }
+        let ids = seen;
+
+        cells.w_cell().is_focused = false;
+
+        // pull the grouped columns out, back to front so indices stay valid
+        let mut sorted = ids.clone();
+        sorted.sort_unstable_by(|a, b| b.cmp(a));
+        let mut pulled = Vec::<(usize, Column, Cell)>::with_capacity(ids.len());
+        for idx in sorted {
+            let col = cells.columns.remove(idx);
             let col_name = cells.header.remove(idx);
-            let col_width = col.width;
-            cells.columns.insert(p_col_idx - dec + i, col);
-            cells.header.insert(p_col_idx - dec + i, col_name);
-            cells.col_ids[p_col_idx - dec + i].width = col_width;
-            cells.col_ids[idx].width = cells.columns[idx].width;
-            i += 1;
+            pulled.push((idx, col, col_name));
+        }
+
+        // then put them back after the primary column, in the listed order
+        let dec = ids.iter().filter(|&&idx| idx < p_col_idx).count();
+        let p_col_idx = p_col_idx - dec;
+        for (i, idx) in ids.iter().enumerate() {
+            let pos = pulled.iter().position(|(j, _, _)| j == idx).unwrap();
+            let (_, col, col_name) = pulled.swap_remove(pos);
+            cells.columns.insert(p_col_idx + 1 + i, col);
+            cells.header.insert(p_col_idx + 1 + i, col_name);
+        }
+        for i in 0..cells.col_ids.len() {
+            cells.col_ids[i].width = cells.columns[i].width;
         }
 
         if self.w_pointer != p_col_idx {
-            self.set_w_pointer(p_col_idx - dec);
+            self.set_w_pointer(p_col_idx);
             self.draw_screen(cells);
         } else {
             self.draw_from_column(cells);
@@ -2425,7 +2474,7 @@ impl WinInfo {
     }
 
     fn sort_indices(col: &mut Column, dir: Sort) {
-        let visible_len = col.len().saturating_sub(col.padding);
+        let visible_len = col.len().saturating_sub(col.padding).min(col.indices.len());
         match dir {
             Sort::AscAlph => 
                 col.indices[..visible_len].sort_by(|&i, &j| {
@@ -2941,14 +2990,8 @@ impl WinInfo {
         let new_row_len = self.num_rows + count;
         
         for col in &mut cells.columns {
-            for _ in start..start + count {
-                col.push_cell(Cell::new(""));
-            }
-
-            let mut idx_split = col.indices.split_off(start);
-            let mut index_insert = (self.num_rows..new_row_len).collect::<Vec<usize>>();
-            col.indices.append(&mut index_insert);
-            col.indices.append(&mut idx_split);
+            let new_cells = (0..count).map(|_| Cell::new("")).collect();
+            col.insert_new_cells(start, new_cells);
         }
         cells.written = true;
         self.num_rows = new_row_len;
@@ -2960,19 +3003,11 @@ impl WinInfo {
         let start = self.h_pointer + 1;
         let end = start + count;
 
-        let new_row_len = self.num_rows + count;
-        
         for col in &mut cells.columns {
             let mut clone = col.get_cell(self.h_pointer).clone();
             clone.is_focused = false;
-            for _ in start..end {
-                col.cells.push(clone.clone());
-            }
-
-            let mut index_insert = (self.num_rows..new_row_len).collect::<Vec<usize>>();
-            let mut idx_split = col.indices.split_off(start);
-            col.indices.append(&mut index_insert);
-            col.indices.append(&mut idx_split);
+            let new_cells = (start..end).map(|_| clone.clone()).collect();
+            col.insert_new_cells(start, new_cells);
         }
 
         cells.written = true;
@@ -3085,22 +3120,21 @@ impl WinInfo {
     }
 
     fn hex_to_dec<'a>(hex: &'a str) -> Result<usize, CmdErr<'a>> {
-        let hex = Self::trim_quotes(hex);
-        let len = hex.len();
-        let mut hex = hex.chars();
+        let digits = Self::trim_quotes(hex);
         let mut num = 0usize;
-        for i in (0..len).rev() {
-            match Self::compute_valid_hex(hex.nth(0).unwrap()) {
-                Ok(d) => num += d * (16usize.pow(i as u32)),
-                Err(e) => return Err(e),
-            }
+        for c in digits.chars() {
+            let d = Self::compute_valid_hex(c)?;
+            num = num
+                .checked_mul(16)
+                .and_then(|n| n.checked_add(d))
+                .ok_or(CmdErr::InvalidDec(hex))?;
         }
         Ok(num)
     }
 
     fn str_to_dec<'a>(s: &'a str) -> Result<usize, CmdErr<'a>> {
-        match s.chars().nth(0).unwrap() {
-            '\'' | '"' => Self::hex_to_dec(s),
+        match s.chars().next() {
+            Some('\'') | Some('"') => Self::hex_to_dec(s),
             _       => {
                 match s.parse::<usize>() {
                     Ok(val) => Ok(val),
@@ -3130,7 +3164,7 @@ impl WinInfo {
         let hi = match tokens.get(1) {
             Some(val) => {
                 match *val {
-                    "" => self.num_rows - 1,
+                    "" => self.num_rows.saturating_sub(1),
                     "_" => self.h_pointer,
                     _ => {
                         match Self::str_to_dec(val) {
@@ -3304,16 +3338,18 @@ impl WinInfo {
             }
             Ok(col_idx) => {
                 cells.w_cell().is_focused = false;
+                let old_indices = cells.columns[col_idx].indices.clone();
                 {
                     let mut col = &mut cells.columns[col_idx];
                     Self::sort_indices(&mut col, sort_dir);
                 }
 
-                for i in 0..col_idx {
-                    cells.columns[i].indices = cells.columns[col_idx].indices.clone();
-                }
-                for i in col_idx + 1..cells.columns.len() {
-                    cells.columns[i].indices = cells.columns[col_idx].indices.clone();
+                // columns can differ in how their cells are laid out
+                // (e.g. one column was reverted after a filter),
+                // so apply the sorted row order rather than copying indices
+                let order = Self::row_order(&old_indices, &cells.columns[col_idx].indices);
+                for i in (0..cells.columns.len()).filter(|&i| i != col_idx) {
+                    Self::reorder_rows(&mut cells.columns[i], &order);
                 }
                 cells.written = true;
                 cells.set_w_cell(self.w_pointer, self.h_pointer);
@@ -3324,6 +3360,47 @@ impl WinInfo {
         }
     }
 
+    // for each display row after reordering a column,
+    // the display row it came from
+    fn row_order(old_indices: &[usize], new_indices: &[usize]) -> Vec<Option<usize>> {
+        let mut old_pos = std::collections::HashMap::<usize, usize>::new();
+        for (pos, &real) in old_indices.iter().enumerate() {
+            old_pos.insert(real, pos);
+        }
+        new_indices
+            .iter()
+            .map(|real| old_pos.get(real).copied())
+            .collect()
+    }
+
+    // rearrange a column's rows to match a reordered column;
+    // rows that didn't exist before (None) become padding
+    fn reorder_rows(col: &mut Column, order: &[Option<usize>]) {
+        let old_indices = col.indices.clone();
+        let mut new_indices = Vec::<usize>::with_capacity(order.len());
+        let mut used = vec![false; old_indices.len()];
+        for from in order {
+            match from.and_then(|f| old_indices.get(f).map(|&real| (f, real))) {
+                Some((f, real)) => {
+                    used[f] = true;
+                    new_indices.push(real);
+                }
+                None => {
+                    new_indices.push(col.cells.len());
+                    col.cells.push(Cell::new(""));
+                    col.padding += 1;
+                }
+            }
+        }
+        // keep any rows the other column didn't have
+        for (f, &real) in old_indices.iter().enumerate() {
+            if !used[f] {
+                new_indices.push(real);
+            }
+        }
+        col.indices = new_indices;
+    }
+
     fn sift_by(&mut self, cells: &mut Cells, col_name: &str) {
          match cells.get_col_idx(col_name) {
             Err(e) => {
@@ -3331,32 +3408,22 @@ impl WinInfo {
                 return;
             }
             Ok(col_idx) => {
+                let col = &cells.columns[col_idx];
+                if (0..col.len().saturating_sub(col.padding)).all(|row| col.view_cell(row) == "") {
+                    print_bottom!(self, "No values to sift by in '{}'", cells.header[col_idx].content);
+                    return;
+                }
                 cells.w_cell().is_focused = false;
                 let orig_len = self.num_rows;
+                let old_indices = cells.columns[col_idx].indices.clone();
                 {
                     let col = &mut cells.columns[col_idx];
                     self.num_rows = col.make_unique();
                 }
 
-                let new_indices = cells.columns[col_idx].indices.clone();
-
-                for i in 0..col_idx {
-                    let col = cells.get_column(i);
-                    let padding = col.len() - self.num_rows;
-                    for _ in 0..padding {
-                        col.push_cell(Cell::new(""));
-                    }
-                    col.padding = padding;
-                    col.indices = new_indices.clone();
-                }
-                for i in col_idx + 1..cells.columns.len() {
-                    let col = cells.get_column(i);
-                    let padding = col.len() - self.num_rows;
-                    for _ in 0..padding {
-                        col.push_cell(Cell::new(""));
-                    }
-                    col.padding = padding;
-                    col.indices = new_indices.clone();
+                let order = Self::row_order(&old_indices, &cells.columns[col_idx].indices);
+                for i in (0..cells.columns.len()).filter(|&i| i != col_idx) {
+                    Self::reorder_rows(&mut cells.columns[i], &order);
                 }
                 cells.written = true;
                 self.set_h_pointer(self.h_pointer);
@@ -3378,6 +3445,7 @@ impl WinInfo {
         for col in &mut cells.columns {
             col.revert();
         }
+        cells.written = true;
         self.num_rows = cells.num_rows();
         cells.set_w_cell(self.w_pointer, self.h_pointer);
         self.draw_screen(cells);
@@ -3498,6 +3566,16 @@ impl WinInfo {
             None => ida,
         };
 
+        let (ida, idb) = (ida.min(idb), ida.max(idb));
+        if idb >= cells.num_cols() {
+            cmd_err::print(CmdErr::InvalidIndex(idb), self.height);
+            return;
+        }
+        if idb - ida + 1 == cells.num_cols() {
+            print_bottom!(self, "Cannot slice out every column");
+            return;
+        }
+
         cells.slices += 1;
         let mut fn_split = Self::tokenize(&cells.filename, '.');
         let first = format!(
@@ -3536,9 +3614,11 @@ impl WinInfo {
         cells.written = true;
         new_cells.written = true;
 
-        if cells.w_cell.0 >= cells.num_cols() {
-            cells.w_cell.0 = cells.num_cols().saturating_sub(1);
-        }
+        // keep the original sheet's focus inside its remaining columns
+        self.num_cols = cells.num_cols();
+        self.clamp_view();
+        cells.w_cell = (self.w_pointer, self.h_pointer);
+        csvs.save_context(self);
         
         let new_id = csvs.num_contexts();
         let new_context = Context::new(
@@ -3572,6 +3652,16 @@ impl WinInfo {
         // -create new Context
         // -add Context to Csvs and change handle to it
         //
+        let (st, end) = (st.min(end), st.max(end));
+        if end >= self.num_rows {
+            cmd_err::print(CmdErr::InvalidIndex(end), self.height);
+            return;
+        }
+        if end - st + 1 == self.num_rows {
+            print_bottom!(self, "Cannot slice out every row");
+            return;
+        }
+
         let cells = csvs.get_cells();
 
         cells.w_cell().is_focused = false;
@@ -3599,24 +3689,18 @@ impl WinInfo {
             col.reindex();
             let real_end = end.min(col.len().saturating_sub(1));
             let removed = col.drain_cells(st..=real_end);
+            new_col.indices = (0..removed.len()).collect();
             new_col.cells = removed;
-            new_col.indices = (0..(end-st + 1)).collect();
             new_cells.push_column(new_col);
         }
         cells.written = true;
         new_cells.written = true;
 
-        self.num_rows = self.num_rows.saturating_sub(
-            end.saturating_sub(st)
-        );
-        if self.h_pointer > self.num_rows - 2 {
-            self.h_pointer = self.num_rows - 2;
-            self.h_offset = (self.num_rows - 1).saturating_sub(self.h_page);
-            csvs.get_cells().w_cell = (self.w_pointer, self.h_pointer);
-            let con = csvs.get_context();
-            con.h_pointer = self.h_pointer;
-            con.h_offset = self.h_offset;
-        }
+        // keep the original sheet's focus inside its remaining rows
+        self.num_rows = cells.num_rows();
+        self.clamp_view();
+        cells.w_cell = (self.w_pointer, self.h_pointer);
+        csvs.save_context(self);
         
         let new_id = csvs.num_contexts();
         let new_context = Context::new(
@@ -3903,7 +3987,8 @@ impl WinInfo {
     }
 
     fn apply_sheet_filter(cells: &mut Cells, visible_rows: &[usize]) {
-        let row_count = cells.num_rows();
+        // rows hidden by an earlier filter stay hidden, after the new ones
+        let row_count = cells.visible_rows();
         let mut is_visible = vec![false; row_count];
         for &row in visible_rows {
             if row < row_count {
@@ -3937,6 +4022,7 @@ impl WinInfo {
                     .iter()
                     .filter_map(|&row| previous_indices.get(row).copied()),
             );
+            new_indices.extend(previous_indices.iter().skip(row_count).copied());
 
             col.padding += padding;
             col.indices = new_indices;
@@ -3945,8 +4031,9 @@ impl WinInfo {
 
     fn matching_sheet_cells(cells: &Cells, term: &str, insensitive: bool) -> Vec<(usize, usize)> {
         let mut matches = Vec::new();
+        let row_count = cells.visible_rows();
         for (col_idx, col) in cells.columns.iter().enumerate() {
-            for row in 0..col.len() {
+            for row in 0..row_count.min(col.indices.len()) {
                 let content = col.view_cell(row);
                 let found = if insensitive {
                     content.to_lowercase().contains(term)
@@ -4242,6 +4329,208 @@ mod tests {
         win.write_buffer.reset();
         win.cursor.offset = 0;
         win.add_to_write_buffer(cmd);
+    }
+
+    fn win_for(cells: &mut Cells) -> WinInfo {
+        let mut win = command_win();
+        win.num_cols = cells.num_cols();
+        win.num_rows = cells.num_rows();
+        win
+    }
+
+    #[test]
+    fn tokenize_handles_multibyte_chars() {
+        assert_eq!(WinInfo::tokenize("cn to 日本", ' '), vec!["cn", "to", "日本"]);
+        assert_eq!(WinInfo::tokenize("col f 'é名 x' y", ' '), vec!["col", "f", "'é名 x'", "y"]);
+        assert_eq!(WinInfo::tokenize("é-日", '-'), vec!["é", "日"]);
+    }
+
+    #[test]
+    fn trim_quotes_handles_empty_and_multibyte() {
+        assert_eq!(WinInfo::trim_quotes(""), "");
+        assert_eq!(WinInfo::trim_quotes("'"), "");
+        assert_eq!(WinInfo::trim_quotes("'é名'"), "é名");
+        assert_eq!(WinInfo::trim_quotes("plain"), "plain");
+    }
+
+    #[test]
+    fn row_numbers_reject_bad_input_without_panicking() {
+        assert!(WinInfo::str_to_dec("").is_err());
+        assert!(WinInfo::str_to_dec("'é'").is_err());
+        assert!(WinInfo::str_to_dec("'FFFFFFFFFFFFFFFFFFFF'").is_err());
+        assert_eq!(WinInfo::str_to_dec("'1F'").ok(), Some(31));
+    }
+
+    #[test]
+    fn col_idx_rejects_empty_and_lone_quote() {
+        let cells = cells_with_rows("ids.csv", vec!["é名", "b"], vec![vec!["1", "2"]]);
+        assert!(cells.get_col_idx("").is_err());
+        assert!(cells.get_col_idx("'").is_err());
+        assert_eq!(cells.get_col_idx("'é名'").ok(), Some(0));
+    }
+
+    #[test]
+    fn write_buffer_grows_with_text_after_cursor() {
+        let mut buf = WriteBuf::new(4);
+        for c in "abcd".chars() {
+            buf.insert(c);
+        }
+        buf.move_gap(1);
+        for c in "XYZ".chars() {
+            buf.insert(c);
+        }
+        assert_eq!(buf.as_string().trim_end(), "aXYZbcd");
+        buf.move_gap(100);
+        assert_eq!(buf.gap_start, buf.content_len);
+    }
+
+    #[test]
+    fn long_command_then_right_arrow_does_not_panic() {
+        let mut win = command_win();
+        win.cursor.limit = 10;
+        type_command(&mut win, &"w".repeat(2000));
+        win.move_cursor_right();
+        win.move_cursor_right();
+        assert_eq!(win.write_buffer.as_string().trim_end(), "w".repeat(2000));
+    }
+
+    #[test]
+    fn sheet_sort_after_reverting_one_filtered_column() {
+        let mut cells = cells_with_rows(
+            "mixed.csv",
+            vec!["A", "B"],
+            vec![vec!["z", "1"], vec!["m", "2"], vec!["a", "3"]],
+        );
+        WinInfo::apply_sheet_filter(&mut cells, &[0, 2]);
+        cells.columns[1].revert();
+        let mut win = win_for(&mut cells);
+
+        win.sort_by(&mut cells, "A", Sort::AscAlph);
+
+        for col in &cells.columns {
+            assert!(col.indices.iter().all(|&idx| idx < col.cells.len()));
+        }
+        assert_eq!(cells.columns[0].view_cell(0), "a");
+        assert_eq!(cells.columns[0].view_cell(1), "z");
+    }
+
+    #[test]
+    fn inserted_rows_survive_revert_after_unique() {
+        let mut cells = cells_with_rows(
+            "unique.csv",
+            vec!["A"],
+            vec![vec!["x"], vec!["x"], vec!["y"]],
+        );
+        cells.columns[0].make_unique();
+        let mut win = win_for(&mut cells);
+
+        win.insert_row(&mut cells, 2);
+        cells.columns[0].revert();
+
+        // reverted order is storage order, with the new rows kept at the end
+        assert_eq!(column_values(&cells, 0), vec!["x", "x", "y", "", ""]);
+    }
+
+    #[test]
+    fn slicing_every_row_or_column_is_refused() {
+        let cells = cells_with_rows("all.csv", vec!["A", "B"], vec![vec!["1", "2"], vec!["3", "4"]]);
+        let mut csvs = Csvs::new(vec![Context::new(0, cells)]);
+        let mut win = win_for(csvs.get_cells());
+
+        win.slice_rows("0-1", &mut csvs);
+        win.slice_cols("A-B", &mut csvs);
+        win.slice_rows("5", &mut csvs);
+        win.slice_cols("B-A", &mut csvs);
+        assert_eq!(csvs.num_contexts(), 1);
+
+        win.slice_cols("B", &mut csvs);
+        assert_eq!(csvs.num_contexts(), 2);
+        assert_eq!(csvs.contexts[0].cells.num_cols(), 1);
+    }
+
+    #[test]
+    fn view_is_clamped_after_sheet_shrinks() {
+        let mut cells = cells_with_generated_rows("shrink.csv", vec!["A", "B"], 40);
+        let mut win = win_for(&mut cells);
+        win.h_pointer = 39;
+        win.h_offset = 35;
+        win.w_pointer = 1;
+        win.num_rows = 2;
+        win.num_cols = 1;
+
+        win.draw_screen(&mut cells);
+        win.draw_rows(&mut cells);
+        win.draw_from_column(&mut cells);
+
+        assert_eq!((win.w_pointer, win.h_pointer), (0, 1));
+        assert!(win.h_offset <= win.h_pointer);
+    }
+
+    #[test]
+    fn new_column_on_filtered_sheet_matches_layout() {
+        let mut cells = cells_with_rows(
+            "newcol.csv",
+            vec!["A"],
+            vec![vec!["q"], vec!["x"], vec!["q"]],
+        );
+        WinInfo::apply_sheet_filter(&mut cells, &[0, 2]);
+        let mut win = win_for(&mut cells);
+        win.num_rows = 2;
+
+        win.new_column(&mut cells, "B");
+
+        let (a, b) = (&cells.columns[0], &cells.columns[1]);
+        assert_eq!(a.indices, b.indices);
+        assert_eq!(a.cells.len(), b.cells.len());
+        assert_eq!(a.padding, b.padding);
+        // undo/redo and sheet switching reload the visible count
+        assert_eq!(cells.visible_rows(), 2);
+    }
+
+    #[test]
+    fn filtering_an_already_filtered_sheet_keeps_counts() {
+        let mut cells = cells_with_rows(
+            "refilter.csv",
+            vec!["A", "B"],
+            vec![
+                vec!["zz", "1"], vec!["a", "2"], vec!["zz", "3"],
+                vec!["b", "4"], vec!["zz", "5"], vec!["c", "6"],
+            ],
+        );
+        let rows = WinInfo::matching_sheet_cells(&cells, "zz", false)
+            .iter().map(|m| m.1).collect::<Vec<_>>();
+        assert_eq!(rows, vec![0, 2, 4]);
+        WinInfo::apply_sheet_filter(&mut cells, &rows);
+        assert_eq!(cells.visible_rows(), 3);
+
+        // only the shown rows are searched the second time
+        let rows = WinInfo::matching_sheet_cells(&cells, "3", false)
+            .iter().map(|m| m.1).collect::<Vec<_>>();
+        assert_eq!(rows, vec![1]);
+        WinInfo::apply_sheet_filter(&mut cells, &rows);
+        assert_eq!(cells.visible_rows(), 1);
+        assert_eq!(cells.columns[1].view_cell(0), "3");
+
+        for col in &cells.columns {
+            assert_eq!(col.indices.len(), col.cells.len());
+            assert!(col.indices.iter().all(|&idx| idx < col.cells.len()));
+        }
+        // every original value is still stored
+        cells.columns[1].revert();
+        assert_eq!(column_values(&cells, 1), vec!["1", "2", "3", "4", "5", "6"]);
+    }
+
+    #[test]
+    fn unique_on_first_column_keeps_sheet_row_count() {
+        let mut cells = cells_with_rows(
+            "firstcol.csv",
+            vec!["A", "B"],
+            vec![vec!["x", "1"], vec!["x", "2"], vec!["x", "3"]],
+        );
+        cells.columns[0].make_unique();
+
+        assert_eq!(cells.columns[0].visible_len(), 1);
+        assert_eq!(cells.visible_rows(), 3);
     }
 
     #[test]

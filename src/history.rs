@@ -177,7 +177,13 @@ fn apply(edit: &mut Edit, csvs: &mut Csvs, w_info: &mut WinInfo) {
             w_info.set_context(csvs.get_context());
 
             let cells = csvs.get_cells();
-            let current = &mut cells.columns[*col].cells[*real_row];
+            // the cell is gone if an unrecorded change shrank the sheet
+            let current = match cells.columns
+                .get_mut(*col)
+                .and_then(|c| c.cells.get_mut(*real_row)) {
+                Some(c) => c,
+                None => return,
+            };
             mem::swap(&mut current.content, &mut cell.content);
             mem::swap(&mut current.escape_sequences, &mut cell.escape_sequences);
             current.text_offset = 0;
