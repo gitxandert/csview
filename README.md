@@ -45,6 +45,8 @@ csview currently admits the following key bindings:
     - adjust column width
 - **y**
     - yank (copy) content of focused cell
+- **ctrl + y**
+    - yank content of focused cell and copy it to the system clipboard (uses wl-copy, xclip, xsel, or pbcopy)
 - **d**
     - yank and remove content of focused cell
 - **p**

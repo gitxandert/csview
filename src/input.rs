@@ -15,6 +15,33 @@ fn bottom_preview(content: &str, max_shown: usize) -> (String, bool) {
     (WinInfo::terminal_safe_prefix(content, take), truncated)
 }
 
+// Pipe content to the first available clipboard tool; returns false if none worked
+fn copy_to_clipboard(content: &str) -> bool {
+    use std::{io::Write, process::{Command, Stdio}};
+
+    let tools: [&[&str]; 4] = [
+        &["wl-copy"],
+        &["xclip", "-selection", "clipboard"],
+        &["xsel", "--clipboard", "--input"],
+        &["pbcopy"],
+    ];
+    for tool in tools {
+        let Ok(mut child) = Command::new(tool[0])
+            .args(&tool[1..])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn() else { continue };
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(content.as_bytes());
+        }
+        if child.wait().is_ok_and(|s| s.success()) {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn process_input(
     input: &[u8], 
     w_info: &mut WinInfo, 
@@ -223,19 +250,28 @@ pub fn process_input(
                     w_info.draw_focus(csvs.get_cells());
                     w_info.flush();
                 }
-                // y (yank)
-                [121] => {
+                // y (yank) | ctrl + y (yank to system clipboard)
+                [121] | [25] => {
                     let cell = csvs.get_cells().w_cell();
                     w_info.set_yanked(cell);
-                    let max_shown = w_info.width.saturating_sub(9);
+                    let verb = match input[0] {
+                        25 => match copy_to_clipboard(&w_info.yanked) {
+                            true => "clipped",
+                            false => "clipboard unavailable; yanked",
+                        },
+                        _ => "yanked",
+                    };
+                    let max_shown = w_info.width.saturating_sub(verb.len() + 3);
                     let (preview, truncated) = bottom_preview(&w_info.yanked, max_shown);
                     let yank_str = match truncated {
-                        true => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}...'",
+                        true => format!("\x1b[{};1H\x1b[2K\x1b[0m{} '{}...'",
                                     w_info.height, 
+                                    verb,
                                     preview
                                 ),
-                        false => format!("\x1b[{};1H\x1b[2K\x1b[0myanked '{}'",
+                        false => format!("\x1b[{};1H\x1b[2K\x1b[0m{} '{}'",
                                     w_info.height, 
+                                    verb,
                                     preview
                                 ),
                     };
