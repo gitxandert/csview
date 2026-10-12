@@ -1406,6 +1406,11 @@ impl WinInfo {
                 ),
         }
         checkpoint.commit(csvs);
+        // keep the cached counts in step with whatever the command changed
+        let cells = csvs.get_cells();
+        self.num_cols = cells.num_cols();
+        self.num_rows = cells.visible_rows();
+        self.clamp_view();
         SigFlag::Non
     }
 
@@ -2175,6 +2180,8 @@ impl WinInfo {
         if filter {
             Self::apply_column_filter(col, &indices);
             indices = (0..indices.len()).collect();
+            // the sheet shrinks if this was its longest column
+            self.num_rows = cells.visible_rows();
 
             cells.set_w_cell(self.w_pointer, 0);
             cells.written = true;
@@ -2457,6 +2464,9 @@ impl WinInfo {
         cells.w_cell().is_focused = false;
         let orig = &mut cells.columns[self.w_pointer];
         let uq_len = orig.make_unique(); 
+        // the sheet shrinks if this was its longest column
+        self.num_rows = cells.visible_rows();
+        self.clamp_view();
         
         let values = "values";
         print_bottom!(
@@ -4531,6 +4541,23 @@ mod tests {
 
         assert_eq!(cells.columns[0].visible_len(), 1);
         assert_eq!(cells.visible_rows(), 3);
+    }
+
+    #[test]
+    fn unique_on_only_column_shrinks_sheet() {
+        let cells = cells_with_rows(
+            "onecol.csv",
+            vec!["A"],
+            vec![vec!["N/A"], vec!["0x1F"], vec![""]],
+        );
+        let mut csvs = Csvs::new(vec![Context::new(0, cells)]);
+        let mut win = win_for(csvs.get_cells());
+        win.h_pointer = 2;
+
+        win.show_unique_column_values(&mut csvs);
+
+        assert_eq!(win.num_rows, 2);
+        assert_eq!(win.h_pointer, 1);
     }
 
     #[test]
