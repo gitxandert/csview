@@ -184,5 +184,8 @@ csview also has a command mode, accessed through ':' :
             - -f/--filter: filters the sheet to only the rows that contain the term
     - `sh rn {new_name}` | `sheet rename {new_name}`
         - renames the current sheet to the provided new_name
+- **up/down arrows**
+    - scroll through previously run commands; scrolling past the newest restores what you were typing
+    - the last 100 commands are kept across sessions in ~/.csview/cmd_history
 - **ctrl + q**
     - quits command mode

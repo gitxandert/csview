@@ -406,9 +406,11 @@ pub fn process_input(
         InputMode::Command => {
             match input {
                 // normal arrows
-                [27, 91, 65] => { // up
+                [27, 91, 65] => { // up (older command)
+                    w_info.browse_cmd_history(true);
                 }
-                [27, 91, 66] => { // down
+                [27, 91, 66] => { // down (newer command)
+                    w_info.browse_cmd_history(false);
                 }
                 [27, 91, 67] => { // right
                     // scrolls cursor right

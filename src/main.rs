@@ -15,7 +15,7 @@ use crate::{
     input::process_input,
     terminal::{check_flags, SigFlag, WinInfo},
     csv_io::{
-        load_csv, 
+        cmd_history_path, load_csv, 
         poll_stdin, PollEvent, 
         save_backup, write_to_file
     },
@@ -80,6 +80,9 @@ fn main() {
 
     let mut csvs = Csvs::new(contexts);
     let mut w_info = WinInfo::new();
+    if let Some(path) = cmd_history_path() {
+        w_info.set_cmd_history_file(path);
+    }
     w_info.set_context(csvs.get_context());
     w_info.draw_context(&mut csvs);
     w_info.show_csv(csvs.get_cells());

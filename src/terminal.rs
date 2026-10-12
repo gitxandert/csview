@@ -1,6 +1,7 @@
 use std::{
     mem,
     io::Write,
+    path::PathBuf,
     sync::atomic::{AtomicBool, Ordering}
 };
 use libc::{
@@ -11,7 +12,7 @@ use libc::{
 use crate::{
     cells::*,
     cmd_err::{self, CmdErr},
-    csv_io::{make_col_ids, poll_stdin, PollEvent},
+    csv_io::{append_cmd_history, load_cmd_history, make_col_ids, poll_stdin, PollEvent},
     history::Checkpoint,
 };
 
@@ -200,7 +201,14 @@ pub struct WinInfo {
     cursor: Cursor,
     write_buffer: WriteBuf,
     pub yanked: String,
+    cmd_history: Vec<String>,
+    cmd_history_idx: Option<usize>, // None while not browsing history
+    cmd_draft: String, // typed command, kept while browsing
+    cmd_history_file: Option<PathBuf>, // None keeps history in memory only
 }
+
+// oldest commands are dropped once the history grows past this
+const MAX_CMD_HISTORY: usize = 100;
 
 // helper macro to print to bottom of screen
 // (only works with WinInfo)
@@ -251,6 +259,10 @@ impl WinInfo {
             cursor: Cursor::new(),
             write_buffer: WriteBuf::new(1024),
             yanked: String::new(),
+            cmd_history: Vec::<String>::new(),
+            cmd_history_idx: None,
+            cmd_draft: String::new(),
+            cmd_history_file: None,
         }
     }
 
@@ -296,6 +308,8 @@ impl WinInfo {
                 self.set_cursor(self.height, 2, self.width.saturating_sub(1));
                 self.cursor.offset = 0usize;
                 self.write_buffer.reset();
+                self.cmd_history_idx = None;
+                self.cmd_draft.clear();
                 self.push_str_to_frame(
                     &format!(
                         "\x1b[{};1H\x1b[2K\x1b[0m:\x1b[{};{}H\x1b[?25h",
@@ -549,6 +563,58 @@ impl WinInfo {
                 cursor.offset = new_cur_off;
             }
         }
+    }
+
+    // load earlier sessions' commands and save new ones to path
+    pub fn set_cmd_history_file(&mut self, path: PathBuf) {
+        self.cmd_history = load_cmd_history(&path, MAX_CMD_HISTORY);
+        self.cmd_history_file = Some(path);
+    }
+
+    fn push_cmd_history(&mut self, cmd: &str) {
+        self.cmd_history_idx = None;
+        if cmd.trim().is_empty()
+        || cmd.contains('\n')
+        || self.cmd_history.last().map(|c| c.as_str()) == Some(cmd) {
+            return;
+        }
+        self.cmd_history.push(cmd.to_string());
+        if let Some(path) = &self.cmd_history_file {
+            // history is a convenience; don't interrupt over it
+            let _ = append_cmd_history(path, cmd);
+        }
+        if self.cmd_history.len() > MAX_CMD_HISTORY {
+            self.cmd_history.remove(0);
+        }
+    }
+
+    // replace the command being typed with an older (up) or newer (down) one
+    pub fn browse_cmd_history(&mut self, older: bool) {
+        let len = self.cmd_history.len();
+        let idx = match (self.cmd_history_idx, older) {
+            (_, _) if len == 0 => return,
+            (None, true) => {
+                self.cmd_draft = self.write_buffer.as_string();
+                Some(len - 1)
+            }
+            (None, false) => return,
+            (Some(i), true) => Some(i.saturating_sub(1)),
+            (Some(i), false) if i + 1 < len => Some(i + 1),
+            (Some(_), false) => None,
+        };
+        self.cmd_history_idx = idx;
+
+        let cmd = match idx {
+            Some(i) => self.cmd_history[i].clone(),
+            None => mem::take(&mut self.cmd_draft),
+        };
+        self.write_buffer.reset();
+        self.cursor.offset = 0usize;
+        // add one char at a time, as if typed
+        for c in cmd.chars() {
+            self.add_to_write_buffer(&c.to_string());
+        }
+        self.changed = WinChange::Command;
     }
 
     pub fn delete_from_write_buffer(&mut self) {
@@ -1276,6 +1342,7 @@ impl WinInfo {
 
     pub fn process_command(&mut self, csvs: &mut Csvs) -> SigFlag {
         let input = self.write_buffer.as_string();
+        self.push_cmd_history(&input);
         let tokens = Self::tokenize(&input, ' ');
         let checkpoint = Checkpoint::take(csvs, self, &tokens);
         match tokens[0] {
@@ -4161,6 +4228,98 @@ mod tests {
             .join(format!("csview_{name}_{}_{}.csv", std::process::id(), nonce))
             .to_string_lossy()
             .into_owned()
+    }
+
+    fn command_win() -> WinInfo {
+        let mut win = WinInfo::new();
+        win.width = 80;
+        win.height = 10;
+        win.cursor.limit = 79;
+        win
+    }
+
+    fn type_command(win: &mut WinInfo, cmd: &str) {
+        win.write_buffer.reset();
+        win.cursor.offset = 0;
+        win.add_to_write_buffer(cmd);
+    }
+
+    #[test]
+    fn command_history_browses_older_and_newer() {
+        let mut win = command_win();
+        win.push_cmd_history("row c");
+        win.push_cmd_history("col c");
+
+        type_command(&mut win, "sh");
+        win.browse_cmd_history(true);
+        assert_eq!(win.write_buffer.as_string(), "col c");
+        win.browse_cmd_history(true);
+        assert_eq!(win.write_buffer.as_string(), "row c");
+        // stops at the oldest
+        win.browse_cmd_history(true);
+        assert_eq!(win.write_buffer.as_string(), "row c");
+
+        win.browse_cmd_history(false);
+        assert_eq!(win.write_buffer.as_string(), "col c");
+        // past the newest restores what was being typed
+        win.browse_cmd_history(false);
+        assert_eq!(win.write_buffer.as_string(), "sh");
+        win.browse_cmd_history(false);
+        assert_eq!(win.write_buffer.as_string(), "sh");
+    }
+
+    #[test]
+    fn command_history_skips_blank_and_repeated_commands() {
+        let mut win = command_win();
+        win.push_cmd_history("row c");
+        win.push_cmd_history("row c");
+        win.push_cmd_history("  ");
+
+        assert_eq!(win.cmd_history, vec!["row c"]);
+    }
+
+    #[test]
+    fn command_history_cursor_ends_after_recalled_command() {
+        let mut win = command_win();
+        win.push_cmd_history("row c");
+
+        type_command(&mut win, "");
+        win.browse_cmd_history(true);
+        win.add_to_write_buffer("ount");
+        assert_eq!(win.write_buffer.as_string(), "row count");
+    }
+
+    #[test]
+    fn command_history_persists_across_sessions() {
+        let path = PathBuf::from(test_path("cmd_history"));
+
+        let mut win = command_win();
+        win.set_cmd_history_file(path.clone());
+        win.push_cmd_history("row c");
+        win.push_cmd_history("col c");
+
+        let mut next = command_win();
+        next.set_cmd_history_file(path.clone());
+        assert_eq!(next.cmd_history, vec!["row c", "col c"]);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn command_history_file_is_trimmed_to_max() {
+        let path = PathBuf::from(test_path("cmd_history_trim"));
+        let lines: Vec<String> = (0..MAX_CMD_HISTORY + 5)
+            .map(|i| format!("row g {i}"))
+            .collect();
+        fs::write(&path, lines.join("\n")).unwrap();
+
+        let mut win = command_win();
+        win.set_cmd_history_file(path.clone());
+        assert_eq!(win.cmd_history.len(), MAX_CMD_HISTORY);
+        assert_eq!(win.cmd_history[0], "row g 5");
+        assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), MAX_CMD_HISTORY);
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

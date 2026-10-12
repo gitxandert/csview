@@ -2,7 +2,7 @@ use std::{
     env,
     fs,
     time::{SystemTime, UNIX_EPOCH},
-    io::{self, Read, stdin},
+    io::{self, Read, Write, stdin},
     path::{Component, Path, PathBuf}
 };
 use libc::{poll, pollfd, POLLIN, STDIN_FILENO};
@@ -195,6 +195,46 @@ pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
     let cells = parse_csv_into_cells(filename, file, delim)?;
 
     Ok(cells)
+}
+
+// commands run in command mode, one per line,
+// kept in ~/.csview/cmd_history
+pub fn cmd_history_path() -> Option<PathBuf> {
+    let home_dir = env::home_dir()?;
+    Some(home_dir.join(".csview").join("cmd_history"))
+}
+
+// returns the last max commands, trimming the file if it holds more
+pub fn load_cmd_history(path: &Path, max: usize) -> Vec<String> {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::<String>::new(),
+    };
+    let mut cmds: Vec<String> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect();
+
+    if cmds.len() > max {
+        cmds.drain(..cmds.len() - max);
+        let mut trimmed = cmds.join("\n");
+        trimmed.push('\n');
+        let _ = fs::write(path, trimmed);
+    }
+
+    cmds
+}
+
+pub fn append_cmd_history(path: &Path, cmd: &str) -> Result<(), io::Error> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(file, "{cmd}")
 }
 
 pub fn save_backup(file: &String) -> Result<String, io::Error> {
