@@ -372,8 +372,13 @@ pub fn process_input(
                 [27] => { // escape by itself
                     // ignore for now
                 }
-                [27, 91, 90] => { // shift-tab
-                    // ignore for now
+                [9] => { // tab (jump to next word)
+                    w_info.jump_word_right();
+                    w_info.changed = WinChange::Write;
+                }
+                [27, 91, 90] => { // shift-tab (jump to previous word)
+                    w_info.jump_word_left();
+                    w_info.changed = WinChange::Write;
                 }
                 // modified arrows
                 [27, 91, 49, 59, m, d] => {
@@ -414,8 +419,14 @@ pub fn process_input(
                 }
                 [27, 91, 50, 126] => { /* insert */ }
                 [27, 91, 51, 126] => { /* delete */ }
-                [27, 91, 70] => { /* end */ }
-                [27, 91, 72] => { /* home */ }
+                [27, 91, 70] | [27, 79, 70] | [27, 91, 52, 126] | [27, 91, 56, 126] => { // end
+                    w_info.move_cursor_end();
+                    w_info.changed = WinChange::Write;
+                }
+                [27, 91, 72] | [27, 79, 72] | [27, 91, 49, 126] | [27, 91, 55, 126] => { // home
+                    w_info.move_cursor_home();
+                    w_info.changed = WinChange::Write;
+                }
                 [27, 91, 50, 59, 53, 126] => { /* ctrl + insert */ }
                 [27, 91, 51, 59, 53, 126] => { /* ctrl + delete */ }
                 _ => {
@@ -479,8 +490,13 @@ pub fn process_input(
                     let col = cells.get_column(w_info.w_pointer);
                     w_info.set_command_mode(false, &col);
                 }
-                [27, 91, 90] => { // shift-tab
-                    // ignore for now
+                [9] => { // tab (jump to next word)
+                    w_info.jump_word_right();
+                    w_info.changed = WinChange::Command;
+                }
+                [27, 91, 90] => { // shift-tab (jump to previous word)
+                    w_info.jump_word_left();
+                    w_info.changed = WinChange::Command;
                 }
                 // modified arrows
                 [27, 91, 49, 59, m, d] => {
@@ -525,8 +541,14 @@ pub fn process_input(
                 }
                 [27, 91, 50, 126] => { /* insert */ }
                 [27, 91, 51, 126] => { /* delete */ }
-                [27, 91, 70] => { /* end */ }
-                [27, 91, 72] => { /* home */ }
+                [27, 91, 70] | [27, 79, 70] | [27, 91, 52, 126] | [27, 91, 56, 126] => { // end
+                    w_info.move_cursor_end();
+                    w_info.changed = WinChange::Command;
+                }
+                [27, 91, 72] | [27, 79, 72] | [27, 91, 49, 126] | [27, 91, 55, 126] => { // home
+                    w_info.move_cursor_home();
+                    w_info.changed = WinChange::Command;
+                }
                 [27, 91, 50, 59, 53, 126] => { /* ctrl + insert */ }
                 [27, 91, 51, 59, 53, 126] => { /* ctrl + delete */ }
                 _ => {

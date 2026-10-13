@@ -72,6 +72,11 @@ impl Cursor {
     }
 }
 
+// word boundaries for tab / shift + tab jumps
+pub fn is_delimiter(c: char) -> bool {
+    !c.is_alphanumeric()
+}
+
 #[derive(Debug)]
 struct WriteBuf {
     data: Vec<char>,
@@ -153,6 +158,18 @@ impl WriteBuf {
         }
 
         contents
+    }
+
+    // chars on either side of the cursor
+    fn prev_char(&self) -> Option<char> {
+        self.gap_start.checked_sub(1).map(|i| self.data[i])
+    }
+
+    fn next_char(&self) -> Option<char> {
+        match self.gap_start < self.content_len {
+            true => Some(self.data[self.gap_start + self.gap_len]),
+            false => None,
+        }
     }
 
     fn grow(&mut self) {
@@ -418,6 +435,39 @@ impl WinInfo {
             cursor.offset = cursor.offset.saturating_sub(1);
             buf.move_gap(buf.gap_start.saturating_sub(1));
         }
+    }
+
+    // move the cursor one char at a time so scrolling stays in sync;
+    // stops early if the cursor can't move any further
+    fn move_cursor_while(&mut self, right: bool, keep_going: impl Fn(&WriteBuf) -> bool) {
+        while keep_going(&self.write_buffer) {
+            let before = self.write_buffer.gap_start;
+            match right {
+                true => self.move_cursor_right(),
+                false => self.move_cursor_left(),
+            }
+            if self.write_buffer.gap_start == before { break; }
+        }
+    }
+
+    // tab: jump to the start of the next word
+    pub fn jump_word_right(&mut self) {
+        self.move_cursor_while(true, |b| b.next_char().is_some_and(|c| !is_delimiter(c)));
+        self.move_cursor_while(true, |b| b.next_char().is_some_and(is_delimiter));
+    }
+
+    // shift + tab: jump to the start of the previous word
+    pub fn jump_word_left(&mut self) {
+        self.move_cursor_while(false, |b| b.prev_char().is_some_and(is_delimiter));
+        self.move_cursor_while(false, |b| b.prev_char().is_some_and(|c| !is_delimiter(c)));
+    }
+
+    pub fn move_cursor_home(&mut self) {
+        self.move_cursor_while(false, |b| b.gap_start > 0);
+    }
+
+    pub fn move_cursor_end(&mut self) {
+        self.move_cursor_while(true, |b| b.gap_start < b.content_len);
     }
 
     fn cursor_pos(&self) -> (usize, usize) {
@@ -4392,6 +4442,53 @@ mod tests {
         assert_eq!(buf.as_string().trim_end(), "aXYZbcd");
         buf.move_gap(100);
         assert_eq!(buf.gap_start, buf.content_len);
+    }
+
+    #[test]
+    fn tab_jumps_over_delimiters_and_home_end_reach_buffer_edges() {
+        let mut win = command_win();
+        type_command(&mut win, "foo/bar\\baz, qux");
+        win.move_cursor_home();
+        assert_eq!(win.write_buffer.gap_start, 0);
+        assert_eq!(win.cursor.offset, 0);
+
+        win.jump_word_right();
+        assert_eq!(win.write_buffer.gap_start, 4); // bar
+        win.jump_word_right();
+        assert_eq!(win.write_buffer.gap_start, 8); // baz
+        win.jump_word_right();
+        assert_eq!(win.write_buffer.gap_start, 13); // qux
+        win.jump_word_right();
+        assert_eq!(win.write_buffer.gap_start, 16); // end
+
+        win.jump_word_left();
+        assert_eq!(win.write_buffer.gap_start, 13);
+        win.jump_word_left();
+        assert_eq!(win.write_buffer.gap_start, 8);
+
+        win.move_cursor_end();
+        assert_eq!(win.write_buffer.gap_start, 16);
+        assert_eq!(win.cursor.offset, 16);
+        assert_eq!(win.write_buffer.as_string().trim_end(), "foo/bar\\baz, qux");
+
+        type_command(&mut win, "snake_case");
+        win.move_cursor_home();
+        win.jump_word_right();
+        assert_eq!(win.write_buffer.gap_start, 6); // case
+    }
+
+    #[test]
+    fn home_and_end_scroll_long_buffers() {
+        let mut win = command_win();
+        win.cursor.limit = 10;
+        // write mode sizes both the cursor limit and the scroll window to the cell
+        win.write_buffer.window = 10;
+        for _ in 0..50 { win.add_to_write_buffer("w"); }
+        win.move_cursor_home();
+        assert_eq!(win.write_buffer.gap_start, 0);
+        assert_eq!(win.write_buffer.offset, 0);
+        win.move_cursor_end();
+        assert_eq!(win.write_buffer.gap_start, 50);
     }
 
     #[test]

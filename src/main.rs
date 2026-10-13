@@ -1,6 +1,6 @@
 use std::{
     env,
-    io::{self, Write},
+    io::{self, Read, Write},
 };
 
 mod cells;
@@ -13,7 +13,7 @@ mod terminal;
 use crate::{
     cells::{Context, Csvs},
     input::process_input,
-    terminal::{check_flags, SigFlag, WinInfo},
+    terminal::{check_flags, is_delimiter, SigFlag, WinInfo},
     csv_io::{
         cmd_history_path, load_csv, 
         poll_stdin, PollEvent, 
@@ -127,12 +127,8 @@ fn main() {
     for con in csvs.contexts {
         let mut cells = con.cells;
         if cells.written {
-            print!("\nWrite {} to file? [y/N/s(ave as)]: ", cells.filename);
-            io::stdout().flush().unwrap();
-            let mut input = String::new();
-            io::stdin()
-                .read_line(&mut input)
-                .expect("Failed to read line");
+            println!();
+            let input = edit_line(&format!("Write {} to file? [y/N/s(ave as)]: ", cells.filename));
             cells.filename = match input.trim_end().to_lowercase().as_str() {
                 "y" | "yes" => {
                     // save backup to /home/user/.csview/backups/
@@ -149,13 +145,11 @@ fn main() {
                     cells.filename
                 },
                 "s" | "save as" => {
-                    print!("Enter new filename: ");
-                    io::stdout().flush().unwrap();
-                    input = String::new();
-                    io::stdin()
-                        .read_line(&mut input)
-                        .expect("Failed to read line");
-                    input.trim_end().to_string()
+                    let name = edit_line("Enter new filename: ");
+                    match name.trim_end() {
+                        "" => continue,
+                        name => name.to_string(),
+                    }
                 },
                 _ => continue,
             };
@@ -165,4 +159,75 @@ fn main() {
             }
         }
     }
+}
+
+// read one line in raw mode so arrows, home/end and tab jumps work while typing;
+// ctrl + c cancels with an empty line
+fn edit_line(prompt: &str) -> String {
+    use libc::{cfmakeraw, tcgetattr, tcsetattr, termios, STDIN_FILENO, TCSANOW};
+
+    let mut orig: termios = unsafe { std::mem::zeroed() };
+    if unsafe { tcgetattr(STDIN_FILENO, &mut orig) } != 0 {
+        // not a terminal; fall back to a plain read
+        print!("{prompt}");
+        io::stdout().flush().unwrap();
+        let mut input = String::new();
+        let _ = io::stdin().read_line(&mut input);
+        return input;
+    }
+    let mut raw = orig;
+    unsafe {
+        cfmakeraw(&mut raw);
+        raw.c_cc[libc::VMIN] = 1;
+        raw.c_cc[libc::VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+    }
+
+    let mut line = Vec::<char>::new();
+    let mut pos = 0usize;
+    let mut buf = [0u8; 16];
+    let mut out = io::stdout();
+    loop {
+        let shown: String = line.iter().collect();
+        let col = prompt.chars().count() + pos + 1;
+        let _ = write!(out, "\r\x1b[2K{prompt}{shown}\x1b[{col}G");
+        let _ = out.flush();
+
+        let n = match io::stdin().read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        match &buf[..n] {
+            [13] | [10] | [13, 10] => break,
+            [3] | [4] => { line.clear(); break; } // ctrl + c / ctrl + d
+            [27, 91, 67] => pos = (pos + 1).min(line.len()), // right
+            [27, 91, 68] => pos = pos.saturating_sub(1), // left
+            [27, 91, 72] | [27, 79, 72] | [27, 91, 49, 126] | [27, 91, 55, 126] => pos = 0, // home
+            [27, 91, 70] | [27, 79, 70] | [27, 91, 52, 126] | [27, 91, 56, 126] => pos = line.len(), // end
+            [9] => { // tab (jump to next word)
+                while pos < line.len() && !is_delimiter(line[pos]) { pos += 1; }
+                while pos < line.len() && is_delimiter(line[pos]) { pos += 1; }
+            }
+            [27, 91, 90] => { // shift-tab (jump to previous word)
+                while pos > 0 && is_delimiter(line[pos - 1]) { pos -= 1; }
+                while pos > 0 && !is_delimiter(line[pos - 1]) { pos -= 1; }
+            }
+            [127] | [8] => { // backspace
+                if pos > 0 { pos -= 1; line.remove(pos); }
+            }
+            [27, 91, 51, 126] => { // delete
+                if pos < line.len() { line.remove(pos); }
+            }
+            [27, ..] | [0..=31] => (), // other escapes and control chars
+            bytes => {
+                if let Ok(s) = std::str::from_utf8(bytes) {
+                    for c in s.chars() { line.insert(pos, c); pos += 1; }
+                }
+            }
+        }
+    }
+
+    unsafe { tcsetattr(STDIN_FILENO, TCSANOW, &orig); }
+    println!();
+    line.into_iter().collect()
 }
