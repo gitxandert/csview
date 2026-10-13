@@ -588,33 +588,28 @@ impl WinInfo {
     }
 
     pub fn add_to_write_buffer(&mut self, content: &str) {
-        let add = content.chars().count();
+        // insert one char at a time so the cursor and scroll offset stay
+        // in sync with the gap when the text overflows the window
         for c in content.chars() {
             self.write_buffer.insert(c);
-            
+            self.offset_cursor();
         }
-        
-        self.offset_cursor(add);
 
         self.changed = WinChange::Write;
     }
 
     pub fn paste_yanked_to_write_buffer(&mut self) {
-        let add = self.yanked.chars().count();
-        for c in self.yanked.chars() {
-            self.write_buffer.insert(c);
-        }
-        self.offset_cursor(add);
-        self.changed = WinChange::Write;
+        let yanked = self.yanked.clone();
+        self.add_to_write_buffer(&yanked);
     }
 
-    fn offset_cursor(&mut self, add: usize) {
+    fn offset_cursor(&mut self) {
         let cursor = &mut self.cursor;
         let buf = &mut self.write_buffer;
       
-        let new_cur_off = cursor.offset + add;
+        let new_cur_off = cursor.offset + 1;
         if new_cur_off > cursor.limit {
-            let new_buf_off = buf.offset + add;
+            let new_buf_off = buf.offset + 1;
             let diff = buf.content_len.saturating_sub(new_buf_off);
             if diff >= buf.window {
                 buf.offset = new_buf_off;
@@ -4489,6 +4484,26 @@ mod tests {
         assert_eq!(win.write_buffer.offset, 0);
         win.move_cursor_end();
         assert_eq!(win.write_buffer.gap_start, 50);
+    }
+
+    #[test]
+    fn paste_longer_than_window_keeps_cursor_in_sync() {
+        let mut win = command_win();
+        win.cursor.limit = 10;
+        win.write_buffer.window = 10;
+        win.set_yanked(&Cell::new(&"abcdefghij".repeat(3)));
+        win.paste_yanked_to_write_buffer();
+        let (buf, cur) = (&win.write_buffer, &win.cursor);
+        assert_eq!(buf.gap_start, 30);
+        assert_eq!(buf.offset + cur.offset, buf.gap_start);
+
+        for _ in 0..30 { win.move_cursor_left(); }
+        assert_eq!(win.write_buffer.gap_start, 0);
+        assert_eq!(win.write_buffer.offset, 0);
+        assert_eq!(win.cursor.offset, 0);
+        win.move_cursor_end();
+        assert_eq!(win.write_buffer.gap_start, 30);
+        assert_eq!(win.write_buffer.offset + win.cursor.offset, 30);
     }
 
     #[test]
