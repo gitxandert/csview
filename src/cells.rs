@@ -323,21 +323,64 @@ impl Column {
         self.padding = 0;
     }
 
-    pub fn drain_cells(&mut self, range: std::ops::RangeInclusive<usize>) -> Vec<Cell> {
-        let start = *range.start();
-        let end = *range.end();
-
-        self.reindex();
-
-        // columns can be shorter than the range
-        if start >= self.cells.len() {
+    // copies of the rows shown at display rows st..=end,
+    // blank where the column shows padding
+    pub fn copy_shown(&self, st: usize, end: usize) -> Vec<Cell> {
+        if st >= self.indices.len() {
             return Vec::<Cell>::new();
         }
-        let end = end.min(self.cells.len() - 1);
-        let drained_cells = self.cells.drain(start..=end).collect();
-        self.indices = (0..self.cells.len()).collect();
+        let end = end.min(self.indices.len() - 1);
+        self.indices[st..=end]
+            .iter()
+            .map(|&real| {
+                let mut cell = self.cells[real].clone();
+                cell.is_focused = false;
+                cell
+            })
+            .collect()
+    }
 
-        drained_cells
+    // remove display rows st..=end out of the `shown` rows on screen;
+    // rows hidden by a filter/sift/unique stay hidden
+    pub fn remove_shown(&mut self, st: usize, end: usize, shown: usize) {
+        let shown = shown.min(self.indices.len());
+        if st >= shown {
+            return;
+        }
+        let end = end.min(shown - 1);
+        let real_len = self.len();
+
+        // padding blanks pair up with hidden rows, so keep them,
+        // just out of view; real cells in the range are dropped
+        let mut removed = vec![false; self.cells.len()];
+        let mut pads = Vec::<usize>::new();
+        for &real in &self.indices[st..=end] {
+            if real < real_len {
+                removed[real] = true;
+            } else {
+                pads.push(real);
+            }
+        }
+
+        let mut new_pos = vec![0usize; self.cells.len()];
+        let mut kept = 0usize;
+        for (real, &gone) in removed.iter().enumerate() {
+            new_pos[real] = kept;
+            kept += !gone as usize;
+        }
+
+        let order = self.indices[..st]
+            .iter()
+            .chain(&self.indices[end + 1..shown])
+            .chain(&pads)
+            .chain(&self.indices[shown..]);
+        self.indices = order.map(|&real| new_pos[real]).collect();
+
+        let mut real = 0usize;
+        self.cells.retain(|_| {
+            real += 1;
+            !removed[real - 1]
+        });
     }
 
     pub fn swap_cells(&mut self, a: usize, b: usize) {

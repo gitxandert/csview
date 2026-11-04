@@ -3651,11 +3651,18 @@ impl WinInfo {
             col_len
         );
 
+        // the slice is a copy of the rows on screen
+        let shown = cells.visible_rows();
         let mut new_header = Vec::<Cell>::new();
         for _ in ida..=idb {
-            let mut col = cells.columns.remove(ida);
-            col.reindex();
-            new_cells.push_column(col);
+            let col = cells.columns.remove(ida);
+            let mut new_col = Column::new();
+            new_col.width = col.width;
+            if shown > 0 {
+                new_col.cells = col.copy_shown(0, shown - 1);
+            }
+            new_col.indices = (0..new_col.cells.len()).collect();
+            new_cells.push_column(new_col);
             
             let name = cells.header.remove(ida);
             new_header.push(name);
@@ -3690,6 +3697,8 @@ impl WinInfo {
     }
 
     fn slice_rows(&mut self, range: &str, csvs: &mut Csvs) {
+        // ranges index the rows on screen
+        self.num_rows = csvs.get_cells().visible_rows();
         let (st, end) = match self.parse_row_range(range) {
             Ok((s,t)) => (s, t),
             Err(e) => {
@@ -3738,21 +3747,20 @@ impl WinInfo {
             self.num_cols
         );
 
+        // the slice is a copy of the rows on screen
         for col in &mut cells.columns {
             let mut new_col = Column::new();
             new_col.width = col.width;
-            col.reindex();
-            let real_end = end.min(col.len().saturating_sub(1));
-            let removed = col.drain_cells(st..=real_end);
-            new_col.indices = (0..removed.len()).collect();
-            new_col.cells = removed;
+            new_col.cells = col.copy_shown(st, end);
+            new_col.indices = (0..new_col.cells.len()).collect();
+            col.remove_shown(st, end, self.num_rows);
             new_cells.push_column(new_col);
         }
         cells.written = true;
         new_cells.written = true;
 
         // keep the original sheet's focus inside its remaining rows
-        self.num_rows = cells.num_rows();
+        self.num_rows = cells.visible_rows();
         self.clamp_view();
         cells.w_cell = (self.w_pointer, self.h_pointer);
         csvs.save_context(self);
@@ -4551,6 +4559,71 @@ mod tests {
 
         // reverted order is storage order, with the new rows kept at the end
         assert_eq!(column_values(&cells, 0), vec!["x", "x", "y", "", ""]);
+    }
+
+    fn dup_rows() -> Cells {
+        cells_with_rows(
+            "dup.csv",
+            vec!["A", "B"],
+            vec![vec!["x", "1"], vec!["x", "2"], vec!["y", "3"], vec!["z", "4"], vec!["y", "5"]],
+        )
+    }
+
+    fn shown_values(cells: &Cells, idx: usize) -> Vec<&str> {
+        (0..cells.visible_rows().min(cells.columns[idx].indices.len()))
+            .map(|row| cells.columns[idx].view_cell(row))
+            .collect()
+    }
+
+    #[test]
+    fn row_slice_after_sift_copies_shown_rows() {
+        let mut csvs = Csvs::new(vec![Context::new(0, dup_rows())]);
+        let mut win = win_for(csvs.get_cells());
+        win.sift_by(csvs.get_cells(), "A");
+
+        win.slice_rows("0-1", &mut csvs);
+
+        let slice = &csvs.contexts[1].cells;
+        assert_eq!(shown_values(slice, 0), vec!["x", "y"]);
+        assert_eq!(shown_values(slice, 1), vec!["1", "3"]);
+        // the sifted-out duplicates stay hidden in the original
+        let orig = &mut csvs.contexts[0].cells;
+        assert_eq!(shown_values(orig, 0), vec!["z"]);
+        assert_eq!(shown_values(orig, 1), vec!["4"]);
+        for col in &mut orig.columns {
+            col.revert();
+        }
+        assert_eq!(column_values(orig, 0), vec!["x", "z", "y"]);
+        assert_eq!(column_values(orig, 1), vec!["2", "4", "5"]);
+    }
+
+    #[test]
+    fn row_slice_after_col_unique_copies_shown_rows() {
+        let mut csvs = Csvs::new(vec![Context::new(0, dup_rows())]);
+        csvs.get_cells().columns[0].make_unique();
+        let mut win = win_for(csvs.get_cells());
+
+        win.slice_rows("2-4", &mut csvs);
+
+        let slice = &csvs.contexts[1].cells;
+        assert_eq!(shown_values(slice, 0), vec!["z", "", ""]);
+        assert_eq!(shown_values(slice, 1), vec!["3", "4", "5"]);
+        let orig = &csvs.contexts[0].cells;
+        assert_eq!(shown_values(orig, 0), vec!["x", "y"]);
+        assert_eq!(shown_values(orig, 1), vec!["1", "2"]);
+    }
+
+    #[test]
+    fn col_slice_after_sift_copies_shown_rows() {
+        let mut csvs = Csvs::new(vec![Context::new(0, dup_rows())]);
+        let mut win = win_for(csvs.get_cells());
+        win.sift_by(csvs.get_cells(), "A");
+
+        win.slice_cols("B", &mut csvs);
+
+        let slice = &csvs.contexts[1].cells;
+        assert_eq!(column_values(slice, 0), vec!["1", "3", "4"]);
+        assert_eq!(shown_values(&csvs.contexts[0].cells, 0), vec!["x", "y", "z"]);
     }
 
     #[test]
