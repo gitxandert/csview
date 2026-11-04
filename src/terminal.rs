@@ -2492,7 +2492,9 @@ impl WinInfo {
             cells.col_ids[i].width = cells.columns[i].width;
         }
 
-        if self.w_pointer != p_col_idx {
+        // columns left of the focus changed if any grouped column came
+        // from before the primary, so draw_from_column won't cover them
+        if self.w_pointer != p_col_idx || dec > 0 {
             self.set_w_pointer(p_col_idx);
             self.draw_screen(cells);
         } else {
@@ -4713,6 +4715,28 @@ mod tests {
         // every original value is still stored
         cells.columns[1].revert();
         assert_eq!(column_values(&cells, 1), vec!["1", "2", "3", "4", "5", "6"]);
+    }
+
+    #[test]
+    fn grouping_focused_first_column_behind_another_redraws_it() {
+        let mut cells = cells_with_rows(
+            "groupfirst.csv",
+            vec!["A", "B", "C"],
+            vec![vec!["aaaaaaaa", "b", "c"]],
+        );
+        let mut win = win_for(&mut cells);
+        win.draw_screen(&mut cells);
+        let b_start = cells.columns[1].start;
+        assert!(b_start > cells.columns[0].start);
+
+        // focus stays on index 0, but A moves after B
+        win.group_columns(&mut cells, "B,A");
+
+        assert_eq!(cells.header[0].content, "B");
+        assert_eq!(cells.header[1].content, "A");
+        // B is redrawn in the first slot, not left at its old position
+        assert_eq!(cells.columns[0].start, 6);
+        assert!(cells.columns[1].start > cells.columns[0].start);
     }
 
     #[test]
