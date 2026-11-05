@@ -197,6 +197,12 @@ pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
     Ok(cells)
 }
 
+// an empty sheet with one "Unnamed" column; nothing touches disk until it's saved
+pub fn blank_csv(filename: String, delim: char, rows: usize) -> Cells {
+    let csv = format!("Unnamed{}", "\n".repeat(rows.max(1)));
+    parse_csv_into_cells(filename, csv, delim).unwrap()
+}
+
 // commands run in command mode, one per line,
 // kept in ~/.csview/cmd_history
 pub fn cmd_history_path() -> Option<PathBuf> {
@@ -398,7 +404,17 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
         sheet.push('\n');
     }
 
-    for i in 0..cells.num_rows() {
+    // drop trailing rows with nothing in them (e.g. a blank sheet's filler);
+    // any dropped rows collapse into one final newline
+    let mut num_rows = cells.num_rows();
+    while num_rows > 0
+        && (0..cells.num_cols()).all(|j| cells.get_column(j).get_cell(num_rows - 1).raw_content().is_empty())
+    {
+        num_rows -= 1;
+    }
+    let trimmed = num_rows < cells.num_rows();
+
+    for i in 0..num_rows {
         let mut row = String::new();
         for j in 0..cells.num_cols() {
             let column = cells.get_column(j);
@@ -409,7 +425,7 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
             }
         }
 
-        if i != cells.num_rows() - 1 {
+        if i != num_rows - 1 || trimmed {
             row.push('\n');
         }
 
@@ -426,7 +442,7 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_csv, parse_csv_into_cells, write_to_file};
+    use super::{blank_csv, load_csv, parse_csv_into_cells, write_to_file};
     use crate::cells::{Cell, Cells, Column};
     use std::{
         env, fs,
@@ -453,6 +469,43 @@ mod tests {
         cells.push_column(col);
         cells.set_w_cell(0, 0);
         cells
+    }
+
+    #[test]
+    fn blank_sheet_has_one_unnamed_column_of_empty_rows() {
+        let mut cells = blank_csv("Untitled.csv".to_string(), ',', 5);
+        assert_eq!(cells.filename, "Untitled.csv");
+        assert_eq!(cells.num_cols(), 1);
+        assert_eq!(cells.num_rows(), 5);
+        assert_eq!(cells.header[0].content, "Unnamed");
+        assert_eq!(cells.get_column(0).get_cell(4).content, "");
+        assert!(!cells.written);
+    }
+
+    #[test]
+    fn save_trims_trailing_blank_rows() {
+        let path = test_path("trim_blank");
+        let mut cells = blank_csv(path.clone(), ',', 5);
+        cells.get_column(0).get_cell(1).content = "x".to_string();
+
+        write_to_file(&mut cells).unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(saved, "Unnamed\n\nx\n");
+    }
+
+    #[test]
+    fn trailing_newline_survives_round_trip() {
+        let path = test_path("trailing_nl");
+        fs::write(&path, "col\nx\n").unwrap();
+
+        let mut cells = load_csv(path.clone(), ',').unwrap();
+        write_to_file(&mut cells).unwrap();
+        let saved = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(saved, "col\nx\n");
     }
 
     #[test]

@@ -17,6 +17,8 @@ To run csview:
 
     csview some_csv_file.csv
 
+Run it with no file to start on an empty sheet named Untitled.csv: one "Unnamed" column with enough rows to fill the screen. Nothing is written to disk unless you save it.
+
 There is an argument -d/--delimiter that is default set to ',', but can take any other single char as an argument ('t' = tab): 
     
     csview -d : some_colon_separated_file
@@ -194,6 +196,11 @@ csview also has a command mode, accessed through ':' :
                 - if the focused sheet has unsaved edits, asks whether to save it first (y/n, anything else cancels)
             - -d/--delimiter {char}: the file's delimiter (t for tab); defaults to the focused sheet's
         - undo closes the opened sheet, or brings back the replaced one
+    - `sh c` | `sheet close`
+        - closes the focused sheet and switches to the next one
+        - if the sheet has unsaved edits, asks whether to save it first (y/n, anything else cancels)
+        - closing the only open sheet quits csview, as `q` does
+        - undo brings the closed sheet back
 - **up/down arrows**
     - scroll through previously run commands; scrolling past the newest restores what you were typing
     - the last 100 commands are kept across sessions in ~/.csview/cmd_history

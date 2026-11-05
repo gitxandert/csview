@@ -1423,6 +1423,10 @@ impl WinInfo {
         match tokens[0] {
             // quit
             "q" | "quit" => return SigFlag::Quit,
+            // closing the only sheet closes the program
+            "sh" | "sheet"
+                if matches!(tokens.get(1), Some(&"c") | Some(&"close"))
+                && csvs.num_contexts() == 1 => return SigFlag::Quit,
             // column name
             // can show, edit, and find column names
             "cn" => self.cn_cmd(
@@ -1914,6 +1918,7 @@ impl WinInfo {
                 }
             }
             "o"  | "open" => self.open_sheet(tokens, csvs),
+            "c"  | "close" => self.close_sheet(csvs),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd), 
                     self.height
@@ -4300,7 +4305,7 @@ impl WinInfo {
 
         if in_place {
             if csvs.get_cells().written
-            && !self.save_before_replacing(csvs.get_cells(), &path) {
+            && !self.save_before(csvs.get_cells(), &format!("opening {path}")) {
                 return;
             }
             let id = csvs.handle;
@@ -4328,14 +4333,33 @@ impl WinInfo {
         }
     }
 
-    // asks whether to save a sheet with edits before it's replaced;
-    // false cancels the replacement
-    fn save_before_replacing(&mut self, cells: &mut Cells, new_path: &str) -> bool {
+    // closes the focused sheet and focuses the next one
+    // (process_command quits instead when it's the only sheet)
+    fn close_sheet(&mut self, csvs: &mut Csvs) {
+        if csvs.get_cells().written && !self.save_before(csvs.get_cells(), "closing") {
+            return;
+        }
+        let closed = csvs.remove_context(csvs.handle);
+        if csvs.handle >= csvs.num_contexts() {
+            csvs.set_handle(csvs.num_contexts() - 1);
+        }
+
+        self.set_context(csvs.get_context());
+        self.draw_context(csvs);
+        self.changed = WinChange::Screen;
+        self.show_csv(csvs.get_cells());
+        print_bottom!(self, "Closed {}", closed.cells.filename);
+        self.flush();
+    }
+
+    // asks whether to save a sheet with edits before it's replaced or closed;
+    // false cancels
+    fn save_before(&mut self, cells: &mut Cells, action: &str) -> bool {
         print_bottom!(
             self,
-            "Save {} before opening {}? [y/n/c(ancel)]",
+            "Save {} before {}? [y/n/c(ancel)]",
             cells.filename,
-            new_path
+            action
         );
         self.flush();
         match self.read_key() {
@@ -4355,7 +4379,7 @@ impl WinInfo {
             }
             Some(b'n') | Some(b'N') => true,
             _ => {
-                print_bottom!(self, "Open cancelled");
+                print_bottom!(self, "Cancelled {}", action);
                 self.flush();
                 false
             }
@@ -4590,6 +4614,51 @@ mod tests {
         assert_eq!(csvs.get_cells().filename, "first.csv");
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn close_removes_the_sheet_and_undo_restores_it() {
+        let (mut csvs, mut win, path) = open_fixture();
+        type_command(&mut win, &format!("sh o {path}"));
+        win.process_command(&mut csvs);
+        csvs.set_handle(0);
+        win.set_context(csvs.get_context());
+
+        type_command(&mut win, "sh c");
+        assert!(matches!(win.process_command(&mut csvs), SigFlag::Non));
+        assert_eq!(csvs.num_contexts(), 1);
+        assert_eq!(csvs.handle, 0);
+        assert_eq!(csvs.contexts[0].id, 0);
+        assert_eq!(csvs.get_cells().filename, path);
+
+        assert!(crate::history::undo(&mut csvs, &mut win));
+        assert_eq!(csvs.num_contexts(), 2);
+        assert_eq!(csvs.contexts[0].cells.filename, "first.csv");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn closing_the_last_sheet_focuses_the_one_before() {
+        let (mut csvs, mut win, path) = open_fixture();
+        type_command(&mut win, &format!("sh o {path}"));
+        win.process_command(&mut csvs);
+
+        type_command(&mut win, "sheet close");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.num_contexts(), 1);
+        assert_eq!(csvs.handle, 0);
+        assert_eq!(csvs.get_cells().filename, "first.csv");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn closing_the_only_sheet_quits() {
+        let (mut csvs, mut win, _) = open_fixture();
+        type_command(&mut win, "sh close");
+        assert!(matches!(win.process_command(&mut csvs), SigFlag::Quit));
+        assert_eq!(csvs.num_contexts(), 1);
     }
 
     #[test]
@@ -5091,7 +5160,7 @@ mod tests {
         let saved = fs::read_to_string(&path).unwrap();
         let _ = fs::remove_file(&path);
 
-        assert_eq!(saved, "A,B\nmatch,b2\n,\n,\n,");
+        assert_eq!(saved, "A,B\nmatch,b2\n");
         for col in &cells.columns {
             assert!(col.indices.iter().all(|&idx| idx < col.cells.len()));
         }

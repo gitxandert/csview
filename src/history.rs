@@ -75,7 +75,7 @@ impl Checkpoint {
             && matches!(
                 tokens.get(1),
                 Some(&"sl") | Some(&"slice") | Some(&"sp") | Some(&"splice")
-                    | Some(&"o") | Some(&"open")
+                    | Some(&"o") | Some(&"open") | Some(&"c") | Some(&"close")
             );
         let can_edit = matches!(
             tokens.get(0),

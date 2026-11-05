@@ -15,7 +15,7 @@ use crate::{
     input::process_input,
     terminal::{check_flags, is_delimiter, SigFlag, WinInfo},
     csv_io::{
-        cmd_history_path, load_csv, 
+        blank_csv, cmd_history_path, load_csv, 
         poll_stdin, PollEvent, 
         save_backup, write_to_file
     },
@@ -23,10 +23,6 @@ use crate::{
 
 fn main() {
     let mut args = env::args();
-    if args.len() < 2 {
-        println!("csview expects at least a file name");
-        return;
-    }
 
     // skip the program name
     let _ = args.next();
@@ -74,12 +70,18 @@ fn main() {
         };
     }
 
+    let mut w_info = WinInfo::new();
+    // no file given: start on an empty sheet that fills the screen
+    if contexts.is_empty() {
+        let rows = w_info.height.saturating_sub(4);
+        contexts.push(Context::new(0, blank_csv("Untitled.csv".to_string(), delimiter, rows)));
+    }
+
     terminal::install_panic_hook();
     terminal::install_sig_handlers();
     terminal::raw_mode(true);
 
     let mut csvs = Csvs::new(contexts);
-    let mut w_info = WinInfo::new();
     if let Some(path) = cmd_history_path() {
         w_info.set_cmd_history_file(path);
     }
@@ -132,14 +134,16 @@ fn main() {
             cells.filename = match input.trim_end().to_lowercase().as_str() {
                 "y" | "yes" => {
                     // save backup to /home/user/.csview/backups/
-                    // only if retaining filename
-                    match save_backup(&cells.filename) {
-                        Ok(b) => {
-                            println!("\t{b}");
-                        }
-                        Err(e) => {
-                            println!("\tWARNING -- could not create backup due to the following:");
-                            println!("\t\t{e}");
+                    // only if retaining filename and there's a file to back up
+                    if std::path::Path::new(&cells.filename).exists() {
+                        match save_backup(&cells.filename) {
+                            Ok(b) => {
+                                println!("\t{b}");
+                            }
+                            Err(e) => {
+                                println!("\tWARNING -- could not create backup due to the following:");
+                                println!("\t\t{e}");
+                            }
                         }
                     }
                     cells.filename
