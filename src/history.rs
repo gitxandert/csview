@@ -75,6 +75,7 @@ impl Checkpoint {
             && matches!(
                 tokens.get(1),
                 Some(&"sl") | Some(&"slice") | Some(&"sp") | Some(&"splice")
+                    | Some(&"o") | Some(&"open")
             );
         let can_edit = matches!(
             tokens.get(0),
@@ -114,9 +115,10 @@ impl Checkpoint {
                 csvs.contexts[ctx].cells.written |= was_written;
             }
             Checkpoint::Workspace { contexts, handle } => {
-                // slicing and splicing only succeed
-                // if they add or remove a sheet
-                if csvs.num_contexts() != contexts.len() {
+                // slicing, splicing and opening only succeed
+                // if they add, remove or replace a sheet
+                let replaced = mem::take(&mut csvs.replaced);
+                if csvs.num_contexts() != contexts.len() || replaced {
                     csvs.history.push(Edit::Workspace { contexts, handle });
                 }
             }

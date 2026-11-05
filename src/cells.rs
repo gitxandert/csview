@@ -691,6 +691,9 @@ pub struct Csvs {
     pub contexts: Vec<Context>,
     pub handle: usize,
     pub history: History,
+    // set when a command swaps out a sheet without changing the sheet count
+    // (`sh open -i`), so the change still lands in the history
+    pub replaced: bool,
 }
 
 impl Csvs {
@@ -699,6 +702,7 @@ impl Csvs {
             contexts,
             handle: 0usize,
             history: History::new(),
+            replaced: false,
         }
     }
 

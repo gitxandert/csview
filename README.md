@@ -186,6 +186,14 @@ csview also has a command mode, accessed through ':' :
             - -f/--filter: filters the sheet to only the rows that contain the term
     - `sh rn {new_name}` | `sheet rename {new_name}`
         - renames the current sheet to the provided new_name
+    - `sh o {path} {arguments}` | `sheet open {path} {arguments}`
+        - opens a file as a new sheet and switches to it
+        - quote paths that contain spaces; a leading ~/ expands to the home directory
+        - arguments are preceded by dashes and include:
+            - -i/--in-place: replaces the focused sheet instead
+                - if the focused sheet has unsaved edits, asks whether to save it first (y/n, anything else cancels)
+            - -d/--delimiter {char}: the file's delimiter (t for tab); defaults to the focused sheet's
+        - undo closes the opened sheet, or brings back the replaced one
 - **up/down arrows**
     - scroll through previously run commands; scrolling past the newest restores what you were typing
     - the last 100 commands are kept across sessions in ~/.csview/cmd_history

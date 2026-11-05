@@ -12,7 +12,10 @@ use libc::{
 use crate::{
     cells::*,
     cmd_err::{self, CmdErr},
-    csv_io::{append_cmd_history, load_cmd_history, make_col_ids, poll_stdin, PollEvent},
+    csv_io::{
+        append_cmd_history, load_cmd_history, load_csv, make_col_ids,
+        poll_stdin, save_backup, write_to_file, PollEvent,
+    },
     history::Checkpoint,
 };
 
@@ -1910,6 +1913,7 @@ impl WinInfo {
                     Some(name) => self.rename_sheet(csvs, name)
                 }
             }
+            "o"  | "open" => self.open_sheet(tokens, csvs),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd), 
                     self.height
@@ -4244,6 +4248,145 @@ impl WinInfo {
         self.flush();
     }
 
+    // `sh o {path} [-i] [-d {delim}]` loads a file into a new sheet,
+    // or in place of the focused sheet with -i
+    fn open_sheet(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
+        let tok = tokens[1];
+        let mut path: Option<String> = None;
+        let mut in_place = false;
+        let mut delim = csvs.get_cells().delim;
+
+        let mut args = tokens.into_iter().skip(2);
+        while let Some(arg) = args.next() {
+            match arg {
+                "-i" | "--in-place" => in_place = true,
+                "-d" | "--delimiter" => match args.next() {
+                    Some("t") => delim = '\t',
+                    Some(d) if d.chars().count() == 1 => delim = d.chars().next().unwrap(),
+                    Some(d) => {
+                        cmd_err::print(CmdErr::InvalidArg(d), self.height);
+                        return;
+                    }
+                    None => {
+                        cmd_err::print(CmdErr::MissingValue(arg), self.height);
+                        return;
+                    }
+                },
+                _ if path.is_none() => path = Some(Self::expand_home(&Self::trim_quotes(arg))),
+                _ => {
+                    cmd_err::print(CmdErr::TooManyArgs(tok), self.height);
+                    return;
+                }
+            }
+        }
+
+        let path = match path {
+            Some(p) => p,
+            None => {
+                cmd_err::print(CmdErr::MissingName(tok), self.height);
+                return;
+            }
+        };
+
+        // load first so a bad path doesn't prompt to save
+        let new_cells = match load_csv(path.clone(), delim) {
+            Ok(c) => c,
+            Err(e) => {
+                print_bottom!(self, "Could not open {}: {}", path, e);
+                self.flush();
+                return;
+            }
+        };
+
+        if in_place {
+            if csvs.get_cells().written
+            && !self.save_before_replacing(csvs.get_cells(), &path) {
+                return;
+            }
+            let id = csvs.handle;
+            csvs.contexts[id] = Context::new(id, new_cells);
+            csvs.replaced = true;
+        } else {
+            csvs.save_context(self);
+            let id = csvs.num_contexts();
+            csvs.push_context(Context::new(id, new_cells));
+            csvs.set_handle(id);
+        }
+
+        self.set_context(csvs.get_context());
+        self.draw_context(csvs);
+        self.changed = WinChange::Screen;
+        self.show_csv(csvs.get_cells());
+        print_bottom!(self, "Opened {}", path);
+        self.flush();
+    }
+
+    fn expand_home(path: &str) -> String {
+        match (path.strip_prefix("~/"), std::env::home_dir()) {
+            (Some(rest), Some(home)) => home.join(rest).to_string_lossy().into_owned(),
+            _ => path.to_string(),
+        }
+    }
+
+    // asks whether to save a sheet with edits before it's replaced;
+    // false cancels the replacement
+    fn save_before_replacing(&mut self, cells: &mut Cells, new_path: &str) -> bool {
+        print_bottom!(
+            self,
+            "Save {} before opening {}? [y/n/c(ancel)]",
+            cells.filename,
+            new_path
+        );
+        self.flush();
+        match self.read_key() {
+            Some(b'y') | Some(b'Y') => {
+                let _ = save_backup(&cells.filename);
+                match write_to_file(cells) {
+                    Ok(_) => {
+                        cells.written = false;
+                        true
+                    }
+                    Err(e) => {
+                        print_bottom!(self, "Could not save {}: {}", cells.filename, e);
+                        self.flush();
+                        false
+                    }
+                }
+            }
+            Some(b'n') | Some(b'N') => true,
+            _ => {
+                print_bottom!(self, "Open cancelled");
+                self.flush();
+                false
+            }
+        }
+    }
+
+    // block for a single keypress; escape sequences and signals give None
+    fn read_key(&mut self) -> Option<u8> {
+        let mut buf = [0u8; 16];
+        loop {
+            match poll_stdin(&mut buf) {
+                Ok(PollEvent::Data(0)) => continue,
+                Ok(PollEvent::Data(1)) => return Some(buf[0]),
+                Ok(PollEvent::Data(_)) => return None,
+                Ok(PollEvent::Sig) => match check_flags() {
+                    SigFlag::Winch => {
+                        unsafe {
+                            let mut ws: winsize = mem::zeroed();
+                            if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
+                                self.width = ws.ws_col as usize;
+                                self.height = ws.ws_row as usize;
+                            }
+                        }
+                    }
+                    _ => return None,
+                },
+                Err(_) => return None,
+            }
+        }
+    }
+
     fn rename_sheet(&mut self, csvs: &mut Csvs, new_name: &str) {
         let new_name = Self::trim_quotes(new_name);
         let cells = csvs.get_cells();
@@ -4401,6 +4544,63 @@ mod tests {
         win.num_cols = cells.num_cols();
         win.num_rows = cells.num_rows();
         win
+    }
+
+    fn open_fixture() -> (Csvs, WinInfo, String) {
+        let path = test_path("open_target");
+        fs::write(&path, "x,y\n1,2\n3,4\n").unwrap();
+        let cells = cells_with_rows("first.csv", vec!["a"], vec![vec!["one"]]);
+        let mut csvs = Csvs::new(vec![Context::new(0, cells)]);
+        let mut win = command_win();
+        win.set_context(csvs.get_context());
+        (csvs, win, path)
+    }
+
+    #[test]
+    fn open_adds_a_sheet_and_undo_removes_it() {
+        let (mut csvs, mut win, path) = open_fixture();
+
+        type_command(&mut win, &format!("sh o \"{path}\""));
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.num_contexts(), 2);
+        assert_eq!(csvs.handle, 1);
+        assert_eq!(csvs.get_cells().filename, path);
+        assert_eq!(csvs.get_cells().num_cols(), 2);
+        assert!(!csvs.get_cells().written);
+
+        assert!(crate::history::undo(&mut csvs, &mut win));
+        assert_eq!(csvs.num_contexts(), 1);
+        assert_eq!(csvs.get_cells().filename, "first.csv");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn open_in_place_replaces_the_sheet_and_undo_restores_it() {
+        let (mut csvs, mut win, path) = open_fixture();
+
+        type_command(&mut win, &format!("sheet open {path} -i"));
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.num_contexts(), 1);
+        assert_eq!(csvs.get_cells().filename, path);
+        assert_eq!(win.num_cols, 2);
+
+        assert!(crate::history::undo(&mut csvs, &mut win));
+        assert_eq!(csvs.num_contexts(), 1);
+        assert_eq!(csvs.get_cells().filename, "first.csv");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn open_missing_file_changes_nothing() {
+        let (mut csvs, mut win, _) = open_fixture();
+
+        type_command(&mut win, "sh o /no/such/file.csv -i");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.num_contexts(), 1);
+        assert_eq!(csvs.get_cells().filename, "first.csv");
+        assert!(!crate::history::undo(&mut csvs, &mut win));
     }
 
     #[test]
