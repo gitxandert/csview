@@ -117,10 +117,12 @@ csview also has a command mode, accessed through ':' :
         - replaces the target value with the new one
     - `col a` | `col add`
         - sums all numeric cells in a column
-    - `col d {other}` | `col diff {other}`
+    - `col d {other} {-f}` | `col diff {other} {-f}`
         - shows differences between all unique values in the focused column and all unique values in the other column
-    - `col si {other}` | `col sim {other}`
+        - optional flag `-f`/`--filter` filters the focused column to the rows whose values aren't in the other column
+    - `col si {other} {-f}` | `col sim {other} {-f}`
         - shows similarities between all unique values in the focused column and all unique values in the other column
+        - optional flag `-f`/`--filter` filters the focused column to the rows whose values are in the other column
     - `col pre {string} {nb}` | `col prepend {string} {nonblank}`
         - prepends the string to cells in the focused column
         - optional flag `nb`/`nonblank` prepends the string only to cells with content

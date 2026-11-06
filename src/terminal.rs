@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     mem,
     io::Write,
     path::PathBuf,
@@ -1662,7 +1663,8 @@ impl WinInfo {
                     Some(other) => self.col_cmp(
                                             csvs,
                                             &other,
-                                            true
+                                            true,
+                                            &tokens[3..]
                                         ),
                 }
             },
@@ -1675,7 +1677,8 @@ impl WinInfo {
                     Some(other) => self.col_cmp(
                                             csvs,
                                             &other,
-                                            false
+                                            false,
+                                            &tokens[3..]
                                         ),
                 }
             },
@@ -2746,7 +2749,21 @@ impl WinInfo {
         );
     }
 
-    fn col_cmp(&mut self, csvs: &mut Csvs, other: &str, diff: bool) {
+    fn col_cmp(&mut self, csvs: &mut Csvs, other: &str, diff: bool, options: &[&str]) {
+        let mut filter = false;
+        for opt in options {
+            match *opt {
+                "-f" | "--filter" => filter = true,
+                _ => {
+                    cmd_err::print(
+                        CmdErr::InvalidOption(opt),
+                        self.height
+                    );
+                    return;
+                }
+            }
+        }
+
         let cells = csvs.get_cells();
         let other_col_idx = match cells.get_col_idx(other) {
             Ok(idx) => idx,
@@ -2759,56 +2776,42 @@ impl WinInfo {
         };
 
         let other_col = cells.get_column(other_col_idx);
-
-        let mut other_values = Vec::<String>::new();
+        let mut other_values = HashSet::<String>::new();
         for i in 0..other_col.len() {
-            let cell = other_col.get_cell(i);
-            let mut found = false;
-            for o_v in &other_values {
-                if cell.content == *o_v {
-                    found = true;
-                    break;
-                }
-            }
-            if !found && cell.content != "" {
-                other_values.push(cell.content.clone());
+            let content = &other_col.get_cell(i).content;
+            if content != "" {
+                other_values.insert(content.clone());
             }
         }
 
+        // every row that matches, and the first row of each matching value
         let cur_col = cells.get_column(self.w_pointer);
-        let mut cur_values = Vec::<(usize, &str)>::new();
-        for i in 0..cur_col.len() {
-            let mut found = false;
+        let mut matching_rows = Vec::<usize>::new();
+        let mut cmp_values = Vec::<usize>::new();
+        let mut seen = HashSet::<&str>::new();
+        for i in 0..cur_col.visible_len() {
             let cell = cur_col.view_cell(i);
-            for cv in &cur_values {
-                if cv.1 == cell {
-                    found = true;
-                    break;
-                }
+            if cell == "" || other_values.contains(cell) == diff {
+                continue;
             }
-            if !found && cell != "" {
-                cur_values.push((i, cell));
+            matching_rows.push(i);
+            if seen.insert(cell) {
+                cmp_values.push(i);
             }
         }
 
-        let mut cmp_values = Vec::<usize>::new();
-        for cv in &cur_values {
-            let mut found = false;
-            for ov in &other_values {
-                if ov.as_str() == cv.1 {
-                    found = true;
-                    break;
-                }
+        if filter && !matching_rows.is_empty() {
+            let col = cells.get_column(self.w_pointer);
+            Self::apply_column_filter(col, &matching_rows);
+            for v in cmp_values.iter_mut() {
+                *v = matching_rows.binary_search(v).unwrap();
             }
-            if diff {
-                if !found {
-                    cmp_values.push(cv.0);
-                }
-            } else {
-                if found {
-                    cmp_values.push(cv.0);
-                }
-            }
+            // the sheet shrinks if this was its longest column
+            self.num_rows = cells.visible_rows();
+
+            cells.set_w_cell(self.w_pointer, 0);
+            cells.written = true;
+            self.draw_screen(cells);
         }
 
         // get value closest to focus
