@@ -1754,22 +1754,7 @@ impl WinInfo {
                                 CmdErr::MissingValue(subcmd),
                                 self.height
                             ),
-                    Some(pre) => {
-                        let nonblank: bool = match tokens.get(3) {
-                            Some(b) => {
-                                match *b {
-                                    "nb" | "nonblank" => true,
-                                    _ => false,
-                                }
-                            }
-                            None => false
-                        };
-                        self.col_pre(
-                            csvs.get_cells(),
-                            &pre,
-                            nonblank
-                        );
-                    }
+                    Some(pre) => self.col_pre(csvs.get_cells(), &pre),
                 }
             },
             "app" | "append" => {
@@ -1778,22 +1763,7 @@ impl WinInfo {
                                 CmdErr::MissingValue(subcmd),
                                 self.height
                             ),
-                    Some(app) => {
-                        let nonblank: bool = match tokens.get(3) {
-                            Some(b) => {
-                                match *b {
-                                    "nb" | "nonblank" => true,
-                                    _ => false,
-                                }
-                            }
-                            None => false
-                        };
-                        self.col_app(
-                            csvs.get_cells(),
-                            &app,
-                            nonblank
-                        );
-                    }
+                    Some(app) => self.col_app(csvs.get_cells(), &app),
                 }
             },
             "dup" | "duplicate" => self.col_dup(csvs.get_cells()),
@@ -3056,15 +3026,14 @@ impl WinInfo {
         self.flush();
     }
 
-    fn col_pre(&mut self, cells: &mut Cells, pre: &str, nonblank: bool) {
+    // blank cells stay blank
+    fn col_pre(&mut self, cells: &mut Cells, pre: &str) {
         let pre = Self::trim_quotes(pre);
         let col = cells.get_column(self.w_pointer);
         for i in 0..col.len() {
             let cell = col.get_cell(i);
-            if nonblank {
-                if cell.content == "" {
-                    continue;
-                }
+            if cell.content.is_empty() {
+                continue;
             }
             cell.content = format!("{}{}", pre, cell.content);
         }
@@ -3074,15 +3043,14 @@ impl WinInfo {
         self.flush();
     }
 
-    fn col_app(&mut self, cells: &mut Cells, app: &str, nonblank: bool) {
+    // blank cells stay blank
+    fn col_app(&mut self, cells: &mut Cells, app: &str) {
         let app = Self::trim_quotes(app);
         let col = cells.get_column(self.w_pointer);
         for i in 0..col.len() {
             let cell = col.get_cell(i);
-            if nonblank {
-                if cell.content == "" {
-                    continue;
-                }
+            if cell.content.is_empty() {
+                continue;
             }
             cell.content = format!("{}{}", cell.content, app);
         }
@@ -5772,6 +5740,23 @@ mod tests {
         type_command(&mut win, "sh c");
         win.process_command(&mut csvs);
         assert_eq!((csvs.handle, csvs.prev), (1, Some(0)));
+    }
+
+    #[test]
+    fn prepend_and_append_skip_blank_cells() {
+        let mut cells = cells_with_rows(
+            "affix.csv",
+            vec!["a", "b"],
+            vec![vec!["x", "1"], vec!["", "2"], vec!["y", ""]],
+        );
+        let mut win = win_for(&mut cells);
+
+        win.col_pre(&mut cells, "<");
+        win.col_app(&mut cells, "'>'");
+        let col: Vec<String> = (0..3)
+            .map(|i| cells.get_column(0).get_cell(i).content.clone())
+            .collect();
+        assert_eq!(col, vec!["<x>", "", "<y>"]);
     }
 
     #[test]
