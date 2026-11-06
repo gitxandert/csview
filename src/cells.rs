@@ -694,6 +694,8 @@ pub struct Csvs {
     // set when a command swaps out a sheet without changing the sheet count
     // (`sh open -i`), so the change still lands in the history
     pub replaced: bool,
+    // the sheet that was focused before this one (for backtick)
+    pub prev: Option<usize>,
 }
 
 impl Csvs {
@@ -703,6 +705,7 @@ impl Csvs {
             handle: 0usize,
             history: History::new(),
             replaced: false,
+            prev: None,
         }
     }
 
@@ -723,6 +726,11 @@ impl Csvs {
             c.id -= (c.id > id) as usize;
         }
         self.handle -= (self.handle > id) as usize; 
+        self.prev = match self.prev {
+            Some(p) if p == id => None,
+            Some(p) => Some(p - (p > id) as usize),
+            None => None,
+        };
 
         self.contexts.remove(id)
     }
@@ -736,6 +744,9 @@ impl Csvs {
     }
 
     pub fn set_handle(&mut self, id: usize) {
+        if id != self.handle {
+            self.prev = Some(self.handle);
+        }
         self.handle = id;
     }
 }

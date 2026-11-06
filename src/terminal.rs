@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     mem,
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering}
 };
 use libc::{
@@ -213,6 +213,7 @@ pub struct WinInfo {
     pub changed: WinChange,
     pub scroll_mode: ScrollMode,
     pub input_mode: InputMode,
+    bar_start: usize, // first sheet shown in the sheet bar
     num_cols: usize,
     num_rows: usize,
     frame: String,
@@ -271,6 +272,7 @@ impl WinInfo {
             changed: WinChange::Init,
             scroll_mode: ScrollMode::Cell,
             input_mode: InputMode::Scroll,
+            bar_start: 0usize,
             w_pointer: 0usize,
             h_pointer: 0usize,
             w_page: 0usize,
@@ -963,14 +965,90 @@ impl WinInfo {
         }
     }
 
-    fn printed_context_width(con: &mut Context) -> usize {
-        let mut pad_num = 1usize;
-        let mut num = con.id;
-        while num > 10 {
-            pad_num += 1;
-            num /= 10;
+    // switch focus to sheet id; false if there is nothing to switch to
+    fn focus_sheet(&mut self, csvs: &mut Csvs, id: usize) -> bool {
+        if id == csvs.handle || id >= csvs.num_contexts() {
+            return false;
         }
-        pad_num + con.cells().filename.len()
+        csvs.save_context(self);
+        csvs.set_handle(id);
+        self.set_context(csvs.get_context());
+        true
+    }
+
+    pub fn switch_sheet(&mut self, csvs: &mut Csvs, id: usize) {
+        if !self.focus_sheet(csvs, id) {
+            return;
+        }
+        self.draw_screen(csvs.get_cells());
+        self.draw_context(csvs);
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    // lays out the sheet bar: returns the first sheet shown, the entries
+    // to print (as many as fit, the last one possibly cut short with '…'),
+    // and whether sheets are hidden to the left and to the right.
+    // two columns are always kept free for the '<' and '>' markers
+    fn layout_sheet_bar(
+        names: &[String],
+        handle: usize,
+        start: usize,
+        width: usize,
+    ) -> (usize, Vec<String>, bool, bool) {
+        let n = names.len();
+        if n == 0 {
+            return (0, Vec::new(), false, false);
+        }
+        let avail = width.saturating_sub(2);
+        let full = |i: usize| format!("{}: {} ", i, names[i]);
+        let handle = handle.min(n - 1);
+
+        let mut start = start.min(n - 1);
+        if handle < start {
+            start = handle;
+        }
+        while start < handle
+        && (start..=handle).map(|i| full(i).chars().count()).sum::<usize>() > avail {
+            start += 1;
+        }
+
+        let mut entries = Vec::<String>::new();
+        let mut used = 0usize;
+        let mut filled = false;
+        for i in start..n {
+            let entry = full(i);
+            let w = entry.chars().count();
+            if used + w <= avail {
+                used += w;
+                entries.push(entry);
+                continue;
+            }
+            // cut the name short if at least one char of it fits
+            let prefix = format!("{}: ", i);
+            let room = (avail - used).saturating_sub(prefix.chars().count() + 1);
+            if room > 0 {
+                let cut: String = names[i].chars().take(room).collect();
+                entries.push(format!("{prefix}{cut}…"));
+            }
+            filled = true;
+            break;
+        }
+        // the last sheet fit with room to spare (sheets closed, window
+        // widened), so pull in earlier sheets until the bar is full
+        while !filled && start > 0 {
+            let entry = full(start - 1);
+            let w = entry.chars().count();
+            if used + w > avail {
+                break;
+            }
+            used += w;
+            start -= 1;
+            entries.insert(0, entry);
+        }
+
+        let right = start + entries.len() < n;
+        (start, entries, start > 0, right)
     }
 
     pub fn draw_context(&mut self, csvs: &mut Csvs) {
@@ -981,45 +1059,33 @@ impl WinInfo {
             )
         );
 
-        let mut width = 0usize;
-        let mut i = 0usize;
-        while width < self.width && i < csvs.num_contexts() { 
-            let con = &mut csvs.contexts[i];
-            let con_width = Self::printed_context_width(con);
-            width += con_width.min(self.width);
-            let formatted = {
-                let con_string = format!(
-                                    "{}: {} ",
-                                    con.id.clone(),
-                                    con.cells().filename
-                                );
-                if i == csvs.handle {
-                    format!(
-                        "\x1b[7;36m{:<width$}\x1b[27;39m\x1b[30m",
-                        con_string,
-                        width = con_width
-                    )
-                } else {
-                    format!(
-                        "{:<width$}",
-                        con_string,
-                        width = con_width
-                    )
-                }
-            };
-
-            self.push_str_to_frame(
-                &formatted
-            );
-            i += 1;
-        }
-        width = self.width.saturating_sub(width);
-        let padding = format!(
-            "{:<width$}\x1b[39;49m", 
-            "",
-            width = width
+        let names: Vec<String> = csvs.contexts
+            .iter_mut()
+            .map(|con| con.cells().filename.clone())
+            .collect();
+        let (start, entries, left, right) = Self::layout_sheet_bar(
+            &names, csvs.handle, self.bar_start, self.width
         );
-        self.push_str_to_frame(&padding);
+        self.bar_start = start;
+
+        let mut used = 0usize;
+        let mut bar = String::from(if left { "<" } else { " " });
+        for (k, entry) in entries.iter().enumerate() {
+            used += entry.chars().count();
+            if start + k == csvs.handle {
+                bar.push_str(&format!("\x1b[7;36m{}\x1b[27;39m\x1b[30m", entry));
+            } else {
+                bar.push_str(entry);
+            }
+        }
+        bar.push_str(&" ".repeat(self.width.saturating_sub(used + 2)));
+        bar.push(if right { '>' } else { ' ' });
+        bar.push_str("\x1b[39;49m");
+
+        if self.width < 2 {
+            bar = format!("{}\x1b[39;49m", " ".repeat(self.width));
+        }
+        self.push_str_to_frame(&bar);
     }
 
     pub fn draw_screen(&mut self, cells: &mut Cells) {
@@ -1920,6 +1986,7 @@ impl WinInfo {
                     Some(name) => self.rename_sheet(csvs, name)
                 }
             }
+            "g"  | "goto" => self.goto_sheet(tokens, csvs),
             "o"  | "open" => self.open_sheet(tokens, csvs),
             "c"  | "close" => self.close_sheet(csvs),
             _ => cmd_err::print(
@@ -1927,6 +1994,82 @@ impl WinInfo {
                     self.height
                 ),
         }
+    }
+
+    // finds a sheet by index, or by name: an exact match on the
+    // filename, basename, or basename without extension wins, then
+    // a unique prefix of the filename or basename
+    fn resolve_sheet<'a>(csvs: &Csvs, target: &'a str) -> Result<usize, CmdErr<'a>> {
+        let t = Self::trim_quotes(target);
+        if !t.is_empty() && t.chars().all(|c| c.is_ascii_digit()) {
+            return match t.parse::<usize>() {
+                Ok(id) if id < csvs.num_contexts() => Ok(id),
+                _ => Err(CmdErr::InvalidConId(target)),
+            };
+        }
+
+        let t = t.to_lowercase();
+        let names: Vec<(String, String, String)> = csvs.contexts
+            .iter()
+            .map(|con| {
+                let full = con.cells.filename.clone();
+                let path = Path::new(&full);
+                let base = path.file_name()
+                    .map(|b| b.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| full.clone());
+                let stem = path.file_stem()
+                    .map(|b| b.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| base.clone());
+                (full.to_lowercase(), base.to_lowercase(), stem.to_lowercase())
+            })
+            .collect();
+
+        let tiers: [Box<dyn Fn(&(String, String, String)) -> bool>; 3] = [
+            Box::new(|n| n.0 == t),
+            Box::new(|n| n.1 == t || n.2 == t),
+            Box::new(|n| n.0.starts_with(&t) || n.1.starts_with(&t)),
+        ];
+        for tier in &tiers {
+            let hits: Vec<usize> = (0..names.len())
+                .filter(|&i| tier(&names[i]))
+                .collect();
+            match hits.len() {
+                0 => (),
+                1 => return Ok(hits[0]),
+                n => return Err(CmdErr::AmbiguousSheet(target, n)),
+            }
+        }
+        Err(CmdErr::NoSheet(target))
+    }
+
+    // `sh g {index or name}` focuses another sheet
+    fn goto_sheet(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
+        let tok = tokens[1];
+        let target = match tokens.get(2) {
+            Some(t) => *t,
+            None => {
+                cmd_err::print(CmdErr::MissingName(tok), self.height);
+                return;
+            }
+        };
+        if tokens.len() > 3 {
+            cmd_err::print(CmdErr::TooManyArgs(tok), self.height);
+            return;
+        }
+        let id = match Self::resolve_sheet(csvs, target) {
+            Ok(id) => id,
+            Err(e) => {
+                cmd_err::print(e, self.height);
+                return;
+            }
+        };
+        if !self.focus_sheet(csvs, id) {
+            return;
+        }
+        self.draw_context(csvs);
+        self.changed = WinChange::Screen;
+        self.show_csv(csvs.get_cells());
+        self.flush();
     }
 
     fn trim_quotes(q: &str) -> String {
@@ -3811,19 +3954,11 @@ impl WinInfo {
 
         let con_id = match tokens.next() {
             Some(r) if r != "" => {
-                match Self::str_to_dec(r) {
+                match Self::resolve_sheet(csvs, r) {
                     Ok(num) => {
                         if csvs.handle == num {
                             cmd_err::print(
                                 CmdErr::SameCon,
-                                self.height
-                            );
-                            return;
-                        }
-                        if num >= csvs.num_contexts() {
-
-                            cmd_err::print(
-                                CmdErr::InvalidConId(r),
                                 self.height
                             );
                             return;
@@ -4344,7 +4479,11 @@ impl WinInfo {
         }
         let closed = csvs.remove_context(csvs.handle);
         if csvs.handle >= csvs.num_contexts() {
+            // the closed sheet isn't a sheet to go back to,
+            // so keep the one backtick pointed at before
+            let prev = csvs.prev;
             csvs.set_handle(csvs.num_contexts() - 1);
+            csvs.prev = prev.filter(|&p| p != csvs.handle);
         }
 
         self.set_context(csvs.get_context());
@@ -5392,6 +5531,265 @@ mod tests {
         win.num_rows = rows;
         win.set_h_pointer(378);
         win.draw_screen(&mut dest);
+    }
+
+    fn sheets_fixture(names: &[&str]) -> (Csvs, WinInfo) {
+        let contexts = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| Context::new(i, cells_with_rows(n, vec!["a"], vec![vec!["x"]])))
+            .collect::<Vec<Context>>();
+        let mut csvs = Csvs::new(contexts);
+        let mut win = command_win();
+        win.set_context(csvs.get_context());
+        (csvs, win)
+    }
+
+    fn goto(csvs: &mut Csvs, win: &mut WinInfo, target: &str) {
+        type_command(win, &format!("sh g {target}"));
+        win.process_command(csvs);
+    }
+
+    #[test]
+    fn goto_by_index_prefix_and_basename() {
+        let (mut csvs, mut win) = sheets_fixture(&[
+            "/d/alpha.csv", "/d/beta.csv", "/e/beta2.csv", "gamma.csv",
+        ]);
+
+        goto(&mut csvs, &mut win, "1");
+        assert_eq!(csvs.handle, 1);
+        goto(&mut csvs, &mut win, "gam");
+        assert_eq!(csvs.handle, 3);
+        goto(&mut csvs, &mut win, "ALPHA");
+        assert_eq!(csvs.handle, 0);
+        goto(&mut csvs, &mut win, "beta.csv");
+        assert_eq!(csvs.handle, 1);
+        goto(&mut csvs, &mut win, "beta2");
+        assert_eq!(csvs.handle, 2);
+        goto(&mut csvs, &mut win, "'/d/alpha.csv'");
+        assert_eq!(csvs.handle, 0);
+        goto(&mut csvs, &mut win, "/e");
+        assert_eq!(csvs.handle, 2);
+        goto(&mut csvs, &mut win, "goto");
+        assert_eq!(csvs.handle, 2);
+        type_command(&mut win, "sheet goto 3");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.handle, 3);
+    }
+
+    #[test]
+    fn goto_bad_targets_do_not_switch() {
+        let (mut csvs, mut win) = sheets_fixture(&[
+            "/d/alpha.csv", "/d/beta.csv", "/e/beta2.csv",
+        ]);
+
+        goto(&mut csvs, &mut win, "be");
+        assert_eq!(csvs.handle, 0);
+        goto(&mut csvs, &mut win, "nope");
+        assert_eq!(csvs.handle, 0);
+        goto(&mut csvs, &mut win, "3");
+        assert_eq!(csvs.handle, 0);
+        goto(&mut csvs, &mut win, "99999999999999999999999");
+        assert_eq!(csvs.handle, 0);
+        type_command(&mut win, "sh g");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.handle, 0);
+        assert!(WinInfo::resolve_sheet(&csvs, "be").is_err());
+        assert_eq!(WinInfo::resolve_sheet(&csvs, "beta").ok(), Some(1));
+    }
+
+    #[test]
+    fn goto_leaves_undo_history_alone() {
+        let (mut csvs, mut win) = sheets_fixture(&["a.csv", "b.csv"]);
+        let before = crate::history::undo_len(&csvs);
+        goto(&mut csvs, &mut win, "b");
+        goto(&mut csvs, &mut win, "0");
+        assert_eq!(csvs.handle, 0);
+        assert_eq!(crate::history::undo_len(&csvs), before);
+    }
+
+    #[test]
+    fn prev_follows_the_handle_and_close() {
+        let (mut csvs, _) = sheets_fixture(&["a", "b", "c", "d"]);
+        assert_eq!(csvs.prev, None);
+        csvs.set_handle(2);
+        assert_eq!(csvs.prev, Some(0));
+        csvs.set_handle(2);
+        assert_eq!(csvs.prev, Some(0));
+        csvs.set_handle(3);
+        assert_eq!(csvs.prev, Some(2));
+
+        // closing a sheet before prev shifts it down
+        csvs.remove_context(0);
+        assert_eq!((csvs.handle, csvs.prev), (2, Some(1)));
+        // closing prev itself clears it
+        csvs.remove_context(1);
+        assert_eq!((csvs.handle, csvs.prev), (1, None));
+    }
+
+    #[test]
+    fn tab_shift_tab_and_backtick_switch_sheets() {
+        use crate::input::process_input;
+        let (mut csvs, mut win) = sheets_fixture(&["a", "b", "c"]);
+
+        process_input(&[9], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 1);
+        process_input(&[9], &mut win, &mut csvs);
+        process_input(&[9], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 0);
+        process_input(&[27, 91, 90], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 2);
+        process_input(&[96], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 0);
+        process_input(&[96], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 2);
+        process_input(&[49], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 1);
+
+        // a stale prev is ignored
+        csvs.prev = Some(7);
+        process_input(&[96], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 1);
+        csvs.prev = Some(1);
+        process_input(&[96], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 1);
+    }
+
+    #[test]
+    fn single_sheet_ignores_tab_and_backtick() {
+        use crate::input::process_input;
+        let (mut csvs, mut win) = sheets_fixture(&["a"]);
+        process_input(&[9], &mut win, &mut csvs);
+        process_input(&[27, 91, 90], &mut win, &mut csvs);
+        process_input(&[96], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 0);
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn bar_width(entries: &[String]) -> usize {
+        entries.iter().map(|e| e.chars().count()).sum()
+    }
+
+    #[test]
+    fn sheet_bar_shows_everything_that_fits() {
+        let n = names(&["a.csv", "b.csv"]);
+        let (start, entries, left, right) = WinInfo::layout_sheet_bar(&n, 0, 0, 40);
+        assert_eq!(start, 0);
+        assert_eq!(entries, vec!["0: a.csv ", "1: b.csv "]);
+        assert!(!left && !right);
+    }
+
+    #[test]
+    fn sheet_bar_scrolls_to_the_focused_sheet_and_back() {
+        let n = names(&["aaaa", "bbbb", "cccc", "dddd", "eeee"]);
+        // each entry is 8 wide; 20 columns leave room for 2
+        let (start, entries, left, right) = WinInfo::layout_sheet_bar(&n, 4, 0, 20);
+        assert_eq!(start, 3);
+        assert_eq!(entries, vec!["3: dddd ", "4: eeee "]);
+        assert!(left && !right);
+
+        // moving focus back left pulls the bar back
+        let (start, entries, left, right) = WinInfo::layout_sheet_bar(&n, 1, start, 20);
+        assert_eq!(start, 1);
+        assert_eq!(entries[0], "1: bbbb ");
+        assert!(left && right);
+
+        // focus still inside the window leaves the start alone
+        let (start, _, _, _) = WinInfo::layout_sheet_bar(&n, 3, 2, 20);
+        assert_eq!(start, 2);
+
+        // start is clamped when sheets were closed, and refills the bar
+        let (start, entries, _, _) = WinInfo::layout_sheet_bar(&n[..2], 1, 4, 20);
+        assert_eq!(start, 0);
+        assert_eq!(entries, vec!["0: aaaa ", "1: bbbb "]);
+    }
+
+    #[test]
+    fn sheet_bar_truncates_the_last_entry_and_huge_names() {
+        let n = names(&["aaaa", "bbbbbbbbbb"]);
+        // 14 usable: "0: aaaa " leaves 6 for "1: bb…"
+        let (_, entries, _, right) = WinInfo::layout_sheet_bar(&n, 0, 0, 16);
+        assert_eq!(entries, vec!["0: aaaa ", "1: bb…"]);
+        assert!(!right);
+
+        // too little room for even one char of the name
+        let (_, entries, _, right) = WinInfo::layout_sheet_bar(&n, 0, 0, 12);
+        assert_eq!(entries, vec!["0: aaaa "]);
+        assert!(right);
+
+        // a single name wider than the bar
+        let huge = names(&["x".repeat(100).as_str()]);
+        let (start, entries, left, right) = WinInfo::layout_sheet_bar(&huge, 0, 0, 20);
+        assert_eq!(start, 0);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].chars().count(), 18);
+        assert!(entries[0].starts_with("0: x") && entries[0].ends_with('…'));
+        assert!(!left && !right);
+    }
+
+    #[test]
+    fn sheet_bar_never_exceeds_the_width() {
+        let n = names(&["日本語のファイル.csv", "é.csv", "plain.csv", "名前", "z"]);
+        for width in 0..60 {
+            for handle in 0..n.len() {
+                let (start, entries, _, _) = WinInfo::layout_sheet_bar(&n, handle, 0, width);
+                assert!(bar_width(&entries) + 2 <= width.max(2), "width {width}");
+                assert!(start <= handle);
+                if width >= 2 + format!("{handle}: ").len() + 2 {
+                    assert!(start + entries.len() > handle, "focus hidden at {width}");
+                }
+            }
+        }
+        let (_, entries, _, _) = WinInfo::layout_sheet_bar(&n, 0, 0, 14);
+        assert_eq!(entries, vec!["0: 日本語のファイル…"]);
+    }
+
+    #[test]
+    fn sheet_bar_pulls_earlier_sheets_back_in_when_room_frees_up() {
+        let n = names(&["aaaa", "bbbb", "cccc", "dddd", "eeee"]);
+        // bar was scrolled to sheet 3 at 20 wide; at 50 wide everything fits
+        let (start, entries, left, right) = WinInfo::layout_sheet_bar(&n, 4, 3, 50);
+        assert_eq!(start, 0);
+        assert_eq!(entries.len(), 5);
+        assert!(!left && !right);
+
+        // after closing down to three sheets, the start comes back too
+        let (start, entries, _, _) = WinInfo::layout_sheet_bar(&n[..3], 2, 2, 30);
+        assert_eq!(start, 0);
+        assert_eq!(entries.len(), 3);
+    }
+
+    #[test]
+    fn closing_the_last_sheet_keeps_the_backtick_target() {
+        let (mut csvs, mut win) = sheets_fixture(&["a", "b", "c"]);
+        csvs.set_handle(2);
+        win.set_context(csvs.get_context());
+        assert_eq!(csvs.prev, Some(0));
+
+        type_command(&mut win, "sh c");
+        win.process_command(&mut csvs);
+        assert_eq!((csvs.handle, csvs.prev), (1, Some(0)));
+    }
+
+    #[test]
+    fn splice_accepts_a_sheet_name() {
+        let first = cells_with_rows("first.csv", vec!["a"], vec![vec!["one"]]);
+        let second = cells_with_rows("second.csv", vec!["a"], vec![vec!["two"]]);
+        let mut csvs = Csvs::new(vec![Context::new(0, first), Context::new(1, second)]);
+        let mut win = command_win();
+        win.set_context(csvs.get_context());
+
+        type_command(&mut win, "sh sp r second 0");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.get_cells().num_rows(), 2);
+
+        // the focused sheet itself is refused
+        type_command(&mut win, "sh sp r first 0");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.get_cells().num_rows(), 2);
     }
 }
 

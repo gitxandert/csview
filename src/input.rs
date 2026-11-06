@@ -51,18 +51,21 @@ pub fn process_input(
         InputMode::Scroll => {
             match input {
                 [48..=57] => {
-                    let id = input[0] as usize - 48;
-                    if csvs.handle != id
-                    && id < csvs.num_contexts() {
-                        csvs.save_context(w_info);
-                        csvs.set_handle(id);
-                        w_info.set_context(
-                            csvs.get_context()
-                        );
-                        w_info.draw_screen(csvs.get_cells());
-                        w_info.draw_context(csvs);
-                        w_info.draw_focused_content();
-                        w_info.flush();
+                    w_info.switch_sheet(csvs, input[0] as usize - 48);
+                }
+                [9] => { // tab (next sheet)
+                    let n = csvs.num_contexts();
+                    w_info.switch_sheet(csvs, (csvs.handle + 1) % n);
+                }
+                [27, 91, 90] => { // shift-tab (previous sheet)
+                    let n = csvs.num_contexts();
+                    w_info.switch_sheet(csvs, (csvs.handle + n - 1) % n);
+                }
+                [96] => { // backtick (last focused sheet)
+                    if let Some(p) = csvs.prev {
+                        if p < csvs.num_contexts() && p != csvs.handle {
+                            w_info.switch_sheet(csvs, p);
+                        }
                     }
                 }
                 // normal arrows

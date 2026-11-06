@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 pub enum CmdErr<'a> {
+    AmbiguousSheet(&'a str, usize),
     InvalidArg(&'a str),
     InvalidCommand(&'a str),
     InvalidConId(&'a str),
@@ -21,6 +22,7 @@ pub enum CmdErr<'a> {
     NoId(&'a str),
     NoName(&'a str),
     NoNameContains(&'a str),
+    NoSheet(&'a str),
     SameCon,
     StdinErr(&'a str),
     TooManyArgs(&'a str),
@@ -32,6 +34,11 @@ pub fn print(err: CmdErr, line: usize) {
     let mut out = io::stdout();
     let outstring = {
         match err {
+            CmdErr::AmbiguousSheet(t, n) => format!(
+                    "\x1b[{};1H\x1b[2KERR: '{}' matches {} sheets",
+                    line, t, n
+                ),
+
             CmdErr::InvalidArg(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: invalid argument '{}'",
                     line, t
@@ -129,6 +136,11 @@ pub fn print(err: CmdErr, line: usize) {
 
             CmdErr::NoNameContains(t) => format!(
                     "\x1b[{};1H\x1b[2KERR: no column name contains '{}'",
+                    line, t
+                ),
+
+            CmdErr::NoSheet(t) => format!(
+                    "\x1b[{};1H\x1b[2KERR: no sheet matches '{}'",
                     line, t
                 ),
 

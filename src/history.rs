@@ -71,6 +71,11 @@ pub enum Checkpoint {
 
 impl Checkpoint {
     pub fn take(csvs: &mut Csvs, w_info: &WinInfo, tokens: &[&str]) -> Self {
+        // switching sheets never touches the history
+        if matches!(tokens.get(0), Some(&"sh") | Some(&"sheet"))
+        && matches!(tokens.get(1), Some(&"g") | Some(&"goto")) {
+            return Checkpoint::Non;
+        }
         let changes_sheets = matches!(tokens.get(0), Some(&"sh") | Some(&"sheet"))
             && matches!(
                 tokens.get(1),

@@ -63,7 +63,11 @@ csview currently admits the following key bindings:
 - **o**
     - display full content of focused cell to the screen
 - **number keys**
-    - switch between different files
+    - switch to sheets 0-9
+- **Tab** | **Shift-Tab**
+    - switch to the next or previous sheet, wrapping around (reaches sheets past 9)
+- **`** (backtick)
+    - switch back to the sheet that was focused before this one
 
 csview also has a command mode, accessed through ':' :
 - **q** | **quit**
@@ -163,7 +167,7 @@ csview also has a command mode, accessed through ':' :
             - does not work on sliced-out sheets, but does work on sheets that have been sliced
     - `sh sl {orientation} {range}` | `sheet slice {orientation} {range}`
         - slices out the specified columns or rows into a separate sheet
-            - switch between sheets with the number keys
+            - switch between sheets with the number keys, Tab / Shift-Tab, or `sh g`
         - orientation can be:
             - 'c' | 'cols'
             - 'r' | 'rows'
@@ -176,7 +180,7 @@ csview also has a command mode, accessed through ':' :
             - underscore: the focused row/col
     - `sh sp {orientation} {sheet id} {loc}` | `sheet splice {sheet id} {orientation} {loc}`
         - adds one sheet's content to the focused sheet by orientation and at the location specified
-        - sheet id is a number key associated with a sheet apart from the focused sheet's
+        - sheet id is a number or a sheet name (see `sh g`) apart from the focused sheet's
         - orientation can be:
             - 'c' | 'cols'
             - 'r' | 'rows'
@@ -190,6 +194,10 @@ csview also has a command mode, accessed through ':' :
             - -f/--filter: filters the sheet to only the rows that contain the term
     - `sh rn {new_name}` | `sheet rename {new_name}`
         - renames the current sheet to the provided new_name
+    - `sh g {target}` | `sheet goto {target}`
+        - switches to a sheet by index or by name
+        - a name matches a sheet's filename, its basename, or the basename without its extension (case-insensitive); failing an exact match, a unique prefix works
+        - errors if nothing matches or the name is ambiguous; never touches undo history
     - `sh o {path} {arguments}` | `sheet open {path} {arguments}`
         - opens a file as a new sheet and switches to it
         - quote paths that contain spaces; a leading ~/ expands to the home directory
