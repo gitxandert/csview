@@ -1,7 +1,7 @@
 use std::mem;
 
 use crate::{
-    cells::{Cell, Context, Csvs},
+    cells::{Cell, Context, Csvs, SplitView},
     terminal::WinInfo,
 };
 
@@ -26,10 +26,11 @@ enum Edit {
         ctx: usize,
         con: Context,
     },
-    // every sheet (slicing and splicing add/remove sheets)
+    // every sheet (workspace commands add/remove sheets)
     Workspace {
         contexts: Vec<Context>,
         handle: usize,
+        split: Option<SplitView>,
     },
 }
 
@@ -66,6 +67,7 @@ pub enum Checkpoint {
     Workspace {
         contexts: Vec<Context>,
         handle: usize,
+        split: Option<SplitView>,
     },
 }
 
@@ -81,6 +83,7 @@ impl Checkpoint {
                 tokens.get(1),
                 Some(&"sl") | Some(&"slice") | Some(&"sp") | Some(&"splice")
                     | Some(&"o") | Some(&"open") | Some(&"c") | Some(&"close")
+                    | Some(&"split")
             );
         let can_edit = matches!(
             tokens.get(0),
@@ -95,6 +98,7 @@ impl Checkpoint {
             return Checkpoint::Workspace {
                 contexts: csvs.contexts.iter().map(|con| con.clone()).collect(),
                 handle: csvs.handle,
+                split: csvs.split,
             };
         }
 
@@ -119,12 +123,12 @@ impl Checkpoint {
                 }
                 csvs.contexts[ctx].cells.written |= was_written;
             }
-            Checkpoint::Workspace { contexts, handle } => {
+            Checkpoint::Workspace { contexts, handle, split } => {
                 // slicing, splicing and opening only succeed
                 // if they add, remove or replace a sheet
                 let replaced = mem::take(&mut csvs.replaced);
                 if csvs.num_contexts() != contexts.len() || replaced {
-                    csvs.history.push(Edit::Workspace { contexts, handle });
+                    csvs.history.push(Edit::Workspace { contexts, handle, split });
                 }
             }
         }
@@ -205,9 +209,10 @@ fn apply(edit: &mut Edit, csvs: &mut Csvs, w_info: &mut WinInfo) {
             csvs.get_cells().written = true;
             w_info.set_context(csvs.get_context());
         }
-        Edit::Workspace { contexts, handle } => {
+        Edit::Workspace { contexts, handle, split } => {
             mem::swap(&mut csvs.contexts, contexts);
             mem::swap(&mut csvs.handle, handle);
+            mem::swap(&mut csvs.split, split);
             csvs.get_cells().written = true;
             w_info.set_context(csvs.get_context());
         }

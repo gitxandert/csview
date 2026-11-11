@@ -86,8 +86,7 @@ fn main() {
         w_info.set_cmd_history_file(path);
     }
     w_info.set_context(csvs.get_context());
-    w_info.draw_context(&mut csvs);
-    w_info.show_csv(csvs.get_cells());
+    w_info.show_workspace(&mut csvs);
     
     // main loop
     let mut buffer = [0u8; 16];
@@ -99,7 +98,7 @@ fn main() {
                 if !input.is_empty() {
                     match process_input(input, &mut w_info, &mut csvs) {
                         SigFlag::Quit => break,
-                        _ => w_info.show_csv(csvs.get_cells()),
+                        _ => w_info.show_workspace(&mut csvs),
                     }
                 }
             }

@@ -35,6 +35,8 @@ csview currently admits the following key bindings:
     - (on exit, the program will prompt the user to save any unsaved edits)
 - **ctrl + Q**
     - exits command mode (see below)
+- **ctrl + O**
+    - switches focus to the other pane in split view
 - **arrow keys**
     - highlight individual cells; if in write mode, these scroll through text
 - **ctrl + arrow key**
@@ -156,6 +158,13 @@ csview also has a command mode, accessed through ':' :
     - `row a` | `row add`
         - sums all numerics cells in a row
 - **sh/sheet**: sheet functions
+    - `sh split {h|horizontal|v|vertical} [sheet]`
+        - splits the terminal into two equal panes (`h` is top/bottom, `v` is left/right)
+        - the optional sheet is resolved like `sh goto`; without one, uses the next sheet or creates an empty sheet
+        - run the command again to change orientation or replace the second pane's sheet
+    - `sh split off`
+        - turns off split view and keeps the active pane's sheet full-screen
+        - both sheets remain open and available through normal sheet switching
     - `sh s {column} {direction}` | `sheet sortby {column} {direction}`
         - reindexes all columns according to the sorted column's indices
         - direction arguments are the same as for `col sort`

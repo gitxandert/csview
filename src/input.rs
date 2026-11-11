@@ -95,6 +95,9 @@ pub fn process_input(
                         }
                     }
                 }
+                [15] => { // ctrl + o (other split pane)
+                    w_info.switch_pane(csvs);
+                }
                 // normal arrows
                 [27, 91, 65] => { // up
                     w_info.set_h_pointer(w_info.h_pointer.saturating_sub(1));
@@ -151,13 +154,14 @@ pub fn process_input(
                         }
                         67 => { // right
                             if winch {
+                                let view_right = w_info.active_view_right(csvs);
                                 let cells = csvs.get_cells();
                                 let col = cells.get_column(
                                     cells.w_cell.0
                                 );
                                 let new_width = col.width + 1;
                                 // only change col_width if the current cell doesn't go out of bounds
-                                if col.start + new_width + 3 < w_info.width {
+                                if col.start + new_width + 3 < view_right {
                                     cells.set_column_width(new_width);
                                     w_info.changed = WinChange::ColWidth;
                                 }

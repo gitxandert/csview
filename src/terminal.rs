@@ -14,7 +14,7 @@ use crate::{
     cells::*,
     cmd_err::{self, CmdErr},
     csv_io::{
-        append_cmd_history, load_cmd_history, load_csv, make_col_ids,
+        append_cmd_history, blank_csv, load_cmd_history, load_csv, make_col_ids,
         poll_stdin, save_backup, write_to_file, PollEvent,
     },
     history::Checkpoint,
@@ -225,7 +225,19 @@ pub struct WinInfo {
     cmd_history_idx: Option<usize>, // None while not browsing history
     cmd_draft: String, // typed command, kept while browsing
     cmd_history_file: Option<PathBuf>, // None keeps history in memory only
+    split_mode: bool,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PaneRect {
+    top: usize,
+    left: usize,
+    width: usize,
+    height: usize,
+}
+
+const MIN_PANE_WIDTH: usize = 22;
+const MIN_PANE_HEIGHT: usize = 4;
 
 // oldest commands are dropped once the history grows past this
 const MAX_CMD_HISTORY: usize = 100;
@@ -284,6 +296,7 @@ impl WinInfo {
             cmd_history_idx: None,
             cmd_draft: String::new(),
             cmd_history_file: None,
+            split_mode: false,
         }
     }
 
@@ -492,10 +505,8 @@ impl WinInfo {
                 self.width = ws.ws_col as usize;
                 self.height = ws.ws_row as usize;
             }
-            self.draw_screen(csvs.get_cells());
-            self.draw_context(csvs);
-            self.draw_focused_content();
-            self.flush();
+            self.changed = WinChange::Screen;
+            self.show_workspace(csvs);
         }
     }
     
@@ -985,10 +996,29 @@ impl WinInfo {
         if !self.focus_sheet(csvs, id) {
             return;
         }
-        self.draw_screen(csvs.get_cells());
-        self.draw_context(csvs);
-        self.draw_focused_content();
-        self.flush();
+        self.changed = WinChange::Screen;
+        self.show_workspace(csvs);
+    }
+
+    pub fn switch_pane(&mut self, csvs: &mut Csvs) {
+        let id = match csvs.other_pane() {
+            Some(id) => id,
+            None => return,
+        };
+        self.switch_sheet(csvs, id);
+    }
+
+    pub fn active_view_right(&self, csvs: &Csvs) -> usize {
+        let split = match csvs.split {
+            Some(split) => split,
+            None => return self.width,
+        };
+        let (first, second) = match self.split_rects(split.direction) {
+            Some(rects) => rects,
+            None => return self.width,
+        };
+        let rect = if csvs.handle == split.first { first } else { second };
+        rect.left + rect.width - 1
     }
 
     // lays out the sheet bar: returns the first sheet shown, the entries
@@ -1093,7 +1123,268 @@ impl WinInfo {
         self.push_str_to_frame(&bar);
     }
 
+    fn split_rects(&self, direction: SplitDirection) -> Option<(PaneRect, PaneRect)> {
+        let content_height = self.height.saturating_sub(2);
+        match direction {
+            SplitDirection::Vertical => {
+                if self.width < MIN_PANE_WIDTH * 2 + 1
+                || content_height < MIN_PANE_HEIGHT {
+                    return None;
+                }
+                let first_width = (self.width - 1) / 2;
+                let second_width = self.width - first_width - 1;
+                Some((
+                    PaneRect { top: 1, left: 1, width: first_width, height: content_height },
+                    PaneRect {
+                        top: 1,
+                        left: first_width + 2,
+                        width: second_width,
+                        height: content_height,
+                    },
+                ))
+            }
+            SplitDirection::Horizontal => {
+                if self.width < MIN_PANE_WIDTH
+                || content_height < MIN_PANE_HEIGHT * 2 + 1 {
+                    return None;
+                }
+                let first_height = (content_height - 1) / 2;
+                let second_height = content_height - first_height - 1;
+                Some((
+                    PaneRect { top: 1, left: 1, width: self.width, height: first_height },
+                    PaneRect {
+                        top: first_height + 2,
+                        left: 1,
+                        width: self.width,
+                        height: second_height,
+                    },
+                ))
+            }
+        }
+    }
+
+    fn clear_pane(&mut self, rect: PaneRect) {
+        for row in rect.top..rect.top + rect.height {
+            self.push_str_to_frame(&format!(
+                "\x1b[{row};{}H\x1b[{}X",
+                rect.left,
+                rect.width,
+            ));
+        }
+    }
+
+    fn draw_split_pane(
+        &mut self,
+        cells: &mut Cells,
+        id: usize,
+        rect: PaneRect,
+        active: bool,
+    ) {
+        self.clamp_view();
+        cells.set_w_cell(self.w_pointer, self.h_pointer);
+        self.clear_pane(rect);
+
+        let marker = if active { "*" } else { " " };
+        let title = Self::terminal_safe_prefix(
+            &format!("{marker} {id}: {}", cells.filename),
+            rect.width.saturating_sub(1),
+        );
+        let style = if active { "\x1b[7;36;47m" } else { "\x1b[30;47m" };
+        self.push_str_to_frame(&format!(
+            "\x1b[{};{}H{}{}\x1b[27;39;49m",
+            rect.top,
+            rect.left,
+            style,
+            title,
+        ));
+
+        let table_top = rect.top + 1;
+        let prefix_width = 5usize;
+        let mut shown = Vec::<(usize, usize, usize)>::new();
+        let mut used = prefix_width;
+        let mut col = self.w_offset;
+        while col < self.num_cols {
+            let col_width = cells.columns[col].col_width();
+            if used + col_width >= rect.width {
+                break;
+            }
+            let start = rect.left + used;
+            cells.columns[col].set_start(start);
+            shown.push((col, start, col_width));
+            used += col_width;
+            col += 1;
+        }
+        self.w_page = shown.len().max(1);
+        self.h_page = rect.height.saturating_sub(3).max(1);
+
+        if rect.height > 1 {
+            self.push_str_to_frame(&format!(
+                "\x1b[{table_top};{}H\x1b[4m    |",
+                rect.left,
+            ));
+            for &(idx, start, width) in &shown {
+                let value = &cells.col_ids[idx].content;
+                self.push_str_to_frame(&format!(
+                    "\x1b[{table_top};{start}H {:^width$} |",
+                    value,
+                    width = width - 3,
+                ));
+            }
+        }
+        if rect.height > 2 {
+            let row = table_top + 1;
+            self.push_str_to_frame(&format!(
+                "\x1b[{row};{}H\x1b[1;30;47mHEAD|\x1b[22;39;49m",
+                rect.left,
+            ));
+            for &(idx, start, width) in &shown {
+                let value = Self::terminal_safe_window(
+                    &cells.header[idx].content,
+                    cells.header[idx].text_offset,
+                    width - 3,
+                );
+                self.push_str_to_frame(&format!(
+                    "\x1b[{row};{start}H\x1b[30;47m {:<width$} |\x1b[39;49m",
+                    value,
+                    width = width - 3,
+                ));
+            }
+        }
+
+        let rows = rect.height.saturating_sub(3);
+        for displayed in 0..rows {
+            let sheet_row = self.h_offset + displayed;
+            if sheet_row >= self.num_rows {
+                break;
+            }
+            let row = table_top + 2 + displayed;
+            self.push_str_to_frame(&format!(
+                "\x1b[{row};{}H\x1b[30;47m{:04X} \x1b[39;49m",
+                rect.left,
+                sheet_row,
+            ));
+            for &(idx, start, width) in &shown {
+                let focused = active && idx == self.w_pointer && sheet_row == self.h_pointer;
+                let (value, full_value) = if focused && self.input_mode == InputMode::Write {
+                    let full = self.write_buffer.as_string();
+                    (
+                        Self::terminal_safe_window(
+                            &full,
+                            self.write_buffer.offset,
+                            width - 3,
+                        ),
+                        full,
+                    )
+                } else if sheet_row < cells.columns[idx].indices.len() {
+                    let cell = cells.columns[idx].get_cell(sheet_row);
+                    (
+                        Self::terminal_safe_window(&cell.content, cell.text_offset, width - 3),
+                        cell.content.clone(),
+                    )
+                } else {
+                    (String::new(), String::new())
+                };
+                let style = if focused { "\x1b[7;36;47m" } else { "" };
+                let reset = if focused { "\x1b[27;39;49m" } else { "" };
+                self.push_str_to_frame(&format!(
+                    "\x1b[{row};{start}H{style} {:<width$} {reset}|",
+                    value,
+                    width = width - 3,
+                ));
+                if focused {
+                    self.set_focused(&full_value);
+                    self.set_cursor(row, start + 1, width - 3);
+                }
+            }
+        }
+    }
+
+    fn draw_split(&mut self, csvs: &mut Csvs) -> bool {
+        let split = match csvs.split {
+            Some(split) => split,
+            None => return false,
+        };
+        let (first_rect, second_rect) = match self.split_rects(split.direction) {
+            Some(rects) => rects,
+            None => return false,
+        };
+
+        csvs.save_context(self);
+        let active = csvs.handle;
+        let inactive = if active == split.first { split.second } else { split.first };
+        let inactive_rect = if inactive == split.first { first_rect } else { second_rect };
+        let active_rect = if active == split.first { first_rect } else { second_rect };
+
+        {
+            let con = &mut csvs.contexts[inactive];
+            self.set_context(con);
+            self.draw_split_pane(&mut con.cells, inactive, inactive_rect, false);
+            con.save(self);
+        }
+        {
+            let con = &mut csvs.contexts[active];
+            self.set_context(con);
+            self.draw_split_pane(&mut con.cells, active, active_rect, true);
+        }
+
+        match split.direction {
+            SplitDirection::Vertical => {
+                let col = first_rect.left + first_rect.width;
+                for row in 1..=first_rect.height {
+                    self.push_str_to_frame(&format!("\x1b[{row};{col}H\x1b[2m|\x1b[22m"));
+                }
+            }
+            SplitDirection::Horizontal => {
+                let row = first_rect.top + first_rect.height;
+                self.push_str_to_frame(&format!(
+                    "\x1b[{row};1H\x1b[2m{}\x1b[22m",
+                    "-".repeat(self.width.saturating_sub(1)),
+                ));
+            }
+        }
+        true
+    }
+
+    pub fn show_workspace(&mut self, csvs: &mut Csvs) {
+        let was_split = self.split_mode;
+        self.split_mode = csvs.split.is_some();
+        if csvs.split.is_none() {
+            if was_split {
+                self.changed = WinChange::Screen;
+            }
+            if matches!(self.changed, WinChange::Screen | WinChange::Init) {
+                self.draw_context(csvs);
+            }
+            self.show_csv(csvs.get_cells());
+            return;
+        }
+        if self.input_mode == InputMode::Command {
+            if self.changed == WinChange::Command {
+                self.draw_command();
+                self.flush();
+            }
+            return;
+        }
+        let changed = self.changed != WinChange::Non;
+        if self.draw_split(csvs) {
+            self.draw_context(csvs);
+            if changed {
+                self.draw_focused_content();
+            }
+        } else {
+            self.split_mode = false;
+            self.draw_screen(csvs.get_cells());
+            self.split_mode = true;
+            self.draw_context(csvs);
+            print_bottom!(self, "Terminal too small for split");
+        }
+        self.flush();
+    }
+
     pub fn draw_screen(&mut self, cells: &mut Cells) {
+        if self.split_mode {
+            return;
+        }
         // reset focused cell
         self.clamp_view();
         cells.set_w_cell(self.w_pointer, self.h_pointer);
@@ -1136,6 +1427,9 @@ impl WinInfo {
     }
 
     pub fn draw_from_column(&mut self, cells: &mut Cells) {
+        if self.split_mode {
+            return;
+        }
         self.clamp_view();
         let col_id = self.w_pointer;
         let start = cells.columns[col_id].start;
@@ -1168,6 +1462,9 @@ impl WinInfo {
     }
 
     pub fn draw_rows(&mut self, cells: &mut Cells) {
+        if self.split_mode {
+            return;
+        }
         self.clamp_view();
         let (_, prev_row) = cells.w_cell;
         cells.set_w_cell(self.w_pointer, self.h_pointer);
@@ -1199,6 +1496,9 @@ impl WinInfo {
     }
 
     pub fn draw_focus(&mut self, cells: &mut Cells) {
+        if self.split_mode {
+            return;
+        }
         // erase the previously-focused cell
         // and whatever follows it
         self.clamp_view();
@@ -1233,6 +1533,9 @@ impl WinInfo {
     }
 
     pub fn draw_edited(&mut self, cells: &mut Cells) {
+        if self.split_mode {
+            return;
+        }
         self.focused_content.clear();
 
         let (mut id, row) = cells.w_cell;
@@ -1328,6 +1631,9 @@ impl WinInfo {
     }
 
     pub fn draw_w_cell(&mut self, cells: &mut Cells) {
+        if self.split_mode {
+            return;
+        }
         let (mut i, row) = cells.w_cell;
         let cursor = format!("\x1b[{};{}H\x1b[K\x1b[4m",
             row.saturating_sub(self.h_offset) + 3, &cells.columns[i].start
@@ -1357,7 +1663,11 @@ impl WinInfo {
         }
         
         let mut out = std::io::stdout();
-        let _ = write!(out, "{}", self.frame);
+        if self.split_mode && !self.frame.is_empty() {
+            let _ = write!(out, "\x1b[?2026h{}\x1b[?2026l", self.frame);
+        } else {
+            let _ = write!(out, "{}", self.frame);
+        }
         out.flush().unwrap();
 
         self.frame = String::new();
@@ -1365,6 +1675,9 @@ impl WinInfo {
     }
 
     pub fn show_csv(&mut self, cells: &mut Cells) {
+        if self.split_mode {
+            return;
+        }
         match self.changed {
             WinChange::Cell => {
                 // redraw the focused cell,
@@ -1964,6 +2277,7 @@ impl WinInfo {
             "g"  | "goto" => self.goto_sheet(tokens, csvs),
             "o"  | "open" => self.open_sheet(tokens, csvs),
             "c"  | "close" => self.close_sheet(csvs),
+            "split" => self.split_sheet(tokens, csvs),
             _ => cmd_err::print(
                     CmdErr::InvalidSubCmd(subcmd), 
                     self.height
@@ -2045,6 +2359,98 @@ impl WinInfo {
         self.changed = WinChange::Screen;
         self.show_csv(csvs.get_cells());
         self.flush();
+    }
+
+    fn split_sheet(&mut self, tokens: Vec<&str>, csvs: &mut Csvs) {
+        let arg = match tokens.get(2) {
+            Some(arg) => *arg,
+            None => {
+                cmd_err::print(CmdErr::MissingValue("split"), self.height);
+                return;
+            }
+        };
+        if arg == "off" {
+            if tokens.len() > 3 {
+                cmd_err::print(CmdErr::TooManyArgs("split"), self.height);
+                return;
+            }
+            self.disable_split(csvs);
+            return;
+        }
+        let direction = match arg {
+            "h" | "horizontal" => SplitDirection::Horizontal,
+            "v" | "vertical" => SplitDirection::Vertical,
+            _ => {
+                cmd_err::print(CmdErr::InvalidArg(arg), self.height);
+                return;
+            }
+        };
+        if tokens.len() > 4 {
+            cmd_err::print(CmdErr::TooManyArgs("split"), self.height);
+            return;
+        }
+
+        if let Some(mut split) = csvs.split {
+            split.direction = direction;
+            if let Some(target) = tokens.get(3) {
+                let id = match Self::resolve_sheet(csvs, target) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        cmd_err::print(e, self.height);
+                        return;
+                    }
+                };
+                if id == split.first {
+                    cmd_err::print(CmdErr::SamePane, self.height);
+                    return;
+                }
+                split.second = id;
+                if split.active == SplitPane::Second {
+                    csvs.set_handle(id);
+                    split.active = SplitPane::Second;
+                }
+            }
+            csvs.split = Some(split);
+        } else {
+            let second = match tokens.get(3) {
+                Some(target) => match Self::resolve_sheet(csvs, target) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        cmd_err::print(e, self.height);
+                        return;
+                    }
+                },
+                None if csvs.num_contexts() > 1 => (csvs.handle + 1) % csvs.num_contexts(),
+                None => {
+                    let id = csvs.num_contexts();
+                    let delim = csvs.get_cells().delim;
+                    let rows = self.height.saturating_sub(4);
+                    csvs.push_context(Context::new(
+                        id,
+                        blank_csv("Untitled.csv".to_string(), delim, rows),
+                    ));
+                    id
+                }
+            };
+            if second == csvs.handle {
+                cmd_err::print(CmdErr::SamePane, self.height);
+                return;
+            }
+            csvs.start_split(direction, second);
+        }
+        self.changed = WinChange::Screen;
+    }
+
+    fn disable_split(&mut self, csvs: &mut Csvs) {
+        if csvs.split.is_none() {
+            print_bottom!(self, "No split view");
+            self.flush();
+            return;
+        }
+        csvs.save_context(self);
+        csvs.split = None;
+        self.set_context(csvs.get_context());
+        self.changed = WinChange::Screen;
     }
 
     fn trim_quotes(q: &str) -> String {
@@ -5654,6 +6060,191 @@ mod tests {
         assert_eq!(csvs.handle, 0);
     }
 
+    #[test]
+    fn split_commands_create_reorient_and_disable_two_panes() {
+        let (mut csvs, mut win) = sheets_fixture(&["a.csv", "b.csv", "c.csv"]);
+
+        type_command(&mut win, "sh split v b.csv");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.split, Some(SplitView {
+            direction: SplitDirection::Vertical,
+            first: 0,
+            second: 1,
+            active: SplitPane::First,
+        }));
+
+        type_command(&mut win, "sh split h c.csv");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.split.unwrap().direction, SplitDirection::Horizontal);
+        assert_eq!(csvs.split.unwrap().second, 2);
+
+        csvs.set_handle(2);
+        win.set_context(csvs.get_context());
+        type_command(&mut win, "sh split off");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.num_contexts(), 3);
+        assert_eq!(csvs.handle, 2);
+        assert_eq!(csvs.split, None);
+        assert_eq!(csvs.contexts[1].cells.filename, "b.csv");
+        assert_eq!(csvs.contexts[2].cells.filename, "c.csv");
+        assert!(!crate::history::undo(&mut csvs, &mut win));
+    }
+
+    #[test]
+    fn split_without_target_uses_next_or_creates_blank_sheet() {
+        let (mut csvs, mut win) = sheets_fixture(&["a.csv", "b.csv"]);
+        type_command(&mut win, "sh split v a.csv");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.split, None);
+
+        type_command(&mut win, "sh split v");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.split.unwrap().second, 1);
+
+        let (mut csvs, mut win) = sheets_fixture(&["only.csv"]);
+        type_command(&mut win, "sh split h");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.num_contexts(), 2);
+        assert_eq!(csvs.contexts[1].cells.filename, "Untitled.csv");
+        assert_eq!(csvs.split.unwrap().direction, SplitDirection::Horizontal);
+
+        csvs.contexts[1].cells.written = true;
+        type_command(&mut win, "sh split off");
+        win.process_command(&mut csvs);
+        assert_eq!(csvs.num_contexts(), 2);
+        assert_eq!(csvs.split, None);
+        assert!(csvs.contexts[1].cells.written);
+
+        crate::input::process_input(&[9], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 1);
+
+        assert!(crate::history::undo(&mut csvs, &mut win));
+        assert_eq!(csvs.num_contexts(), 1);
+        assert_eq!(csvs.split, None);
+    }
+
+    #[test]
+    fn ctrl_o_and_sheet_switching_target_the_active_pane() {
+        use crate::input::process_input;
+        let (mut csvs, mut win) = sheets_fixture(&["a", "b", "c"]);
+        csvs.start_split(SplitDirection::Vertical, 1);
+
+        process_input(&[15], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 1);
+        assert_eq!(csvs.split.unwrap().active, SplitPane::Second);
+
+        process_input(&[50], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 2);
+        assert_eq!(csvs.split.unwrap().second, 2);
+
+        process_input(&[48], &mut win, &mut csvs);
+        assert_eq!(csvs.handle, 0);
+        assert_eq!(csvs.split.unwrap().active, SplitPane::First);
+        assert_eq!(csvs.split.unwrap().second, 2);
+    }
+
+    #[test]
+    fn split_panes_restore_independent_scroll_positions() {
+        let contexts = ["a", "b"]
+            .iter()
+            .enumerate()
+            .map(|(id, name)| {
+                Context::new(id, cells_with_generated_rows(name, vec!["a"], 20))
+            })
+            .collect();
+        let mut csvs = Csvs::new(contexts);
+        let mut win = command_win();
+        win.height = 20;
+        win.set_context(csvs.get_context());
+        csvs.start_split(SplitDirection::Vertical, 1);
+
+        win.set_h_pointer(5);
+        win.switch_pane(&mut csvs);
+        assert_eq!(csvs.contexts[0].h_pointer, 5);
+
+        win.set_h_pointer(7);
+        win.switch_pane(&mut csvs);
+        assert_eq!(csvs.contexts[1].h_pointer, 7);
+        assert_eq!(win.h_pointer, 5);
+    }
+
+    #[test]
+    fn removing_other_sheet_repairs_split_indices() {
+        let (mut csvs, _) = sheets_fixture(&["a", "unused", "b"]);
+        csvs.start_split(SplitDirection::Vertical, 2);
+
+        csvs.remove_context(1);
+        assert_eq!(csvs.split.unwrap().first, 0);
+        assert_eq!(csvs.split.unwrap().second, 1);
+
+        csvs.remove_context(1);
+        assert_eq!(csvs.split, None);
+        assert_eq!(csvs.handle, 0);
+    }
+
+    #[test]
+    fn split_layouts_are_equal_and_reject_tiny_terminals() {
+        let mut win = command_win();
+        win.width = 81;
+        win.height = 20;
+
+        let (left, right) = win.split_rects(SplitDirection::Vertical).unwrap();
+        assert_eq!(left.width + right.width + 1, 81);
+        assert_eq!(right.left, left.width + 2);
+
+        let (top, bottom) = win.split_rects(SplitDirection::Horizontal).unwrap();
+        assert_eq!(top.height + bottom.height + 1, 18);
+        assert_eq!(bottom.top, top.height + 2);
+
+        win.width = MIN_PANE_WIDTH * 2;
+        assert!(win.split_rects(SplitDirection::Vertical).is_none());
+        win.width = 80;
+        win.height = MIN_PANE_HEIGHT * 2 + 2;
+        assert!(win.split_rects(SplitDirection::Horizontal).is_none());
+    }
+
+    #[test]
+    fn split_renderer_draws_both_sheet_titles() {
+        let (mut csvs, mut win) = sheets_fixture(&["left.csv", "right.csv"]);
+        win.width = 80;
+        win.height = 20;
+        csvs.start_split(SplitDirection::Vertical, 1);
+
+        assert!(win.draw_split(&mut csvs));
+        assert!(win.frame.contains("0: left.csv"));
+        assert!(win.frame.contains("1: right.csv"));
+        assert!(win.frame.contains("X"));
+        assert!(!win.frame.contains("\x1b[2J"));
+        assert_eq!(csvs.handle, 0);
+    }
+
+    #[test]
+    fn split_mode_suppresses_legacy_full_screen_draws() {
+        let (mut csvs, mut win) = sheets_fixture(&["left.csv", "right.csv"]);
+        csvs.start_split(SplitDirection::Vertical, 1);
+        win.split_mode = true;
+
+        win.draw_screen(csvs.get_cells());
+        win.draw_focus(csvs.get_cells());
+        win.show_csv(csvs.get_cells());
+        assert!(win.frame.is_empty());
+    }
+
+    #[test]
+    fn collapsing_split_forces_full_screen_redraw() {
+        let (mut csvs, mut win) = sheets_fixture(&["left.csv", "right.csv"]);
+        csvs.start_split(SplitDirection::Vertical, 1);
+        win.changed = WinChange::Screen;
+        win.show_workspace(&mut csvs);
+        assert!(win.split_mode);
+
+        csvs.split = None;
+        win.changed = WinChange::Non;
+        win.show_workspace(&mut csvs);
+        assert!(!win.split_mode);
+        assert_eq!(win.changed, WinChange::Non);
+    }
+
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
     }
@@ -5694,6 +6285,22 @@ mod tests {
         let (start, entries, _, _) = WinInfo::layout_sheet_bar(&n[..2], 1, 4, 20);
         assert_eq!(start, 0);
         assert_eq!(entries, vec!["0: aaaa ", "1: bbbb "]);
+    }
+
+    #[test]
+    fn workspace_redraw_tracks_focused_sheet_in_bar() {
+        let (mut csvs, mut win) = sheets_fixture(&[
+            "aaaa", "bbbb", "cccc", "dddd", "eeee",
+        ]);
+        win.width = 20;
+        csvs.set_handle(4);
+        win.set_context(csvs.get_context());
+        win.changed = WinChange::Screen;
+
+        win.show_workspace(&mut csvs);
+
+        assert_eq!(win.bar_start, 3);
+        assert_eq!(csvs.handle, 4);
     }
 
     #[test]

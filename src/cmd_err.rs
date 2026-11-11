@@ -24,6 +24,7 @@ pub enum CmdErr<'a> {
     NoNameContains(&'a str),
     NoSheet(&'a str),
     SameCon,
+    SamePane,
     StdinErr(&'a str),
     TooManyArgs(&'a str),
     UnknownSpec(&'a str),
@@ -146,6 +147,11 @@ pub fn print(err: CmdErr, line: usize) {
 
             CmdErr::SameCon => format!(
                     "\x1b[{};1H\x1b[2KERR: can't splice the active context to itself",
+                    line
+                ),
+
+            CmdErr::SamePane => format!(
+                    "\x1b[{};1H\x1b[2KERR: sheet is already shown in the first pane",
                     line
                 ),
 

@@ -687,6 +687,26 @@ impl Context {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SplitDirection {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SplitPane {
+    First,
+    Second,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SplitView {
+    pub direction: SplitDirection,
+    pub first: usize,
+    pub second: usize,
+    pub active: SplitPane,
+}
+
 pub struct Csvs {
     pub contexts: Vec<Context>,
     pub handle: usize,
@@ -696,6 +716,7 @@ pub struct Csvs {
     pub replaced: bool,
     // the sheet that was focused before this one (for backtick)
     pub prev: Option<usize>,
+    pub split: Option<SplitView>,
 }
 
 impl Csvs {
@@ -706,6 +727,7 @@ impl Csvs {
             history: History::new(),
             replaced: false,
             prev: None,
+            split: None,
         }
     }
 
@@ -725,12 +747,31 @@ impl Csvs {
         for c in &mut self.contexts {
             c.id -= (c.id > id) as usize;
         }
-        self.handle -= (self.handle > id) as usize; 
+        self.handle -= (self.handle > id) as usize;
         self.prev = match self.prev {
             Some(p) if p == id => None,
             Some(p) => Some(p - (p > id) as usize),
             None => None,
         };
+
+        if let Some(split) = self.split {
+            let adjust = |idx: usize| idx - (idx > id) as usize;
+            if id == split.first || id == split.second {
+                let survivor = if id == split.first {
+                    adjust(split.second)
+                } else {
+                    adjust(split.first)
+                };
+                self.split = None;
+                self.handle = survivor;
+            } else {
+                self.split = Some(SplitView {
+                    first: adjust(split.first),
+                    second: adjust(split.second),
+                    ..split
+                });
+            }
+        }
 
         self.contexts.remove(id)
     }
@@ -747,7 +788,35 @@ impl Csvs {
         if id != self.handle {
             self.prev = Some(self.handle);
         }
+        if let Some(split) = &mut self.split {
+            if id == split.first {
+                split.active = SplitPane::First;
+            } else if id == split.second {
+                split.active = SplitPane::Second;
+            } else {
+                match split.active {
+                    SplitPane::First => split.first = id,
+                    SplitPane::Second => split.second = id,
+                }
+            }
+        }
         self.handle = id;
+    }
+
+    pub fn start_split(&mut self, direction: SplitDirection, second: usize) {
+        self.split = Some(SplitView {
+            direction,
+            first: self.handle,
+            second,
+            active: SplitPane::First,
+        });
+    }
+
+    pub fn other_pane(&self) -> Option<usize> {
+        self.split.map(|split| match split.active {
+            SplitPane::First => split.second,
+            SplitPane::Second => split.first,
+        })
     }
 }
     
