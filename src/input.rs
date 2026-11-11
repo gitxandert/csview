@@ -42,6 +42,33 @@ fn copy_to_clipboard(content: &str) -> bool {
     false
 }
 
+// Read content from the first available clipboard tool
+fn read_from_clipboard() -> Option<String> {
+    use std::process::{Command, Stdio};
+
+    let tools: [&[&str]; 4] = [
+        &["wl-paste", "--no-newline"],
+        &["xclip", "-selection", "clipboard", "-o"],
+        &["xsel", "--clipboard", "--output"],
+        &["pbpaste"],
+    ];
+    for tool in tools {
+        let Ok(output) = Command::new(tool[0])
+            .args(&tool[1..])
+            .stderr(Stdio::null())
+            .output()
+        else {
+            continue;
+        };
+        if output.status.success() {
+            if let Ok(content) = String::from_utf8(output.stdout) {
+                return Some(content);
+            }
+        }
+    }
+    None
+}
+
 pub fn process_input(
     input: &[u8], 
     w_info: &mut WinInfo, 
@@ -307,6 +334,29 @@ pub fn process_input(
                                     ),
                         };
                         w_info.push_str_to_frame(&paste_str);
+                    }
+                    w_info.flush();
+                }
+                // ctrl + p (paste from system clipboard)
+                [16] => {
+                    match read_from_clipboard() {
+                        Some(content) => {
+                            let old = csvs.get_cells().w_cell().clone();
+                            w_info.paste_content(csvs.get_cells(), &content);
+                            history::record_cell(csvs, old);
+                            let verb = "pasted clipboard";
+                            let max_shown = w_info.width.saturating_sub(verb.len() + 3);
+                            let (preview, truncated) = bottom_preview(&content, max_shown);
+                            let suffix = if truncated { "..." } else { "" };
+                            w_info.push_str_to_frame(&format!(
+                                "\x1b[{};1H\x1b[2K\x1b[0m{} '{}{}'",
+                                w_info.height, verb, preview, suffix
+                            ));
+                        }
+                        None => w_info.push_str_to_frame(&format!(
+                            "\x1b[{};1H\x1b[2K\x1b[0mClipboard unavailable",
+                            w_info.height
+                        )),
                     }
                     w_info.flush();
                 }

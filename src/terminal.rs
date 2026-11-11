@@ -380,8 +380,13 @@ impl WinInfo {
     }
 
     pub fn paste(&mut self, cells: &mut Cells) {
+        let content = self.yanked.clone();
+        self.paste_content(cells, &content);
+    }
+
+    pub fn paste_content(&mut self, cells: &mut Cells, content: &str) {
         let cell = cells.w_cell();
-        cell.content = self.yanked.clone();
+        cell.content = content.to_string();
         cell.escape_sequences.clear();
         self.set_focused(&cell.content);
         self.draw_focus(cells);
@@ -5421,6 +5426,22 @@ mod tests {
         win.set_yanked(&Cell::new("second\tvalue"));
         win.paste(&mut cells);
         assert_eq!(cells.columns[0].view_cell(0), "second\tvalue");
+    }
+
+    #[test]
+    fn paste_content_does_not_replace_yanked_content() {
+        let mut cells = cells_with_rows("paste.csv", vec!["report"], vec![vec![""]]);
+        let mut win = WinInfo::new();
+        win.width = 80;
+        win.height = 10;
+        win.num_cols = cells.num_cols();
+        win.num_rows = cells.num_rows();
+        win.set_yanked(&Cell::new("yanked"));
+
+        win.paste_content(&mut cells, "clipboard");
+
+        assert_eq!(cells.columns[0].view_cell(0), "clipboard");
+        assert_eq!(win.yanked, "yanked");
     }
 
     #[test]

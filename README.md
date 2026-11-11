@@ -54,6 +54,7 @@ csview currently admits the following key bindings:
 - **p**
     - paste yanked content to focused cell
 - **ctrl + p**
+    - paste system clipboard content to the focused cell (uses wl-paste, xclip, xsel, or pbpaste)
     - (write mode) paste yanked content at the cursor
 - **u**
     - undo the last edit (cell edits, deletes, pastes, and any command that changes a sheet)
