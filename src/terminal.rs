@@ -3212,6 +3212,7 @@ impl WinInfo {
         cells.w_cell().is_focused = false;
         let col = &mut cells.columns[self.w_pointer];
         col.revert();
+        self.num_rows = cells.visible_rows();
         cells.set_w_cell(self.w_pointer, self.h_pointer);
         cells.written = true;
         self.draw_from_column(cells);
@@ -5557,6 +5558,23 @@ mod tests {
 
         assert_eq!(win.num_rows, 2);
         assert_eq!(win.h_pointer, 1);
+    }
+
+    #[test]
+    fn revert_after_unique_restores_sheet_row_count() {
+        let cells = cells_with_rows(
+            "onecol.csv",
+            vec!["A"],
+            vec![vec!["x"], vec!["x"], vec!["y"]],
+        );
+        let mut csvs = Csvs::new(vec![Context::new(0, cells)]);
+        let mut win = win_for(csvs.get_cells());
+
+        win.show_unique_column_values(&mut csvs);
+        win.revert_focused_column(csvs.get_cells());
+
+        assert_eq!(win.num_rows, 3);
+        assert_eq!(column_values(csvs.get_cells(), 0), vec!["x", "x", "y"]);
     }
 
     #[test]
