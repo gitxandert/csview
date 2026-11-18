@@ -188,10 +188,13 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
 
 pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
     let mut file = fs::read_to_string(filename.clone())?;
-    // don't parse carriage returns
-    file = file.replace("\r", " ");
+    let crlf = file.contains("\r\n");
+    // CRLF line endings become plain newlines; a stray carriage return would
+    // move the cursor when drawn, so it becomes a space
+    file = file.replace("\r\n", "\n").replace('\r', " ");
 
-    let cells = parse_csv_into_cells(filename, file, delim)?;
+    let mut cells = parse_csv_into_cells(filename, file, delim)?;
+    cells.crlf = crlf;
 
     Ok(cells)
 }
@@ -399,7 +402,8 @@ pub fn save_backup(file: &String) -> Result<String, io::Error> {
 // TODO: reintroduce escape sequences
 pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
     let mut sheet = String::new();
-    let delim = cells.delim; 
+    let delim = cells.delim;
+    let newline = if cells.crlf { "\r\n" } else { "\n" };
     {
         let header = &cells.header;
         for i in 0..header.len() {
@@ -410,7 +414,7 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
                 sheet.push(delim);
             }
         }
-        sheet.push('\n');
+        sheet.push_str(newline);
     }
 
     // drop trailing rows with nothing in them (e.g. a blank sheet's filler);
@@ -435,7 +439,7 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
         }
 
         if i != num_rows - 1 || trimmed {
-            row.push('\n');
+            row.push_str(newline);
         }
 
         sheet.push_str(&row);
@@ -489,6 +493,21 @@ mod tests {
         assert_eq!(cells.header[0].content, "Unnamed");
         assert_eq!(cells.get_column(0).get_cell(4).content, "");
         assert!(!cells.written);
+    }
+
+    #[test]
+    fn crlf_file_loads_without_trailing_spaces_and_saves_as_crlf() {
+        let path = test_path("crlf");
+        fs::write(&path, "a,b\r\n1,2\r\n3,4\r\n").unwrap();
+
+        let mut cells = load_csv(path.clone(), ',').unwrap();
+        assert_eq!(cells.header[1].content, "b");
+        assert_eq!(cells.get_column(1).get_cell(0).content, "2");
+        write_to_file(&mut cells).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(written, "a,b\r\n1,2\r\n3,4\r\n");
     }
 
     #[test]

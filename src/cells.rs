@@ -489,6 +489,8 @@ pub struct Cells {
     pub changed: bool,
     pub written: bool,
     pub slices: usize,
+    // rows end in \r\n (kept so a CRLF file is written back as CRLF)
+    pub crlf: bool,
 }
 
 impl Cells {
@@ -508,7 +510,8 @@ impl Cells {
             w_cell, 
             changed, 
             written,
-            slices
+            slices,
+            crlf: false,
         }
     }
 
@@ -523,6 +526,7 @@ impl Cells {
             changed: self.changed,
             written: self.written,
             slices: self.slices,
+            crlf: self.crlf,
         }
     }
 

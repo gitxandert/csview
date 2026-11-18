@@ -4258,6 +4258,7 @@ impl WinInfo {
             col_ids,
             col_len
         );
+        new_cells.crlf = cells.crlf;
 
         // the slice is a copy of the rows on screen
         let shown = cells.visible_rows();
