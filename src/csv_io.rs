@@ -421,7 +421,7 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
     // any dropped rows collapse into one final newline
     let mut num_rows = cells.num_rows();
     while num_rows > 0
-        && (0..cells.num_cols()).all(|j| cells.get_column(j).get_cell(num_rows - 1).raw_content().is_empty())
+        && (0..cells.num_cols()).all(|j| cells.columns[j].cell(num_rows - 1).raw_content().is_empty())
     {
         num_rows -= 1;
     }
@@ -430,8 +430,7 @@ pub fn write_to_file(cells: &mut Cells) -> Result<String, io::Error> {
     for i in 0..num_rows {
         let mut row = String::new();
         for j in 0..cells.num_cols() {
-            let column = cells.get_column(j);
-            let cell = column.get_cell(i);
+            let cell = cells.columns[j].cell(i);
             row.push_str(&serialize_cell(cell, delim));
             if j != cells.num_cols() - 1 {
                 row.push(delim);

@@ -1,4 +1,4 @@
-use std::mem;
+use std::{mem, rc::Rc};
 
 use crate::{
     cells::{Cell, Context, Csvs, SplitView},
@@ -191,8 +191,8 @@ fn apply(edit: &mut Edit, csvs: &mut Csvs, w_info: &mut WinInfo) {
             // the cell is gone if an unrecorded change shrank the sheet
             let current = match cells.columns
                 .get_mut(*col)
-                .and_then(|c| c.cells.get_mut(*real_row)) {
-                Some(c) => c,
+                .and_then(|c| c.cells_mut().get_mut(*real_row)) {
+                Some(c) => Rc::make_mut(c),
                 None => return,
             };
             mem::swap(&mut current.content, &mut cell.content);
@@ -206,6 +206,8 @@ fn apply(edit: &mut Edit, csvs: &mut Csvs, w_info: &mut WinInfo) {
         Edit::Sheet { ctx, con } => {
             csvs.set_handle(*ctx);
             csvs.get_context().swap_state(con);
+            // snapshots share cells with the sheet, focus flag included
+            csvs.get_cells().clear_focus();
             csvs.get_cells().written = true;
             w_info.set_context(csvs.get_context());
         }
@@ -213,6 +215,9 @@ fn apply(edit: &mut Edit, csvs: &mut Csvs, w_info: &mut WinInfo) {
             mem::swap(&mut csvs.contexts, contexts);
             mem::swap(&mut csvs.handle, handle);
             mem::swap(&mut csvs.split, split);
+            for con in &mut csvs.contexts {
+                con.cells.clear_focus();
+            }
             csvs.get_cells().written = true;
             w_info.set_context(csvs.get_context());
         }
@@ -314,6 +319,57 @@ mod tests {
         let cp = Checkpoint::take(&mut csvs, &win, &["row", "c"]);
         cp.commit(&mut csvs);
         assert!(csvs.get_cells().written);
+    }
+
+    fn focused_count(csvs: &mut Csvs) -> usize {
+        csvs.get_cells().columns.iter()
+            .map(|col| col.cells.iter().filter(|cell| cell.is_focused).count())
+            .sum()
+    }
+
+    #[test]
+    fn snapshot_is_unaffected_by_edits_to_shared_cells() {
+        let mut csvs = csvs_with_rows(vec!["a", "b"], vec![vec!["one", "x"], vec!["two", "y"]]);
+        let mut win = win_for(&mut csvs);
+
+        // edit cells in place after the snapshot shares them
+        let cp = Checkpoint::take(&mut csvs, &win, &["col", "r"]);
+        let cells = csvs.get_cells();
+        cells.columns[0].get_cell(1).content = "TWO".to_string();
+        cells.columns[1].cells_mut().push(Rc::new(Cell::new("z")));
+        cells.columns[1].indices.push(2);
+        cells.written = true;
+        cp.commit(&mut csvs);
+        assert_eq!(values(&mut csvs, 0), vec!["one", "TWO"]);
+
+        undo(&mut csvs, &mut win);
+        assert_eq!(values(&mut csvs, 0), vec!["one", "two"]);
+        assert_eq!(values(&mut csvs, 1), vec!["x", "y"]);
+        redo(&mut csvs, &mut win);
+        assert_eq!(values(&mut csvs, 0), vec!["one", "TWO"]);
+        assert_eq!(values(&mut csvs, 1), vec!["x", "y", "z"]);
+    }
+
+    #[test]
+    fn undo_leaves_one_focused_cell() {
+        let mut csvs = csvs_with_rows(vec!["a", "b"], vec![vec!["one", "x"], vec!["two", "y"]]);
+        let mut win = win_for(&mut csvs);
+
+        // the snapshot keeps the focus at (0, 0); the sheet moves it on
+        let cp = Checkpoint::take(&mut csvs, &win, &["col", "r"]);
+        let cells = csvs.get_cells();
+        cells.columns[0].get_cell(1).content = "TWO".to_string();
+        cells.set_w_cell(1, 1);
+        cells.written = true;
+        cp.commit(&mut csvs);
+
+        undo(&mut csvs, &mut win);
+        csvs.get_cells().set_w_cell(1, 0);
+        assert_eq!(focused_count(&mut csvs), 1);
+        assert!(csvs.get_cells().columns[1].cell(0).is_focused);
+        redo(&mut csvs, &mut win);
+        csvs.get_cells().set_w_cell(0, 1);
+        assert_eq!(focused_count(&mut csvs), 1);
     }
 
     #[test]

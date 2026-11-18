@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::{
     csv_io::int_to_base_26,
     cmd_err::CmdErr,
@@ -209,7 +211,11 @@ mod tests {
 
 #[derive(Debug)]
 pub struct Column {
-    pub cells: Vec<Cell>,
+    // shared with undo snapshots at two levels: a snapshot shares the whole
+    // column, the first edit after it copies the list of cell pointers
+    // (cells_mut) and editing a cell copies just that cell (Rc::make_mut).
+    // read through `cells`, write through cells_mut / get_cell
+    pub cells: Rc<Vec<Rc<Cell>>>,
     pub start: usize, // terminal col where this begins
     pub width: usize,
     pub indices: Vec<usize>,
@@ -218,7 +224,7 @@ pub struct Column {
 
 impl Column {
     pub fn new() -> Self {
-        let cells = Vec::<Cell>::with_capacity(256);
+        let cells = Rc::new(Vec::<Rc<Cell>>::with_capacity(256));
         let indices = Vec::<usize>::with_capacity(256);
         Self {
             cells,
@@ -229,16 +235,43 @@ impl Column {
         }
     }
 
+    // a copy of the column with nothing focused
     pub fn clone(&self) -> Self {
-        let mut cells = self.cells.clone();
-        for cell in &mut cells {
-            cell.is_focused = false;
+        let mut col = self.share();
+        col.clear_focus();
+        col
+    }
+
+    // a copy that shares the cells until either side edits them
+    pub fn share(&self) -> Self {
+        Self {
+            cells: Rc::clone(&self.cells),
+            start: self.start,
+            width: self.width,
+            indices: self.indices.clone(),
+            padding: self.padding,
         }
-        let indices = self.indices.clone();
-        let start = self.start;
-        let width = self.width;
-        let padding = self.padding;
-        Self { cells, start, width, indices, padding }
+    }
+
+    pub fn cells_mut(&mut self) -> &mut Vec<Rc<Cell>> {
+        Rc::make_mut(&mut self.cells)
+    }
+
+    // unfocus every focused cell, only copying the column if one is
+    pub fn clear_focus(&mut self) {
+        let focused: Vec<usize> = self.cells
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| cell.is_focused)
+            .map(|(i, _)| i)
+            .collect();
+        if focused.is_empty() {
+            return;
+        }
+        let cells = self.cells_mut();
+        for i in focused {
+            Rc::make_mut(&mut cells[i]).is_focused = false;
+        }
     }
 
     pub fn push_cell(&mut self, cell: Cell) {
@@ -248,14 +281,14 @@ impl Column {
             self.insert_new_cells(at, vec![cell]);
             return;
         }
-        self.cells.push(cell);
+        self.cells_mut().push(Rc::new(cell));
         self.indices.push(self.indices.len());
     }
 
     pub fn insert_cell(&mut self, idx: usize, cell: Cell) {
         if idx < self.indices.len() {
             let real_idx = self.indices[idx];
-            self.cells.insert(real_idx, cell);
+            self.cells_mut().insert(real_idx, Rc::new(cell));
             self.indices.push(0usize);
             for i in ((idx + 1)..self.indices.len()).rev() {
                 self.indices[i] = self.indices[i - (i > idx) as usize];
@@ -265,7 +298,7 @@ impl Column {
                 self.indices[i] += (self.indices[i] >= real_idx) as usize;
             }
         } else {
-            self.cells.push(cell);
+            self.cells_mut().push(Rc::new(cell));
             self.indices.insert(idx, self.indices.len());
         }
     }
@@ -275,7 +308,7 @@ impl Column {
     pub fn insert_new_cells(&mut self, idx: usize, new_cells: Vec<Cell>) {
         let count = new_cells.len();
         let pos = self.cells.len() - self.padding;
-        self.cells.splice(pos..pos, new_cells);
+        self.cells_mut().splice(pos..pos, new_cells.into_iter().map(Rc::new));
         for real in &mut self.indices {
             if *real >= pos {
                 *real += count;
@@ -287,7 +320,7 @@ impl Column {
 
     pub fn remove_cell(&mut self, idx: usize) -> Cell {
         let real_idx = self.indices[idx];
-        let cell = self.cells.remove(real_idx);
+        let cell = Rc::unwrap_or_clone(self.cells_mut().remove(real_idx));
 
         for i in 0..idx {
             if self.indices[i] > real_idx {
@@ -309,32 +342,40 @@ impl Column {
     }
 
     pub fn reindex(&mut self) {
-        let mut reindexed = Vec::<Cell>::with_capacity(self.cells.len());
+        // already in display order: leave the cells shared
+        if self.padding == 0
+        && self.indices.len() == self.cells.len()
+        && self.indices.iter().enumerate().all(|(i, &real)| i == real) {
+            return;
+        }
+        let mut reindexed = Vec::<Rc<Cell>>::with_capacity(self.cells.len());
         // padding blanks sit at the end of cells;
         // keep every real cell (shown or hidden) in display order
         let real_len = self.len();
         for &real_idx in &self.indices {
             if real_idx < real_len {
-                reindexed.push(self.cells[real_idx].clone());
+                reindexed.push(Rc::clone(&self.cells[real_idx]));
             }
         }
-        self.cells = reindexed;
+        self.cells = Rc::new(reindexed);
         self.indices = (0..self.cells.len()).collect();
         self.padding = 0;
     }
 
     // copies of the rows shown at display rows st..=end,
     // blank where the column shows padding
-    pub fn copy_shown(&self, st: usize, end: usize) -> Vec<Cell> {
+    pub fn copy_shown(&self, st: usize, end: usize) -> Vec<Rc<Cell>> {
         if st >= self.indices.len() {
-            return Vec::<Cell>::new();
+            return Vec::<Rc<Cell>>::new();
         }
         let end = end.min(self.indices.len() - 1);
         self.indices[st..=end]
             .iter()
             .map(|&real| {
-                let mut cell = self.cells[real].clone();
-                cell.is_focused = false;
+                let mut cell = Rc::clone(&self.cells[real]);
+                if cell.is_focused {
+                    Rc::make_mut(&mut cell).is_focused = false;
+                }
                 cell
             })
             .collect()
@@ -377,7 +418,7 @@ impl Column {
         self.indices = order.map(|&real| new_pos[real]).collect();
 
         let mut real = 0usize;
-        self.cells.retain(|_| {
+        self.cells_mut().retain(|_| {
             real += 1;
             !removed[real - 1]
         });
@@ -426,7 +467,7 @@ impl Column {
             
             for _ in 0..seen_len {
                 u_idx.push(self.cells.len());
-                self.cells.push(Cell::new(""));
+                self.cells_mut().push(Rc::new(Cell::new("")));
             }
             u_idx.append(&mut seen_idx);
             u_idx.extend_from_slice(&self.indices[visible..]);
@@ -439,7 +480,10 @@ impl Column {
 
     pub fn revert(&mut self) {
         self.indices = (0..self.len()).collect();
-        self.cells.truncate(self.cells.len() - self.padding);
+        if self.padding > 0 {
+            let len = self.cells.len() - self.padding;
+            self.cells_mut().truncate(len);
+        }
         self.padding = 0;
     }
 
@@ -449,8 +493,13 @@ impl Column {
 
     pub fn set_width(&mut self, w: usize) {
         self.width = w;
-        for cell in &mut self.cells {
-            cell.width = w;
+        if self.cells.iter().all(|cell| cell.width == w) {
+            return;
+        }
+        for cell in self.cells_mut() {
+            if cell.width != w {
+                Rc::make_mut(cell).width = w;
+            }
         }
     }
 
@@ -463,9 +512,14 @@ impl Column {
         self.cells.get(real_idx).unwrap().view()
     }
 
+    pub fn cell(&self, idx: usize) -> &Cell {
+        &self.cells[self.indices[idx]]
+    }
+
+    // copies the cell first if an undo snapshot shares it
     pub fn get_cell(&mut self, idx: usize) -> &mut Cell {
         let real_idx = self.indices[idx];
-        self.cells.get_mut(real_idx).unwrap()
+        Rc::make_mut(self.cells_mut().get_mut(real_idx).unwrap())
     }
 
     pub fn len(&self) -> usize {
@@ -521,12 +575,21 @@ impl Cells {
             delim: self.delim,
             header: Self::clone_cell_row(&self.header),
             col_ids: Self::clone_cell_row(&self.col_ids),
-            columns: self.columns.iter().map(|col| col.clone()).collect(),
+            // shared, not copied: this is what makes undo snapshots cheap.
+            // the focused cell stays focused in the copy; clear_focus it
+            // before showing the copy
+            columns: self.columns.iter().map(|col| col.share()).collect(),
             w_cell: self.w_cell,
             changed: self.changed,
             written: self.written,
             slices: self.slices,
             crlf: self.crlf,
+        }
+    }
+
+    pub fn clear_focus(&mut self) {
+        for col in &mut self.columns {
+            col.clear_focus();
         }
     }
 
@@ -552,10 +615,20 @@ impl Cells {
     }
 
     pub fn set_w_cell(&mut self, col: usize, row: usize) {
+        // only write cells whose flag changes, so a redraw doesn't copy
+        // a column it shares with an undo snapshot
+        let prev_focused = self.columns.get(self.w_cell.0)
+            .and_then(|c| c.indices.get(self.w_cell.1).and_then(|&r| c.cells.get(r)))
+            .is_some_and(|cell| cell.is_focused);
+        if prev_focused && self.w_cell == (col, row) {
+            return;
+        }
         // first unfocus the previous w_cell,
         // which may no longer exist if the sheet shrank
-        if let Some(prev) = self.try_w_cell() {
-            prev.set_focused(false);
+        if prev_focused {
+            if let Some(prev) = self.try_w_cell() {
+                prev.set_focused(false);
+            }
         }
         self.w_cell = (col, row);
         self.w_cell().set_focused(true);
@@ -565,7 +638,10 @@ impl Cells {
         let (col, row) = self.w_cell;
         let column = self.columns.get_mut(col)?;
         let real_idx = *column.indices.get(row)?;
-        column.cells.get_mut(real_idx)
+        if real_idx >= column.cells.len() {
+            return None;
+        }
+        Some(Rc::make_mut(&mut column.cells_mut()[real_idx]))
     }
 
     pub fn push_column(&mut self, col: Column) {

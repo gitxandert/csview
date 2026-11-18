@@ -3,6 +3,7 @@ use std::{
     mem,
     io::Write,
     path::{Path, PathBuf},
+    rc::Rc,
     sync::atomic::Ordering,
 };
 
@@ -972,7 +973,7 @@ impl WinInfo {
                 }
                 break;
             }
-            let cell = col.get_cell(row);
+            let cell = col.cell(row);
             let content = &cell.content;
             let visible = Self::terminal_safe_window(
                 content,
@@ -1300,7 +1301,7 @@ impl WinInfo {
                         full,
                     )
                 } else if sheet_row < cells.columns[idx].indices.len() {
-                    let cell = cells.columns[idx].get_cell(sheet_row);
+                    let cell = cells.columns[idx].cell(sheet_row);
                     (
                         Self::terminal_safe_window(&cell.content, cell.text_offset, width - 3),
                         cell.content.clone(),
@@ -1702,7 +1703,9 @@ impl WinInfo {
         }
         
         let mut out = std::io::stdout();
-        if self.split_mode && !self.frame.is_empty() {
+        // synchronized update: the terminal shows the frame all at once
+        // instead of painting it line by line as it arrives
+        if !self.frame.is_empty() {
             let _ = write!(out, "\x1b[?2026h{}\x1b[?2026l", self.frame);
         } else {
             let _ = write!(out, "{}", self.frame);
@@ -2761,7 +2764,7 @@ impl WinInfo {
         let padding_start = col.cells.len();
         for offset in 0..padding {
             new_indices.push(padding_start + offset);
-            col.cells.push(Cell::new(""));
+            col.cells_mut().push(Rc::new(Cell::new("")));
         }
 
         new_indices.extend(
@@ -2921,7 +2924,7 @@ impl WinInfo {
         // rows (from a filter, sift or unique) line up with the new column
         let mut new_col = Column::new();
         let focused = &cells.columns[self.w_pointer];
-        new_col.cells = (0..focused.cells.len()).map(|_| Cell::new("")).collect();
+        new_col.cells = Rc::new((0..focused.cells.len()).map(|_| Rc::new(Cell::new(""))).collect());
         new_col.indices = focused.indices.clone();
         new_col.padding = focused.padding;
         cells.insert_column(loc, new_col);
@@ -3136,55 +3139,49 @@ impl WinInfo {
     fn sort_indices(col: &mut Column, dir: Sort) {
         let visible_len = col.len().saturating_sub(col.padding).min(col.indices.len());
         match dir {
-            Sort::AscAlph => 
+            Sort::AscAlph => {
+                // read every cell once up front instead of on each comparison
+                let keys: Vec<&str> = col.cells.iter().map(|cell| cell.view()).collect();
                 col.indices[..visible_len].sort_by(|&i, &j| {
                     let a = {
-                        match col.cells[i].view() {
-                            "" => &format!("{}a", col.cells[j].view()),
-                            _ => col.cells[i].view(),
+                        match keys[i] {
+                            "" => &format!("{}a", keys[j]),
+                            _ => keys[i],
                         }
                     };
                     let b = {
-                        match col.cells[j].view() {
-                            "" => &format!("{}a", col.cells[i].view()),
-                            _ => col.cells[j].view(),
+                        match keys[j] {
+                            "" => &format!("{}a", keys[i]),
+                            _ => keys[j],
                         }
                     };
                     a.cmp(&b)
-                }),
-            Sort::DescAlph => 
-                col.indices[..visible_len].sort_by(|&i, &j| {
-                    let a = col.cells[i].view();
-                    let b = col.cells[j].view();
-                    b.cmp(&a)
-                }),
-            Sort::AscNum => {
-                col.indices[..visible_len].sort_by(|&i, &j| {
-                    let a = match col.cells[i].content.parse::<f32>() {
-                        Ok(num) => num,
-                        Err(_)  => Self::extract_embedded_float(col.cells[i].view(), f32::MAX),
-                    };
-                    let b = match col.cells[j].content.parse::<f32>() {
-                        Ok(num) => num,
-                        Err(_)  => Self::extract_embedded_float(&col.cells[j].view(), f32::MAX),
-                    };
-                    a.total_cmp(&b)
                 })
+            }
+            Sort::DescAlph => {
+                let keys: Vec<&str> = col.cells.iter().map(|cell| cell.view()).collect();
+                col.indices[..visible_len].sort_by(|&i, &j| keys[j].cmp(keys[i]))
+            }
+            Sort::AscNum => {
+                let keys = Self::numeric_keys(col, f32::MAX);
+                col.indices[..visible_len].sort_by(|&i, &j| keys[i].total_cmp(&keys[j]))
             }
             Sort::DescNum => {
-                col.indices[..visible_len].sort_by(|&i, &j| {
-                    let a = match col.cells[i].content.parse::<f32>() {
-                        Ok(num) => num,
-                        Err(_)  => Self::extract_embedded_float(&col.cells[i].view(), f32::MIN),
-                    };
-                    let b = match col.cells[j].content.parse::<f32>() {
-                        Ok(num) => num,
-                        Err(_)  => Self::extract_embedded_float(&col.cells[j].view(), f32::MIN),
-                    };
-                    b.total_cmp(&a)
-                })
+                let keys = Self::numeric_keys(col, f32::MIN);
+                col.indices[..visible_len].sort_by(|&i, &j| keys[j].total_cmp(&keys[i]))
             }
         }
+    }
+
+    // each cell's sort value, parsed once rather than on every comparison
+    fn numeric_keys(col: &Column, default: f32) -> Vec<f32> {
+        col.cells
+            .iter()
+            .map(|cell| match cell.content.parse::<f32>() {
+                Ok(num) => num,
+                Err(_) => Self::extract_embedded_float(cell.view(), default),
+            })
+            .collect()
     }
 
     fn extract_embedded_float(content: &str, _default: f32) -> f32 {
@@ -3290,9 +3287,9 @@ impl WinInfo {
     fn col_fillna(&mut self, cells: &mut Cells, val: &str) {
         let val = Self::trim_quotes(val);
         let col = &mut cells.columns[self.w_pointer];
-        for cell in &mut col.cells {
+        for cell in col.cells_mut() {
             if &cell.content == "" {
-                cell.content.push_str(&val);
+                Rc::make_mut(cell).content.push_str(&val);
             }
         }
         cells.written = true;
@@ -3306,11 +3303,12 @@ impl WinInfo {
         let n = Self::trim_quotes(new);
 
         let col = &mut cells.columns[self.w_pointer];
-        for cell in &mut col.cells {
+        for cell in col.cells_mut() {
             // Check if the cell content contains the target substring
             if cell.content.contains(&t) {
                 // Replace the substring and reassign to cell.content
-                cell.content = cell.content.replace(&t, &n);
+                let replaced = cell.content.replace(&t, &n);
+                Rc::make_mut(cell).content = replaced;
             }
         }
         cells.written = true;
@@ -3323,7 +3321,7 @@ impl WinInfo {
         let col = cells.get_column(self.w_pointer);
         let mut valid = 0;
         let mut sum: f64 = 0.0;
-        for cell in &mut col.cells {
+        for cell in col.cells.iter() {
             match cell.content.parse::<f64>() {
                 Ok(f) => {
                     sum += f;
@@ -4026,13 +4024,14 @@ impl WinInfo {
     // for each display row after reordering a column,
     // the display row it came from
     fn row_order(old_indices: &[usize], new_indices: &[usize]) -> Vec<Option<usize>> {
-        let mut old_pos = std::collections::HashMap::<usize, usize>::new();
+        let size = old_indices.iter().chain(new_indices).max().map_or(0, |&m| m + 1);
+        let mut old_pos = vec![None; size];
         for (pos, &real) in old_indices.iter().enumerate() {
-            old_pos.insert(real, pos);
+            old_pos[real] = Some(pos);
         }
         new_indices
             .iter()
-            .map(|real| old_pos.get(real).copied())
+            .map(|&real| old_pos[real])
             .collect()
     }
 
@@ -4050,7 +4049,7 @@ impl WinInfo {
                 }
                 None => {
                     new_indices.push(col.cells.len());
-                    col.cells.push(Cell::new(""));
+                    col.cells_mut().push(Rc::new(Cell::new("")));
                     col.padding += 1;
                 }
             }
@@ -4268,7 +4267,7 @@ impl WinInfo {
             let mut new_col = Column::new();
             new_col.width = col.width;
             if shown > 0 {
-                new_col.cells = col.copy_shown(0, shown - 1);
+                new_col.cells = Rc::new(col.copy_shown(0, shown - 1));
             }
             new_col.indices = (0..new_col.cells.len()).collect();
             new_cells.push_column(new_col);
@@ -4360,7 +4359,7 @@ impl WinInfo {
         for col in &mut cells.columns {
             let mut new_col = Column::new();
             new_col.width = col.width;
-            new_col.cells = col.copy_shown(st, end);
+            new_col.cells = Rc::new(col.copy_shown(st, end));
             new_col.indices = (0..new_col.cells.len()).collect();
             col.remove_shown(st, end, self.num_rows);
             new_cells.push_column(new_col);
@@ -4518,11 +4517,12 @@ impl WinInfo {
                     src_col.reindex();
                     let _ = src_cells.header.remove(j);
                     if st >= dest_num_rows {
-                        col.cells.append(&mut src_col.cells);
+                        col.cells_mut().append(src_col.cells_mut());
                     } else {
-                        let mut end_of_col = col.cells.split_off(st);
-                        col.cells.append(&mut src_col.cells);
-                        col.cells.append(&mut end_of_col);
+                        let cells = col.cells_mut();
+                        let mut end_of_col = cells.split_off(st);
+                        cells.append(src_col.cells_mut());
+                        cells.append(&mut end_of_col);
                     }
                     col.indices = (0..col.len()).collect();
                     matched = true;
@@ -4538,11 +4538,11 @@ impl WinInfo {
                         col.push_cell(Cell::new(""));
                     }
                 } else {
-                    let mut end_of_col = col.cells.split_off(st);
+                    let mut end_of_col = col.cells_mut().split_off(st);
                     for _ in 0..num_rows {
                         col.push_cell(Cell::new(""));
                     }
-                    col.cells.append(&mut end_of_col);
+                    col.cells_mut().append(&mut end_of_col);
                 }
                 col.indices = (0..col.len()).collect();
             }
@@ -4559,7 +4559,7 @@ impl WinInfo {
             for _ in 0..st {
                 dest_col.push_cell(Cell::new(""));
             }
-            dest_col.cells.append(&mut src_col.cells);
+            dest_col.cells_mut().append(src_col.cells_mut());
             while dest_col.len() < dest_cells.num_rows() {
                 dest_col.push_cell(Cell::new(""));
             }
@@ -4678,7 +4678,7 @@ impl WinInfo {
             let padding_start = col.cells.len();
             for offset in 0..padding {
                 new_indices.push(padding_start + offset);
-                col.cells.push(Cell::new(""));
+                col.cells_mut().push(Rc::new(Cell::new("")));
             }
 
             new_indices.extend(
