@@ -13,6 +13,10 @@ If you don't want to tinker with the build, you can just run the provided instal
 
 It's a POSIX `sh` script, so it runs from any shell (or as `sh install_csview`). It installs csview to `~/.local/bin` and, if that isn't on your PATH yet, adds it to your shell's config: `~/.bashrc` (`~/.bash_profile` on macOS), `~/.zshrc`, `~/.config/fish/config.fish`, `~/.cshrc`/`~/.tcshrc`, or `~/.profile` for sh/dash/ksh. For any other shell it tells you to add the directory yourself.
 
+On Windows (10 version 1809 or later, in Windows Terminal or a modern console), install with cargo instead; rustup already puts cargo's bin directory on your PATH:
+
+    cargo install --path .
+
 ## Use
 
 To run csview:  
@@ -52,13 +56,13 @@ csview currently admits the following key bindings:
 - **y**
     - yank (copy) content of focused cell
 - **ctrl + y**
-    - yank content of focused cell and copy it to the system clipboard (uses wl-copy, xclip, xsel, or pbcopy)
+    - yank content of focused cell and copy it to the system clipboard (uses wl-copy, xclip, xsel, or pbcopy; the Windows clipboard on Windows)
 - **d**
     - yank and remove content of focused cell
 - **p**
     - paste yanked content to focused cell
 - **ctrl + p**
-    - paste system clipboard content to the focused cell (uses wl-paste, xclip, xsel, or pbpaste)
+    - paste system clipboard content to the focused cell (uses wl-paste, xclip, xsel, or pbpaste; the Windows clipboard on Windows)
     - (write mode) paste yanked content at the cursor
 - **u**
     - undo the last edit (cell edits, deletes, pastes, and any command that changes a sheet)

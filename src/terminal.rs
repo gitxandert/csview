@@ -3,11 +3,7 @@ use std::{
     mem,
     io::Write,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering}
-};
-use libc::{
-    self, c_int, ioctl, winsize, STDOUT_FILENO, TIOCGWINSZ,
-    termios, tcgetattr, tcsetattr, cfmakeraw, TCSANOW,
+    sync::atomic::Ordering,
 };
 
 use crate::{
@@ -15,8 +11,9 @@ use crate::{
     cmd_err::{self, CmdErr},
     csv_io::{
         append_cmd_history, blank_csv, load_cmd_history, load_csv, make_col_ids,
-        poll_stdin, save_backup, write_to_file, PollEvent,
+        save_backup, write_to_file,
     },
+    platform::{self, poll_stdin, PollEvent, RawMode, GOT_INT, GOT_QUIT, GOT_WINCH, IN_COMMAND},
     history::Checkpoint,
 };
 
@@ -260,18 +257,7 @@ macro_rules! print_bottom {
 
 impl WinInfo {
     pub fn new() -> Self {
-        let (width, height) = {
-            unsafe {
-                let mut w = 0usize;
-                let mut h = 0usize;
-                let mut ws: winsize = mem::zeroed();
-                if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
-                    w = ws.ws_col as usize;
-                    h = ws.ws_row as usize;
-                }
-                (w, h)
-            }
-        };
+        let (width, height) = platform::term_size().unwrap_or((0, 0));
 
         Self {
             width,
@@ -499,14 +485,15 @@ impl WinInfo {
         (self.cursor.line, self.cursor.col + self.cursor.offset)
     }
 
-    pub fn set_w_h(&mut self, csvs: &mut Csvs) {
-        unsafe {
-            let mut ws: winsize = mem::zeroed();
-            if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
-                self.width = ws.ws_col as usize;
-                self.height = ws.ws_row as usize;
-            }
+    fn update_size(&mut self) {
+        if let Some((width, height)) = platform::term_size() {
+            self.width = width;
+            self.height = height;
         }
+    }
+
+    pub fn set_w_h(&mut self, csvs: &mut Csvs) {
+        self.update_size();
         self.changed = WinChange::Screen;
         if self.input_mode == InputMode::Command {
             // show_workspace only redraws the command line in command
@@ -874,13 +861,7 @@ impl WinInfo {
                 Ok(PollEvent::Sig) => {
                     match check_flags() {
                         SigFlag::Winch => {
-                            unsafe {
-                                let mut ws: winsize = mem::zeroed();
-                                if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
-                                    self.width = ws.ws_col as usize;
-                                    self.height = ws.ws_row as usize;
-                                }
-                            }
+                            self.update_size();
                             rows = self.build_focused_content_rows(&raw_content);
                             row_offset = row_offset.min(rows.len().saturating_sub(1));
                             self.draw_focused_content_page(&rows, row_offset);
@@ -5004,13 +4985,7 @@ impl WinInfo {
                 Ok(PollEvent::Data(_)) => return None,
                 Ok(PollEvent::Sig) => match check_flags() {
                     SigFlag::Winch => {
-                        unsafe {
-                            let mut ws: winsize = mem::zeroed();
-                            if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
-                                self.width = ws.ws_col as usize;
-                                self.height = ws.ws_row as usize;
-                            }
-                        }
+                        self.update_size();
                     }
                     _ => return None,
                 },
@@ -5039,48 +5014,33 @@ impl WinInfo {
 
 // Terminal takeover + signal handling + globals for WIDTH and HEIGHT
 
-static mut ORIG_TERM: Option<termios> = None;
+static mut ORIG_TERM: Option<platform::SavedMode> = None;
 
 pub fn raw_mode(switch: bool) {
-    unsafe {
-        let fd = libc::STDIN_FILENO;
+    let mut out = std::io::stdout();
+    let mut outstring = String::new();
 
-        let mut term: termios = std::mem::zeroed();
-        tcgetattr(fd, &mut term);
+    match switch {
+        true => {
+            unsafe { ORIG_TERM = platform::enter_raw(RawMode::Tui); }
 
-        let mut out = std::io::stdout();
-        let mut outstring = String::new();
-
-        match switch {
-            true => {
-                ORIG_TERM = Some(term);
-                let mut raw = term;
-                cfmakeraw(&mut raw);
-                //re-enable signals
-                raw.c_lflag |= libc::ISIG;
-                // turn on non-blocking to catch sigs
-                raw.c_cc[libc::VMIN] = 0;
-                raw.c_cc[libc::VTIME] = 0;
-                tcsetattr(fd, TCSANOW, &raw);
-    
-                // switch to Alternate Screen Buffer
-                outstring.push_str("\x1b[?1049h");
-                // hide cursor
-                outstring.push_str("\x1b[?25l");
+            // switch to Alternate Screen Buffer
+            outstring.push_str("\x1b[?1049h");
+            // hide cursor
+            outstring.push_str("\x1b[?25l");
+        }
+        false => {
+            if let Some(orig) = unsafe { ORIG_TERM } {
+                platform::restore(&orig);
+                // switch back to main buffer
+                outstring.push_str("\x1b[?1049l");
+                // show cursor
+                outstring.push_str("\x1b[?25h");
             }
-            false => {
-                if let Some(orig) = ORIG_TERM {
-                    tcsetattr(fd, TCSANOW, &orig);
-                    // switch back to main buffer
-                    outstring.push_str("\x1b[?1049l");
-                    // show cursor
-                    outstring.push_str("\x1b[?25h");
-                }
-            }
-        };
-        write!(out, "{}", outstring).unwrap();
-        out.flush().unwrap();
-    }
+        }
+    };
+    write!(out, "{}", outstring).unwrap();
+    out.flush().unwrap();
 }
 
 #[cfg(test)]
@@ -6550,29 +6510,6 @@ mod tests {
     }
 }
 
-// prevent signals from closing program when in command mode
-static IN_COMMAND: AtomicBool = AtomicBool::new(false);
-
-static GOT_WINCH: AtomicBool = AtomicBool::new(false);
-static GOT_INT: AtomicBool = AtomicBool::new(false);
-static GOT_QUIT: AtomicBool = AtomicBool::new(false);
-
-extern "C" fn sig_winch(_sig: c_int) {
-    GOT_WINCH.store(true, Ordering::SeqCst);
-}
-
-extern "C" fn sig_int(_sig: c_int) {
-    if !IN_COMMAND.load(Ordering::Relaxed) {
-        GOT_INT.store(true, Ordering::SeqCst);
-    }
-}
-
-extern "C" fn sig_quit(_sig: c_int) {
-    if !IN_COMMAND.load(Ordering::Relaxed) {
-        GOT_QUIT.store(true, Ordering::SeqCst);
-    }
-}
-
 pub enum SigFlag {
     Winch,
     Int,
@@ -6596,38 +6533,16 @@ pub fn check_flags() -> SigFlag {
     SigFlag::Non
 }
 
-pub fn install_sig_handlers() {
-    unsafe {
-        //SIGWINCH
-        let mut sa_winch: libc::sigaction = std::mem::zeroed();
-        sa_winch.sa_sigaction = sig_winch as *const () as usize;
-        libc::sigemptyset(&mut sa_winch.sa_mask);
-        sa_winch.sa_flags = 0;
-        libc::sigaction(libc::SIGWINCH, &sa_winch, std::ptr::null_mut());
-
-        //SIGINT
-        let mut sa_int: libc::sigaction = std::mem::zeroed();
-        sa_int.sa_sigaction = sig_int as *const () as usize;
-        libc::sigemptyset(&mut sa_int.sa_mask);
-        sa_int.sa_flags = 0;
-        libc::sigaction(libc::SIGINT, &sa_int, std::ptr::null_mut());
-        
-        //SIGQUIT
-        let mut sa_quit: libc::sigaction = std::mem::zeroed();
-        sa_quit.sa_sigaction = sig_quit as *const () as usize;
-        libc::sigemptyset(&mut sa_quit.sa_mask);
-        sa_quit.sa_flags = 0;
-        libc::sigaction(libc::SIGQUIT, &sa_quit, std::ptr::null_mut());
-    }
-}
+pub use platform::install_sig_handlers;
 
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         raw_mode(false);
         let panic_info = format!("Panic: {info}");
-        match std::fs::write("/tmp/csview_panic.log", panic_info) {
+        let log = std::env::temp_dir().join("csview_panic.log");
+        match std::fs::write(&log, panic_info) {
             Ok(()) => (),
-            Err(_) => println!("csview panicked; couldn't open /tmp/csview_panic.log"),
+            Err(_) => println!("csview panicked; couldn't open {}", log.display()),
         }
         std::process::exit(130);
     }));

@@ -1,6 +1,6 @@
 use std::{
     env,
-    io::{self, Read, Write},
+    io::{self, Write},
 };
 
 mod cells;
@@ -8,17 +8,15 @@ mod cmd_err;
 mod csv_io;
 mod history;
 mod input;
+mod platform;
 mod terminal;
 
 use crate::{
     cells::{Context, Csvs},
     input::process_input,
     terminal::{check_flags, is_delimiter, SigFlag, WinInfo},
-    csv_io::{
-        blank_csv, cmd_history_path, load_csv, 
-        poll_stdin, PollEvent, 
-        save_backup, write_to_file
-    },
+    csv_io::{blank_csv, cmd_history_path, load_csv, save_backup, write_to_file},
+    platform::{poll_stdin, PollEvent, RawMode},
 };
 
 fn main() {
@@ -167,24 +165,14 @@ fn main() {
 // read one line in raw mode so arrows, home/end and tab jumps work while typing;
 // ctrl + c cancels with an empty line
 fn edit_line(prompt: &str) -> String {
-    use libc::{cfmakeraw, tcgetattr, tcsetattr, termios, STDIN_FILENO, TCSANOW};
-
-    let mut orig: termios = unsafe { std::mem::zeroed() };
-    if unsafe { tcgetattr(STDIN_FILENO, &mut orig) } != 0 {
+    let Some(orig) = platform::enter_raw(RawMode::Line) else {
         // not a terminal; fall back to a plain read
         print!("{prompt}");
         io::stdout().flush().unwrap();
         let mut input = String::new();
         let _ = io::stdin().read_line(&mut input);
         return input;
-    }
-    let mut raw = orig;
-    unsafe {
-        cfmakeraw(&mut raw);
-        raw.c_cc[libc::VMIN] = 1;
-        raw.c_cc[libc::VTIME] = 0;
-        tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-    }
+    };
 
     let mut line = Vec::<char>::new();
     let mut pos = 0usize;
@@ -196,7 +184,7 @@ fn edit_line(prompt: &str) -> String {
         let _ = write!(out, "\r\x1b[2K{prompt}{shown}\x1b[{col}G");
         let _ = out.flush();
 
-        let n = match io::stdin().read(&mut buf) {
+        let n = match platform::read_stdin(&mut buf) {
             Ok(0) | Err(_) => break,
             Ok(n) => n,
         };
@@ -230,7 +218,7 @@ fn edit_line(prompt: &str) -> String {
         }
     }
 
-    unsafe { tcsetattr(STDIN_FILENO, TCSANOW, &orig); }
+    platform::restore(&orig);
     println!();
     line.into_iter().collect()
 }

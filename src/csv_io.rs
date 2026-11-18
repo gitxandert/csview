@@ -2,10 +2,9 @@ use std::{
     env,
     fs,
     time::{SystemTime, UNIX_EPOCH},
-    io::{self, Read, Write, stdin},
-    path::{Component, Path, PathBuf}
+    io::{self, Write},
+    path::{Component, Path, PathBuf, Prefix}
 };
-use libc::{poll, pollfd, POLLIN, STDIN_FILENO};
 
 use crate::cells::{Cell, Cells, Column};
 
@@ -275,11 +274,21 @@ pub fn save_backup(file: &String) -> Result<String, io::Error> {
         )
     })?;
 
+    // keep the drive (or UNC share) on windows so C:\a and D:\a don't share backups
     let rel_parent: PathBuf = parent
                 .components()
-                .filter_map(|c| match c {
-                    Component::Normal(p) => Some(p),
-                    _ => None,
+                .flat_map(|c| match c {
+                    Component::Normal(p) => vec![p.to_os_string()],
+                    Component::Prefix(p) => match p.kind() {
+                        Prefix::Disk(d) | Prefix::VerbatimDisk(d) => {
+                            vec![(d as char).to_string().into()]
+                        }
+                        Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
+                            vec!["UNC".into(), server.to_os_string(), share.to_os_string()]
+                        }
+                        _ => vec![],
+                    },
+                    _ => vec![],
                 })
                 .collect();
 
@@ -548,41 +557,4 @@ mod tests {
         assert_eq!(cell.content, "ab");
         assert_eq!(cell.raw_content(), "a\nb");
     }
-}
-
-pub enum PollEvent {
-    Data(usize),
-    Sig,
-}
-
-// can use randomly for reading from stdin
-pub fn poll_stdin(buf: &mut [u8]) -> Result<PollEvent, io::Error> {
-    let mut fds = [pollfd {
-        fd: STDIN_FILENO,
-        events: POLLIN,
-        revents: 0,
-    }];
-
-    let ret = unsafe {
-        poll(
-            fds.as_mut_ptr(), 
-            fds.len() as libc::nfds_t, 
-            -1
-        )
-    };
-
-    if ret < 0 {
-        let err = io::Error::last_os_error();
-        if err.kind() == io::ErrorKind::Interrupted { 
-            return Ok(PollEvent::Sig); 
-        }
-        return Err(err);
-    }
-
-    if fds[0].revents & POLLIN != 0 {
-        let n = stdin().read(buf)?;
-        return Ok(PollEvent::Data(n));
-    }
-
-    return Ok(PollEvent::Data(0));
 }
