@@ -11,6 +11,8 @@ If you don't want to tinker with the build, you can just run the provided instal
 
     ./install_csview
 
+It's a POSIX `sh` script, so it runs from any shell (or as `sh install_csview`). It installs csview to `~/.local/bin` and, if that isn't on your PATH yet, adds it to your shell's config: `~/.bashrc` (`~/.bash_profile` on macOS), `~/.zshrc`, `~/.config/fish/config.fish`, `~/.cshrc`/`~/.tcshrc`, or `~/.profile` for sh/dash/ksh. For any other shell it tells you to add the directory yourself.
+
 ## Use
 
 To run csview:  

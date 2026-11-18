@@ -1,30 +1,73 @@
-#!/bin/bash
-# small install script to build for release and install in $HOME/.csview/bin
-#
+#!/bin/sh
+# Small install script: builds csview for release and installs it to ~/.local/bin.
+# POSIX sh, so it runs the same from bash, zsh, fish, dash, ksh, etc.
+# If ~/.local/bin isn't on your PATH yet, it adds it to your login shell's config.
+
+set -e
 
 # Build
 echo "Building csview..."
-export RUSTFLAGS="-Awarnings"
-cargo build --release
-
-# Define the installation directory
-INSTALL_DIR="$HOME/.local/bin"
-mkdir -p "$INSTALL_DIR"
+RUSTFLAGS="-Awarnings" cargo build --release
 
 # Install the binary
+INSTALL_DIR="$HOME/.local/bin"
+mkdir -p "$INSTALL_DIR"
 echo "Installing csview to $INSTALL_DIR..."
 install -m 0755 target/release/csview "$INSTALL_DIR/csview"
 
-# Define the PATH export line
-PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+# Nothing to do if it's already on PATH
+case ":$PATH:" in
+    *":$INSTALL_DIR:"*)
+        echo "$INSTALL_DIR is already on your PATH."
+        exit 0
+        ;;
+esac
 
-# 4. Check if the line exists in .bashrc, if not, append it
-if ! grep -qF "$PATH_LINE" "$HOME/.bashrc"; then
-    echo "Adding $INSTALL_DIR to PATH in ~/.bashrc..."
-    echo "" >> "$HOME/.bashrc"
-    echo "# Added by csview installer" >> "$HOME/.bashrc"
-    echo "$PATH_LINE" >> "$HOME/.bashrc"
-    echo "Please run 'source ~/.bashrc' or restart your terminal."
+# Pick the config file and PATH line for the user's shell.
+# The single quotes are deliberate: $HOME/$PATH expand when the shell reads the file.
+SHELL_NAME=$(basename "${SHELL:-sh}")
+case "$SHELL_NAME" in
+    bash)
+        # macOS opens login shells, which read .bash_profile, not .bashrc
+        if [ "$(uname)" = Darwin ]; then
+            RC_FILE="$HOME/.bash_profile"
+        else
+            RC_FILE="$HOME/.bashrc"
+        fi
+        PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+        ;;
+    zsh)
+        RC_FILE="${ZDOTDIR:-$HOME}/.zshrc"
+        PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+        ;;
+    fish)
+        RC_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+        PATH_LINE='contains -- $HOME/.local/bin $PATH; or set -gx PATH $HOME/.local/bin $PATH'
+        ;;
+    csh|tcsh)
+        if [ "$SHELL_NAME" = tcsh ] && [ -f "$HOME/.tcshrc" ]; then
+            RC_FILE="$HOME/.tcshrc"
+        else
+            RC_FILE="$HOME/.cshrc"
+        fi
+        PATH_LINE='setenv PATH "$HOME/.local/bin:$PATH"'
+        ;;
+    sh|dash|ksh|mksh|pdksh|oksh|yash|ash|busybox)
+        RC_FILE="$HOME/.profile"
+        PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+        ;;
+    *)
+        echo "Couldn't tell how to configure $SHELL_NAME."
+        echo "Add $INSTALL_DIR to your PATH in your shell's config to run csview by name."
+        exit 0
+        ;;
+esac
+
+if [ -f "$RC_FILE" ] && grep -qF "$PATH_LINE" "$RC_FILE"; then
+    echo "PATH is already updated in $RC_FILE."
 else
-    echo "PATH is already updated in ~/.bashrc."
-fi 
+    echo "Adding $INSTALL_DIR to PATH in $RC_FILE..."
+    mkdir -p "$(dirname "$RC_FILE")"
+    printf '\n# Added by csview installer\n%s\n' "$PATH_LINE" >> "$RC_FILE"
+    echo "Restart your terminal (or source $RC_FILE) to use csview."
+fi
