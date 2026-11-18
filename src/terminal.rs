@@ -2849,7 +2849,10 @@ impl WinInfo {
             match poll_stdin(&mut buf) {
                 Ok(PollEvent::Sig) => {
                     match check_flags() {
-                        SigFlag::Winch => self.set_w_h(csvs),
+                        SigFlag::Winch => {
+                            self.set_w_h(csvs);
+                            self.draw_col_find(csvs, idx, &indices, "");
+                        }
                         SigFlag::Int | SigFlag::Quit => continue, // will never catch
                         SigFlag::Non => break, // must've been quit/int
                     }
@@ -3435,7 +3438,10 @@ impl WinInfo {
             match poll_stdin(&mut buf) {
                 Ok(PollEvent::Sig) => {
                     match check_flags() {
-                        SigFlag::Winch => self.set_w_h(csvs),
+                        SigFlag::Winch => {
+                            self.set_w_h(csvs);
+                            self.draw_col_find(csvs, diff_idx, &cmp_values, &mess);
+                        }
                         SigFlag::Int | SigFlag::Quit => continue, // will never catch
                         SigFlag::Non => break, // must've been quit/int
                     }
@@ -4764,13 +4770,8 @@ impl WinInfo {
                 Ok(PollEvent::Sig) => {
                     match check_flags() {
                         SigFlag::Winch => {
-                            unsafe {
-                                let mut ws: winsize = mem::zeroed();
-                                if ioctl(STDOUT_FILENO, TIOCGWINSZ.into(), &mut ws) == 0 {
-                                    self.width = ws.ws_col as usize;
-                                    self.height = ws.ws_row as usize;
-                                }
-                            }
+                            self.set_w_h(csvs);
+                            self.draw_sheet_find(csvs, idx, &cols_rows, "");
                         }
                         SigFlag::Int | SigFlag::Quit => continue, // will never catch
                         SigFlag::Non => break, // must've been quit/int
