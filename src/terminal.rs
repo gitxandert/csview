@@ -1424,6 +1424,21 @@ impl WinInfo {
         self.flush();
     }
 
+    // how many columns from `first` fit on screen, by the same rule
+    // print_row uses
+    fn fitting_cols(&self, cells: &Cells, first: usize) -> usize {
+        let mut start = 6usize;
+        let mut n = 0usize;
+        for col in cells.columns.iter().take(self.num_cols).skip(first) {
+            if start + col.col_width() >= self.width {
+                break;
+            }
+            start += col.col_width();
+            n += 1;
+        }
+        n
+    }
+
     pub fn draw_screen(&mut self, cells: &mut Cells) {
         if self.split_mode {
             return;
@@ -2946,6 +2961,11 @@ impl WinInfo {
         cells.written = true;
         
         self.num_cols += 1;
+        // w_page still counts the columns drawn before the insert; if the
+        // new column also fits on screen, don't scroll to reach it
+        if !self.split_mode {
+            self.w_page = self.fitting_cols(cells, self.w_offset);
+        }
         self.set_w_pointer(loc);
         self.draw_screen(cells);
         self.set_focused("");
@@ -5528,6 +5548,36 @@ mod tests {
 
         assert_eq!((win.w_pointer, win.h_pointer), (0, 1));
         assert!(win.h_offset <= win.h_pointer);
+    }
+
+    #[test]
+    fn new_column_that_fits_does_not_scroll() {
+        let mut cells = cells_with_rows(
+            "fit.csv", vec!["A", "B"], vec![vec!["1", "2"]],
+        );
+        let mut win = win_for(&mut cells);
+        win.draw_screen(&mut cells);
+        win.set_w_pointer(1);
+
+        win.new_column(&mut cells, "C");
+
+        assert_eq!((win.w_offset, win.w_pointer), (0, 2));
+    }
+
+    #[test]
+    fn new_column_past_screen_edge_scrolls() {
+        let names = vec!["A", "B", "C", "D"];
+        let row = vec![vec!["1", "2", "3", "4"]];
+        let mut cells = cells_with_rows("edge.csv", names, row);
+        let mut win = win_for(&mut cells);
+        win.draw_screen(&mut cells);
+        // 4 columns of width 15 after the 6-wide row label fill 80 cols
+        assert_eq!(win.w_page, 4);
+        win.set_w_pointer(3);
+
+        win.new_column(&mut cells, "E");
+
+        assert_eq!((win.w_offset, win.w_pointer), (1, 4));
     }
 
     #[test]
