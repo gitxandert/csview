@@ -246,13 +246,14 @@ const MAX_CMD_HISTORY: usize = 100;
 // (only works with WinInfo)
 macro_rules! print_bottom {
     ($self:expr, $fmt:expr $(, $args:expr)*) => {
-        let formatted_string = format!(
-            concat!("\x1b[{};1H", "\x1b[2K", "\x1b[0m", $fmt),
+        let body = format!($fmt $(, $args)*);
+        // only the body counts against the width, not escape sequences
+        let fit = format!(
+            "\x1b[{};1H\x1b[2K\x1b[0m{}",
             $self.height,
-            $($args),*
+            WinInfo::fit_visible(&body, $self.width)
         );
-        let fit: String = formatted_string.chars().take($self.width).collect();
-        
+
         $self.push_str_to_frame(&fit);
     };
 }
@@ -727,6 +728,34 @@ impl WinInfo {
                 print_bottom!(self, "{}", &self.focused_content);
             }
         }
+    }
+
+    // keeps at most `width` printed chars, passing escape sequences through
+    pub(crate) fn fit_visible(content: &str, width: usize) -> String {
+        let mut out = String::new();
+        let mut shown = 0usize;
+        let mut chars = content.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                out.push(c);
+                // CSI sequences end on a byte in '@'..='~' after the '['
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                    if next == '[' {
+                        while let Some(n) = chars.next() {
+                            out.push(n);
+                            if ('@'..='~').contains(&n) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else if shown < width {
+                out.push(c);
+                shown += 1;
+            }
+        }
+        out
     }
 
     fn terminal_safe_char(c: char) -> char {
@@ -2640,26 +2669,28 @@ impl WinInfo {
     fn draw_col_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<usize>, mess: &str) {
         self.set_h_pointer(indices[idx]);
         self.show_csv(cells);
-        print_bottom!(
-            self, 
-            "{}/{} {}",
-            idx + 1, 
-            indices.len(),
-            mess
-        );
-        self.flush();
+        self.print_find_status(idx, indices.len(), mess);
     }
     
     fn draw_sheet_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<(usize, usize)>, mess: &str) {
         self.set_w_pointer(indices[idx].0);
         self.set_h_pointer(indices[idx].1);
         self.draw_screen(cells);
+        self.print_find_status(idx, indices.len(), mess);
+    }
+
+    // the found value is shown with the count, since a narrow column
+    // can cut it off in its cell
+    fn print_find_status(&mut self, idx: usize, len: usize, mess: &str) {
+        let sep = if mess.is_empty() { "" } else { ": " };
         print_bottom!(
-            self, 
-            "{}/{} {}",
-            idx + 1, 
-            indices.len(),
-            mess
+            self,
+            "{}/{} {}{}{}",
+            idx + 1,
+            len,
+            mess,
+            sep,
+            self.focused_content
         );
         self.flush();
     }
@@ -5100,6 +5131,16 @@ mod tests {
         let mut win = command_win();
         win.set_context(csvs.get_context());
         (csvs, win, path)
+    }
+
+    #[test]
+    fn fit_visible_ignores_escape_sequences() {
+        assert_eq!(WinInfo::fit_visible("abcdef", 4), "abcd");
+        assert_eq!(
+            WinInfo::fit_visible("a\x1b[7mbc\x1b[27mde", 3),
+            "a\x1b[7mbc\x1b[27m"
+        );
+        assert_eq!(WinInfo::fit_visible("\x1b[?25lab", 1), "\x1b[?25la");
     }
 
     #[test]
