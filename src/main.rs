@@ -13,7 +13,7 @@ mod terminal;
 
 use crate::{
     cells::{Context, Csvs},
-    input::process_input,
+    input::{process_input, split_keys},
     terminal::{check_flags, is_delimiter, SigFlag, WinInfo},
     csv_io::{blank_csv, cmd_history_path, load_csv, save_backup, write_to_file},
     platform::{poll_stdin, PollEvent, RawMode},
@@ -87,18 +87,22 @@ fn main() {
     w_info.show_workspace(&mut csvs);
     
     // main loop
-    let mut buffer = [0u8; 16];
-    loop {
+    let mut buffer = [0u8; 1024];
+    // bytes read so far that don't make up a whole key yet
+    let mut pending = Vec::<u8>::new();
+    'main: loop {
         match poll_stdin(&mut buffer) {
             Ok(PollEvent::Data(0)) => continue,
             Ok(PollEvent::Data(n)) => {
-                let input = &buffer[..n];
-                if !input.is_empty() {
-                    match process_input(input, &mut w_info, &mut csvs) {
-                        SigFlag::Quit => break,
+                pending.extend_from_slice(&buffer[..n]);
+                let (keys, rest) = split_keys(&pending);
+                for key in keys {
+                    match process_input(key, &mut w_info, &mut csvs) {
+                        SigFlag::Quit => break 'main,
                         _ => w_info.show_workspace(&mut csvs),
                     }
                 }
+                pending.drain(..pending.len() - rest);
             }
             Ok(PollEvent::Sig) => {
                 match check_flags() {

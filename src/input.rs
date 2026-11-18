@@ -16,6 +16,55 @@ fn bottom_preview(content: &str, max_shown: usize) -> (String, bool) {
     (WinInfo::terminal_safe_prefix(content, take), truncated)
 }
 
+// Split one read from stdin into single keys. Keys pressed while csview is
+// busy arrive together in one read, and process_input matches one key at a
+// time, so an unsplit burst like "\x1b[B\x1b[B" would match nothing.
+// Also returns how many trailing bytes are a key cut off by the end of
+// the read, to be completed by the next one.
+pub fn split_keys(bytes: &[u8]) -> (Vec<&[u8]>, usize) {
+    let mut keys = Vec::<&[u8]>::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let len = match bytes[i] {
+            27 => match bytes.get(i + 1) {
+                // CSI: parameter and intermediate bytes, then a final byte
+                Some(b'[') => {
+                    let mut j = i + 2;
+                    while j < bytes.len() && (0x20..=0x3f).contains(&bytes[j]) {
+                        j += 1;
+                    }
+                    if j == bytes.len() {
+                        return (keys, bytes.len() - i);
+                    }
+                    j + 1 - i
+                }
+                // SS3: one more byte (home/end on some terminals)
+                Some(b'O') => {
+                    if i + 2 >= bytes.len() {
+                        return (keys, bytes.len() - i);
+                    }
+                    3
+                }
+                // escape by itself
+                _ => 1,
+            },
+            // enter as \r\n
+            13 if bytes.get(i + 1) == Some(&10) => 2,
+            // the rest of a multi-byte UTF-8 char
+            0xc0..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf7 => 4,
+            _ => 1,
+        };
+        if i + len > bytes.len() {
+            return (keys, bytes.len() - i);
+        }
+        keys.push(&bytes[i..i + len]);
+        i += len;
+    }
+    (keys, 0)
+}
+
 pub fn process_input(
     input: &[u8], 
     w_info: &mut WinInfo, 
@@ -583,6 +632,39 @@ pub fn process_input(
 mod tests {
     use super::*;
     use crate::cells::Cell;
+
+    #[test]
+    fn split_keys_separates_a_burst_of_keys() {
+        let (keys, rest) = split_keys(b"\x1b[B\x1b[Bj:\x1b[1;5C\x1bOF\x7f");
+        assert_eq!(
+            keys,
+            vec![
+                &b"\x1b[B"[..], b"\x1b[B", b"j", b":", b"\x1b[1;5C", b"\x1bOF", b"\x7f",
+            ]
+        );
+        assert_eq!(rest, 0);
+    }
+
+    #[test]
+    fn split_keys_keeps_crlf_utf8_and_lone_escape_whole() {
+        let (keys, rest) = split_keys("\r\né€\x1bq\x1b".as_bytes());
+        assert_eq!(
+            keys,
+            vec![&b"\r\n"[..], "é".as_bytes(), "€".as_bytes(), b"\x1b", b"q", b"\x1b"]
+        );
+        assert_eq!(rest, 0);
+    }
+
+    #[test]
+    fn split_keys_holds_back_a_key_cut_off_by_the_read() {
+        let (keys, rest) = split_keys(b"j\x1b[1;5");
+        assert_eq!(keys, vec![&b"j"[..]]);
+        assert_eq!(rest, 5);
+
+        let (keys, rest) = split_keys(&"a€".as_bytes()[..3]);
+        assert_eq!(keys, vec![&b"a"[..]]);
+        assert_eq!(rest, 2);
+    }
 
     #[test]
     fn bottom_preview_sanitizes_tabs_without_changing_stored_content() {
