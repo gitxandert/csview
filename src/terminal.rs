@@ -2288,7 +2288,7 @@ impl WinInfo {
                                 self.height
                             ),
                     Some(term) => self.find_in_sheet(
-                                    csvs.get_cells(),
+                                    csvs,
                                     term,
                                     tokens
                                 )
@@ -2666,17 +2666,34 @@ impl WinInfo {
         self.show_csv(cells);
     }
     
-    fn draw_col_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<usize>, mess: &str) {
+    fn draw_col_find(&mut self, csvs: &mut Csvs, idx: usize, indices: &Vec<usize>, mess: &str) {
         self.set_h_pointer(indices[idx]);
-        self.show_csv(cells);
+        if self.split_mode {
+            self.show_split_find(csvs);
+        } else {
+            self.show_csv(csvs.get_cells());
+        }
         self.print_find_status(idx, indices.len(), mess);
     }
     
-    fn draw_sheet_find(&mut self, cells: &mut Cells, idx: usize, indices: &Vec<(usize, usize)>, mess: &str) {
+    fn draw_sheet_find(&mut self, csvs: &mut Csvs, idx: usize, indices: &Vec<(usize, usize)>, mess: &str) {
         self.set_w_pointer(indices[idx].0);
         self.set_h_pointer(indices[idx].1);
-        self.draw_screen(cells);
+        if self.split_mode {
+            self.show_split_find(csvs);
+        } else {
+            self.draw_screen(csvs.get_cells());
+        }
         self.print_find_status(idx, indices.len(), mess);
+    }
+
+    // find loops run inside command mode, where show_workspace only
+    // redraws the command line, so leave it for the redraw
+    fn show_split_find(&mut self, csvs: &mut Csvs) {
+        self.changed = WinChange::Screen;
+        let mode = std::mem::replace(&mut self.input_mode, InputMode::Scroll);
+        self.show_workspace(csvs);
+        self.input_mode = mode;
     }
 
     // the found value is shown with the count, since a narrow column
@@ -2825,7 +2842,7 @@ impl WinInfo {
 
             i
         };
-        self.draw_col_find(cells, idx, &indices, "");
+        self.draw_col_find(csvs, idx, &indices, "");
 
         let mut buf = [0u8; 1];
         loop {
@@ -2843,7 +2860,7 @@ impl WinInfo {
                         [b'n'] => {
                             idx = (idx + 1) % indices.len();
                             self.draw_col_find(
-                                csvs.get_cells(), 
+                                csvs, 
                                 idx, 
                                 &indices,
                                 ""
@@ -2857,7 +2874,7 @@ impl WinInfo {
                                 idx -= 1;
                             }
                             self.draw_col_find(
-                                csvs.get_cells(), 
+                                csvs, 
                                 idx, 
                                 &indices,
                                 ""
@@ -3408,7 +3425,7 @@ impl WinInfo {
             }
         };
         self.draw_col_find(
-            csvs.get_cells(),
+            csvs,
             diff_idx,
             &cmp_values,
             &mess
@@ -3431,7 +3448,7 @@ impl WinInfo {
                         [b'n'] => {
                             diff_idx = (diff_idx + 1) % cmp_values.len();
                             self.draw_col_find(
-                                csvs.get_cells(),
+                                csvs,
                                 diff_idx,
                                 &cmp_values,
                                 &mess
@@ -3445,7 +3462,7 @@ impl WinInfo {
                                 diff_idx -= 1;
                             }
                             self.draw_col_find(
-                                csvs.get_cells(),
+                                csvs,
                                 diff_idx,
                                 &cmp_values,
                                 &mess
@@ -4679,7 +4696,8 @@ impl WinInfo {
         }
     }
 
-    fn find_in_sheet(&mut self, cells: &mut Cells, term: &str, options: Vec<&str>) {
+    fn find_in_sheet(&mut self, csvs: &mut Csvs, term: &str, options: Vec<&str>) {
+        let cells = csvs.get_cells();
         let mut term = Self::trim_quotes(term);
         let mut filter = false;
         let mut insensitive = false;
@@ -4735,7 +4753,7 @@ impl WinInfo {
 
         let mut idx = 0;
         self.draw_sheet_find(
-            cells, 
+            csvs,
             idx, 
             &cols_rows,
             ""
@@ -4764,7 +4782,7 @@ impl WinInfo {
                         [b'n'] => {
                             idx = (idx + 1) % cols_rows.len();
                             self.draw_sheet_find(
-                                cells, 
+                                csvs,
                                 idx, 
                                 &cols_rows,
                                 ""
@@ -4778,7 +4796,7 @@ impl WinInfo {
                                 idx -= 1;
                             }
                             self.draw_sheet_find(
-                                cells, 
+                                csvs,
                                 idx, 
                                 &cols_rows,
                                 ""
