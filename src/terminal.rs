@@ -506,7 +506,21 @@ impl WinInfo {
                 self.width = ws.ws_col as usize;
                 self.height = ws.ws_row as usize;
             }
-            self.changed = WinChange::Screen;
+        }
+        self.changed = WinChange::Screen;
+        if self.input_mode == InputMode::Command {
+            // show_workspace only redraws the command line in command
+            // mode, so draw the sheet as in scroll mode, then the command
+            let (col, offset, limit) = (self.cursor.col, self.cursor.offset, self.cursor.limit);
+            let mode = std::mem::replace(&mut self.input_mode, InputMode::Scroll);
+            self.show_workspace(csvs);
+            self.input_mode = mode;
+            // drawing the sheet moves the cursor to the focused cell
+            self.set_cursor(self.height, col, limit);
+            self.cursor.offset = offset;
+            self.draw_command();
+            self.flush();
+        } else {
             self.show_workspace(csvs);
         }
     }
@@ -2953,18 +2967,19 @@ impl WinInfo {
             .header[self.w_pointer]
             .content
             .clone();
-        print_bottom!(
-            self,
-            "\x1b[?25lConfirm remove column '{}' with 'y': ",
-            col_name
-        );
+        let prompt = format!("Confirm remove column '{}' with 'y': ", col_name);
+        print_bottom!(self, "\x1b[?25l{}", prompt);
         self.flush();
         let mut buf = [0u8; 1];
         loop {
             match poll_stdin(&mut buf) {
                 Ok(PollEvent::Sig) => {
                     match check_flags() {
-                        SigFlag::Winch => self.set_w_h(csvs),
+                        SigFlag::Winch => {
+                            self.set_w_h(csvs);
+                            print_bottom!(self, "\x1b[?25l{}", prompt);
+                            self.flush();
+                        }
                         SigFlag::Int | SigFlag::Quit => continue, // will never catch
                         SigFlag::Non => break, // must've been quit/int
                     }
@@ -3671,18 +3686,19 @@ impl WinInfo {
             );
             return;
         }
-        print_bottom!(
-            self,
-            "\x1b[?25lConfirm remove row {:04X} with 'y': ",
-            self.h_pointer
-        );
+        let prompt = format!("Confirm remove row {:04X} with 'y': ", self.h_pointer);
+        print_bottom!(self, "\x1b[?25l{}", prompt);
         self.flush();
         let mut buf = [0u8; 1];
         loop {
             match poll_stdin(&mut buf) {
                 Ok(PollEvent::Sig) => {
                     match check_flags() {
-                        SigFlag::Winch => self.set_w_h(csvs),
+                        SigFlag::Winch => {
+                            self.set_w_h(csvs);
+                            print_bottom!(self, "\x1b[?25l{}", prompt);
+                            self.flush();
+                        }
                         SigFlag::Int | SigFlag::Quit => continue, // will never catch
                         SigFlag::Non => break, // must've been quit/int
                     }
