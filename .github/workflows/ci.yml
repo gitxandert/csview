@@ -19,3 +19,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --locked
       - run: cargo test --locked
+      - name: install script (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./install_csview.ps1
+          ./install_csview.ps1  # second run must not add PATH twice
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\csview'
+          if (-not (Test-Path (Join-Path $dir 'csview.exe'))) { throw 'csview.exe not installed' }
+          $path = (Get-Item 'HKCU:\Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          $hits = @($path -split ';' | Where-Object { $_ -ieq $dir }).Count
+          if ($hits -ne 1) { throw "expected $dir on user PATH once, found $hits" }

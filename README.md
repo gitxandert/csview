@@ -13,7 +13,11 @@ If you don't want to tinker with the build, you can just run the provided instal
 
 It's a POSIX `sh` script, so it runs from any shell (or as `sh install_csview`). It installs csview to `~/.local/bin` and, if that isn't on your PATH yet, adds it to your shell's config: `~/.bashrc` (`~/.bash_profile` on macOS), `~/.zshrc`, `~/.config/fish/config.fish`, `~/.cshrc`/`~/.tcshrc`, or `~/.profile` for sh/dash/ksh. For any other shell it tells you to add the directory yourself.
 
-On Windows (10 version 1809 or later, in Windows Terminal or a modern console), install with cargo instead; rustup already puts cargo's bin directory on your PATH:
+On Windows (10 version 1809 or later, in Windows Terminal or a modern console), run the PowerShell installer instead:
+
+    powershell -ExecutionPolicy Bypass -File .\install_csview.ps1
+
+It works in Windows PowerShell 5.1 and PowerShell 7+. It installs csview to `%LOCALAPPDATA%\Programs\csview` and, if that isn't on your user PATH yet, adds it; open a new terminal afterwards to run `csview`. You can also install with cargo, since rustup already puts cargo's bin directory on your PATH:
 
     cargo install --path .
 
