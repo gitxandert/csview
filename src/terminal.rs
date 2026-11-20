@@ -224,6 +224,7 @@ pub struct WinInfo {
     cmd_draft: String, // typed command, kept while browsing
     cmd_history_file: Option<PathBuf>, // None keeps history in memory only
     split_mode: bool,
+    hold_flush: bool, // keep building the frame instead of writing it out
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -285,6 +286,7 @@ impl WinInfo {
             cmd_draft: String::new(),
             cmd_history_file: None,
             split_mode: false,
+            hold_flush: false,
         }
     }
 
@@ -1695,6 +1697,9 @@ impl WinInfo {
     }
 
     pub fn flush(&mut self) {
+        if self.hold_flush {
+            return;
+        }
         if self.input_mode != InputMode::Scroll {
             // show cursor
             let (l, c) = self.cursor_pos();
@@ -2681,22 +2686,27 @@ impl WinInfo {
     
     fn draw_col_find(&mut self, csvs: &mut Csvs, idx: usize, indices: &Vec<usize>, mess: &str) {
         self.set_h_pointer(indices[idx]);
+        // one frame, so the cell value never flashes before the count
+        self.hold_flush = true;
         if self.split_mode {
             self.show_split_find(csvs);
         } else {
             self.show_csv(csvs.get_cells());
         }
+        self.hold_flush = false;
         self.print_find_status(idx, indices.len(), mess);
     }
     
     fn draw_sheet_find(&mut self, csvs: &mut Csvs, idx: usize, indices: &Vec<(usize, usize)>, mess: &str) {
         self.set_w_pointer(indices[idx].0);
         self.set_h_pointer(indices[idx].1);
+        self.hold_flush = true;
         if self.split_mode {
             self.show_split_find(csvs);
         } else {
             self.draw_screen(csvs.get_cells());
         }
+        self.hold_flush = false;
         self.print_find_status(idx, indices.len(), mess);
     }
 
