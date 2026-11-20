@@ -166,7 +166,7 @@ fn main() {
     }
 }
 
-// read one line in raw mode so arrows, home/end and tab jumps work while typing;
+// read one line in raw mode so arrows, home/end and ctrl + arrow word jumps work while typing;
 // ctrl + c cancels with an empty line
 fn edit_line(prompt: &str) -> String {
     let Some(orig) = platform::enter_raw(RawMode::Line) else {
@@ -199,11 +199,11 @@ fn edit_line(prompt: &str) -> String {
             [27, 91, 68] => pos = pos.saturating_sub(1), // left
             [27, 91, 72] | [27, 79, 72] | [27, 91, 49, 126] | [27, 91, 55, 126] => pos = 0, // home
             [27, 91, 70] | [27, 79, 70] | [27, 91, 52, 126] | [27, 91, 56, 126] => pos = line.len(), // end
-            [9] => { // tab (jump to next word)
+            [27, 91, 49, 59, 53, 67] => { // ctrl + right (jump to next word)
                 while pos < line.len() && !is_delimiter(line[pos]) { pos += 1; }
                 while pos < line.len() && is_delimiter(line[pos]) { pos += 1; }
             }
-            [27, 91, 90] => { // shift-tab (jump to previous word)
+            [27, 91, 49, 59, 53, 68] => { // ctrl + left (jump to previous word)
                 while pos > 0 && is_delimiter(line[pos - 1]) { pos -= 1; }
                 while pos > 0 && !is_delimiter(line[pos - 1]) { pos -= 1; }
             }

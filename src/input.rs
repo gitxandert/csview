@@ -425,28 +425,16 @@ pub fn process_input(
                 [27] => { // escape by itself
                     // ignore for now
                 }
-                [9] => { // tab (jump to next word)
+                [27, 91, 90] => { /* shift-tab */ }
+                [27, 91, 49, 59, 53, 67] => { // ctrl + right (jump to next word)
                     w_info.jump_word_right();
                     w_info.changed = WinChange::Write;
                 }
-                [27, 91, 90] => { // shift-tab (jump to previous word)
+                [27, 91, 49, 59, 53, 68] => { // ctrl + left (jump to previous word)
                     w_info.jump_word_left();
                     w_info.changed = WinChange::Write;
                 }
-                // modified arrows
-                [27, 91, 49, 59, m, d] => {
-                    match m {
-                        // affect scroll speed
-                        _ => (),
-                    }
-                    match d {
-                        65 => (),
-                        66 => (),
-                        67 => (),
-                        68 => (),
-                        _ => (),
-                    }
-                }
+                [27, 91, 49, 59, _, _] => { /* other modified arrows */ }
                 [16] => { // ctrl + p (paste)
                     w_info.paste_yanked_to_write_buffer();
                     w_info.changed = WinChange::Write;
@@ -543,28 +531,16 @@ pub fn process_input(
                     let col = cells.get_column(w_info.w_pointer);
                     w_info.set_command_mode(false, &col);
                 }
-                [9] => { // tab (jump to next word)
+                [27, 91, 90] => { /* shift-tab */ }
+                [27, 91, 49, 59, 53, 67] => { // ctrl + right (jump to next word)
                     w_info.jump_word_right();
                     w_info.changed = WinChange::Command;
                 }
-                [27, 91, 90] => { // shift-tab (jump to previous word)
+                [27, 91, 49, 59, 53, 68] => { // ctrl + left (jump to previous word)
                     w_info.jump_word_left();
                     w_info.changed = WinChange::Command;
                 }
-                // modified arrows
-                [27, 91, 49, 59, m, d] => {
-                    match m {
-                        // affect scroll speed
-                        _ => (),
-                    }
-                    match d {
-                        65 => (),
-                        66 => (),
-                        67 => (),
-                        68 => (),
-                        _ => (),
-                    }
-                }
+                [27, 91, 49, 59, _, _] => { /* other modified arrows */ }
                 [1..10] | [11..13] | [14..=26] | [31] => {
                     // ignore other control characters
                 }

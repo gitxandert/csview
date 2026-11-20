@@ -51,6 +51,7 @@ csview currently admits the following key bindings:
     - highlight individual cells; if in write mode, these scroll through text
 - **ctrl + arrow key**
     - offest column/row view by the window width/height
+    - (write and command mode) ctrl + left/right jumps to the previous/next word
 - **shift + arrow key**
     - offset column/row view by one
 - **alt + arrow key (left or right)**

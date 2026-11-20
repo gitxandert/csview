@@ -74,7 +74,7 @@ impl Cursor {
     }
 }
 
-// word boundaries for tab / shift + tab jumps
+// word boundaries for ctrl + left/right jumps
 pub fn is_delimiter(c: char) -> bool {
     !c.is_alphanumeric()
 }
@@ -462,13 +462,13 @@ impl WinInfo {
         }
     }
 
-    // tab: jump to the start of the next word
+    // ctrl + right: jump to the start of the next word
     pub fn jump_word_right(&mut self) {
         self.move_cursor_while(true, |b| b.next_char().is_some_and(|c| !is_delimiter(c)));
         self.move_cursor_while(true, |b| b.next_char().is_some_and(is_delimiter));
     }
 
-    // shift + tab: jump to the start of the previous word
+    // ctrl + left: jump to the start of the previous word
     pub fn jump_word_left(&mut self) {
         self.move_cursor_while(false, |b| b.prev_char().is_some_and(is_delimiter));
         self.move_cursor_while(false, |b| b.prev_char().is_some_and(|c| !is_delimiter(c)));
@@ -5298,7 +5298,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_jumps_over_delimiters_and_home_end_reach_buffer_edges() {
+    fn word_jumps_over_delimiters_and_home_end_reach_buffer_edges() {
         let mut win = command_win();
         type_command(&mut win, "foo/bar\\baz, qux");
         win.move_cursor_home();
@@ -5328,6 +5328,29 @@ mod tests {
         win.move_cursor_home();
         win.jump_word_right();
         assert_eq!(win.write_buffer.gap_start, 6); // case
+    }
+
+    #[test]
+    fn ctrl_arrows_jump_words_and_tabs_type_nothing() {
+        use crate::input::process_input;
+        let (mut csvs, mut win) = sheets_fixture(&["a", "b"]);
+        process_input(&[58], &mut win, &mut csvs); // ':'
+        assert_eq!(win.input_mode, InputMode::Command);
+        win.add_to_write_buffer("foo bar baz");
+
+        process_input(&[27, 91, 49, 59, 53, 68], &mut win, &mut csvs); // ctrl + left
+        assert_eq!(win.write_buffer.gap_start, 8);
+        process_input(&[27, 91, 49, 59, 53, 68], &mut win, &mut csvs);
+        assert_eq!(win.write_buffer.gap_start, 4);
+        process_input(&[27, 91, 49, 59, 53, 67], &mut win, &mut csvs); // ctrl + right
+        assert_eq!(win.write_buffer.gap_start, 8);
+
+        // tab and shift-tab neither move the cursor, type, nor switch sheets
+        process_input(&[9], &mut win, &mut csvs);
+        process_input(&[27, 91, 90], &mut win, &mut csvs);
+        assert_eq!(win.write_buffer.gap_start, 8);
+        assert_eq!(win.write_buffer.as_string().trim_end(), "foo bar baz");
+        assert_eq!(csvs.handle, 0);
     }
 
     #[test]
