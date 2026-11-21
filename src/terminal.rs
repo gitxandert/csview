@@ -225,6 +225,7 @@ pub struct WinInfo {
     cmd_history_file: Option<PathBuf>, // None keeps history in memory only
     split_mode: bool,
     hold_flush: bool, // keep building the frame instead of writing it out
+    running_cmd: bool, // a command is running, so the command line isn't being typed in
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -287,6 +288,7 @@ impl WinInfo {
             cmd_history_file: None,
             split_mode: false,
             hold_flush: false,
+            running_cmd: false,
         }
     }
 
@@ -316,20 +318,18 @@ impl WinInfo {
         self.h_offset = self.h_offset.min(self.h_pointer);
     }
 
+    // flush shows the cursor once the frame has moved it into the cell
     pub fn set_write_mode(&mut self, w: bool) {
-        let mut out = std::io::stdout();
         match w {
             true => {
                 self.input_mode = InputMode::Write;
-                let _ = write!(out, "\x1b[?25h");
                 self.cursor.offset = 0usize;
             }
             false => {
                 self.input_mode = InputMode::Scroll;
-                print_bottom!(self, "\x1b[?25l{}", self.focused_content);
+                print_bottom!(self, "{}", self.focused_content);
             }
         }
-        out.flush().unwrap();
     }
 
     pub fn set_command_mode(&mut self, b: bool, col: &Column) {
@@ -344,10 +344,7 @@ impl WinInfo {
                 self.cmd_history_idx = None;
                 self.cmd_draft.clear();
                 self.push_str_to_frame(
-                    &format!(
-                        "\x1b[{};1H\x1b[2K\x1b[0m:\x1b[{};{}H\x1b[?25h",
-                        self.height, self.cursor.line, self.cursor.col
-                    )
+                    &format!("\x1b[{};1H\x1b[2K\x1b[0m:", self.height)
                 );
             }
             false => {
@@ -359,7 +356,12 @@ impl WinInfo {
                     col.width
                 );
                 self.input_mode = InputMode::Scroll;
-                self.push_str_to_frame("\x1b[?25l");
+                // hide the cursor now, but leave what the command changed
+                // for show_workspace to draw (split view draws it there)
+                let changed = mem::replace(&mut self.changed, WinChange::Non);
+                self.flush();
+                self.changed = changed;
+                return;
             }
         }
         self.flush();
@@ -1700,21 +1702,25 @@ impl WinInfo {
         if self.hold_flush {
             return;
         }
-        if self.input_mode != InputMode::Scroll {
-            // show cursor
+        // the cursor stays hidden while the frame moves it around, and is
+        // only shown again once it's back where text is being typed;
+        // otherwise terminals and multiplexers that draw mid-frame
+        // leave it behind wherever the frame last wrote
+        let typing = match self.input_mode {
+            InputMode::Write => true,
+            InputMode::Command => !self.running_cmd,
+            InputMode::Scroll => false,
+        };
+        if typing {
             let (l, c) = self.cursor_pos();
-            let cursor = format!("\x1b[{l};{c}H");
+            let cursor = format!("\x1b[{l};{c}H\x1b[?25h");
             self.push_str_to_frame(&cursor);
         }
-        
+
         let mut out = std::io::stdout();
         // synchronized update: the terminal shows the frame all at once
         // instead of painting it line by line as it arrives
-        if !self.frame.is_empty() {
-            let _ = write!(out, "\x1b[?2026h{}\x1b[?2026l", self.frame);
-        } else {
-            let _ = write!(out, "{}", self.frame);
-        }
+        let _ = write!(out, "\x1b[?2026h\x1b[?25l{}\x1b[?2026l", self.frame);
         out.flush().unwrap();
 
         self.frame = String::new();
@@ -1848,6 +1854,15 @@ impl WinInfo {
     }
 
     pub fn process_command(&mut self, csvs: &mut Csvs) -> SigFlag {
+        // hide the cursor before anything (like an error) is printed
+        self.running_cmd = true;
+        self.flush();
+        let flag = self.run_command(csvs);
+        self.running_cmd = false;
+        flag
+    }
+
+    fn run_command(&mut self, csvs: &mut Csvs) -> SigFlag {
         let input = self.write_buffer.as_string();
         self.push_cmd_history(&input);
         let tokens = Self::tokenize(&input, ' ');
