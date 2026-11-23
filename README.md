@@ -75,7 +75,18 @@ csview currently admits the following key bindings:
 - **ctrl + r**
     - redo the last undone edit
 - **o**
-    - display full content of focused cell to the screen
+    - display full content of focused cell to the screen, wrapped at word boundaries (only words longer than the screen width are cut)
+    - up/down arrows scroll a line; ctrl + up/down page through the content
+    - `:` opens a command line at the bottom (ctrl + q or escape cancels, ctrl + p pastes yanked content):
+        - `f {term}` | `find {term}`: highlights every match in the cell and scrolls to the first one on or below the screen
+            - `n` / `b` jump to the next/previous match
+            - add `-i`/`--case-insensitive` at the end for a case-insensitive search; `f` by itself clears the search
+        - `r {target} {new}` | `replace {target} {new}`: replaces every occurrence of target in the cell (quote values with spaces; `''` replaces with nothing)
+            - add `-i`/`--case-insensitive` at the end to match regardless of case
+            - each replace can be undone with `u` after leaving the view
+        - in both, `\n` stands for a line break and `\t` for a tab (`\\` for a backslash)
+        - `q` | `quit`: leaves the view
+    - any other key leaves the view
 - **number keys**
     - switch to sheets 0-9
 - **Tab** | **Shift-Tab**

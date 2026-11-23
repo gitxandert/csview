@@ -15,7 +15,9 @@ use crate::{
         save_backup, write_to_file,
     },
     platform::{self, poll_stdin, PollEvent, RawMode, GOT_INT, GOT_QUIT, GOT_WINCH, IN_COMMAND},
-    history::Checkpoint,
+    history::{self, Checkpoint},
+    input::split_keys,
+    cell_view::{self, CellView, LineAction, LineEdit},
 };
 
 #[derive(Debug, PartialEq)]
@@ -226,6 +228,7 @@ pub struct WinInfo {
     split_mode: bool,
     hold_flush: bool, // keep building the frame instead of writing it out
     running_cmd: bool, // a command is running, so the command line isn't being typed in
+    pub unread: Vec<u8>, // keys read by the 'o' view after the one that closed it
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -289,6 +292,7 @@ impl WinInfo {
             split_mode: false,
             hold_flush: false,
             running_cmd: false,
+            unread: Vec::new(),
         }
     }
 
@@ -788,114 +792,162 @@ impl WinInfo {
             .collect()
     }
     
-    fn build_focused_content_rows(&self, raw_content: &str) -> Vec<String> {
-        let width = self.width.max(1);
-        let mut rows = Vec::<String>::new();
-        let mut current_row = String::new();
-        let mut active_formatting = String::new();
-        let mut col = 0usize;
-        let mut chars = raw_content.chars().peekable();
-
-        while let Some(c) = chars.next() {
-            match c {
-                '\x1b' => {
-                    let mut seq = String::from(c);
-                    while let Some(next) = chars.next() {
-                        seq.push(next);
-                        if ('@'..='~').contains(&next) {
-                            break;
-                        }
-                    }
-
-                    if seq.ends_with('m') {
-                        if seq == "\x1b[m" || seq == "\x1b[0m" {
-                            active_formatting.clear();
-                        } else {
-                            active_formatting.push_str(&seq);
-                        }
-                    }
-
-                    current_row.push_str(&seq);
-                }
-                '\n' => {
-                    rows.push(current_row);
-                    current_row = active_formatting.clone();
-                    col = 0;
-                }
-                _ => {
-                    current_row.push(c);
-                    col += 1;
-                    if col >= width {
-                        rows.push(current_row);
-                        current_row = active_formatting.clone();
-                        col = 0;
-                    }
-                }
-            }
-        }
-
-        rows.push(current_row);
-        rows
+    // the 'o' view keeps its bottom line for the status and command line
+    fn cell_view_page(&self) -> usize {
+        self.height.saturating_sub(1).max(1)
     }
 
-    fn draw_focused_content_page(&mut self, rows: &[String], row_offset: usize) {
-        let mut display_content = String::new();
+    fn draw_cell_view(&mut self, v: &mut CellView) {
+        let page = self.cell_view_page();
+        let mut frame = v.text.render(&v.rows, v.top, page, &v.matches, v.current);
+        match v.cmd.as_mut() {
+            Some(line) => frame.push_str(&line.render(self.height, self.width)),
+            None => frame.push_str(&format!(
+                "\x1b[{};1H\x1b[2K{}",
+                self.height,
+                v.status(page, self.width)
+            )),
+        }
+        self.push_str_to_frame(&frame);
+        self.flush();
+    }
 
-        for (i, row) in rows.iter().skip(row_offset).take(self.height).enumerate() {
-            if i > 0 {
-                display_content.push('\r');
-                display_content.push('\n');
+    // false closes the view
+    fn cell_view_key(&mut self, key: &[u8], v: &mut CellView, csvs: &mut Csvs) -> bool {
+        let page = self.cell_view_page();
+        if let Some(line) = v.cmd.as_mut() {
+            if key == [16] { // ctrl + p (paste)
+                line.insert_str(&self.yanked);
+                return true;
             }
-            display_content.push_str(row);
+            match line.key(key) {
+                LineAction::Edit => (),
+                LineAction::Cancel => v.cmd = None,
+                LineAction::Submit(input) => {
+                    v.cmd = None;
+                    return self.run_cell_view_cmd(v, &input, csvs);
+                }
+            }
+            return true;
         }
 
-        self.push_str_to_frame(&format!("\x1b[1;1H\x1b[2J{}", display_content));
-        self.flush();
+        v.msg.clear();
+        match key {
+            [27, 91, 65] => v.scroll(-1, page), // up
+            [27, 91, 66] => v.scroll(1, page), // down
+            [27, 91, 49, 59, 53, 65] => v.scroll(-(page as isize), page), // ctrl + up
+            [27, 91, 49, 59, 53, 66] => v.scroll(page as isize, page), // ctrl + down
+            [b':'] => v.cmd = Some(LineEdit::default()),
+            [b'n'] if v.current.is_some() => v.step(true, page),
+            [b'b'] if v.current.is_some() => v.step(false, page),
+            _ => return false,
+        }
+        true
+    }
+
+    // f/find {term} [-i], r/replace {target} {new} [-i], q/quit
+    fn run_cell_view_cmd(&mut self, v: &mut CellView, input: &str, csvs: &mut Csvs) -> bool {
+        let page = self.cell_view_page();
+        let mut tokens = Self::tokenize(input.trim_start(), ' ');
+        let insensitive = matches!(tokens.last(), Some(&"-i") | Some(&"--case-insensitive"));
+        if insensitive {
+            tokens.pop();
+        }
+        match tokens[0] {
+            "" => (),
+            "q" | "quit" => return false,
+            "f" | "find" => {
+                // the rest of the line is the term, spaces and all
+                let term = Self::trim_quotes(&tokens[1..].join(" "));
+                v.search(&term, cell_view::unescape(&term), insensitive, page);
+                if v.matches.is_empty() && !term.is_empty() {
+                    v.msg = format!("No instance of '{}'", v.term);
+                }
+            }
+            "r" | "replace" => {
+                let args: Vec<String> = tokens[1..]
+                    .iter()
+                    .filter(|t| !t.is_empty())
+                    .map(|t| Self::trim_quotes(t))
+                    .collect();
+                let [target, new] = &args[..] else {
+                    v.msg = "Use r {target} {new} [-i]; quote values with spaces".to_string();
+                    return true;
+                };
+                let count = v.text.replace(
+                    &cell_view::unescape(target),
+                    &cell_view::unescape(new),
+                    insensitive,
+                );
+                if count == 0 {
+                    v.msg = format!("No instance of '{}'", target);
+                    return true;
+                }
+
+                let cells = csvs.get_cells();
+                let cell = cells.w_cell();
+                let old = cell.clone();
+                let mut edited = Cell::new(&v.text.to_raw());
+                edited.width = old.width;
+                edited.is_focused = old.is_focused;
+                *cell = edited;
+                self.set_focused(&cell.content);
+                cells.written = true;
+                history::record_cell(csvs, old);
+
+                v.relayout(self.width, page);
+                v.research(page);
+                v.msg = format!("Replaced {} {}", count, if count == 1 { "match" } else { "matches" });
+            }
+            other => v.msg = format!("Unknown command '{}' (f/find, r/replace, q/quit)", other),
+        }
+        true
     }
 
     pub fn display_focused_content(&mut self, csvs: &mut Csvs) {
         let raw_content = csvs.get_cells().w_cell().raw_content();
-        let mut rows = self.build_focused_content_rows(&raw_content);
-        let mut row_offset = 0usize;
+        let mut v = CellView::new(&raw_content);
+        v.relayout(self.width, self.cell_view_page());
+        self.draw_cell_view(&mut v);
 
-        self.draw_focused_content_page(&rows, row_offset);
+        let mut buf = [0u8; 1024];
+        // keys typed right after 'o', then bytes that don't make up a whole key yet
+        let mut pending = mem::take(&mut self.unread);
+        'view: loop {
+            let (keys, _) = split_keys(&pending);
+            let got_keys = !keys.is_empty();
+            let mut used = 0usize;
+            for key in keys {
+                used += key.len();
+                if !self.cell_view_key(key, &mut v, csvs) {
+                    // the main loop handles whatever came after
+                    self.unread = pending[used..].to_vec();
+                    break 'view;
+                }
+            }
+            pending.drain(..used);
+            if got_keys {
+                self.draw_cell_view(&mut v);
+            }
 
-        let mut buf = [0u8; 3];
-        loop {
             match poll_stdin(&mut buf) {
                 Ok(PollEvent::Sig) => {
                     match check_flags() {
                         SigFlag::Winch => {
                             self.update_size();
-                            rows = self.build_focused_content_rows(&raw_content);
-                            row_offset = row_offset.min(rows.len().saturating_sub(1));
-                            self.draw_focused_content_page(&rows, row_offset);
+                            let page = self.cell_view_page();
+                            v.relayout(self.width, page);
+                            v.show_match(page);
+                            self.draw_cell_view(&mut v);
                         }
                         SigFlag::Int | SigFlag::Quit => continue, // will never catch
                         SigFlag::Non => break, // must've been quit/int
                     }
                 }
-                Ok(PollEvent::Data(0)) => continue,
-                Ok(PollEvent::Data(n)) => {
-                    match &buf[..n] {
-                        [27, 91, 65] => {
-                            row_offset = row_offset.saturating_sub(1);
-                            self.draw_focused_content_page(&rows, row_offset);
-                        }
-                        [27, 91, 66] => {
-                            row_offset = (row_offset + 1).min(rows.len().saturating_sub(1));
-                            self.draw_focused_content_page(&rows, row_offset);
-                        }
-                        _ => break,
-                    }
-                }
+                Ok(PollEvent::Data(n)) => pending.extend_from_slice(&buf[..n]),
                 Err(e) => {
-                    print_bottom!(
-                        self,
-                        "ERR: {}",
-                        e
-                    );
-                    self.flush();
+                    v.msg = format!("ERR: {}", e);
+                    self.draw_cell_view(&mut v);
                 }
             }
         }
@@ -6091,6 +6143,45 @@ mod tests {
         let mut win = command_win();
         win.set_context(csvs.get_context());
         (csvs, win)
+    }
+
+    #[test]
+    fn cell_view_find_replace_and_page() {
+        let cells = cells_with_rows("o.csv", vec!["a"], vec![vec!["one two\nthree two"]]);
+        let mut csvs = Csvs::new(vec![Context::new(0, cells)]);
+        let mut win = command_win();
+        win.width = 8;
+        win.height = 3; // two rows of text and the status line
+        win.set_context(csvs.get_context());
+        let mut v = CellView::new(&csvs.get_cells().w_cell().raw_content());
+        v.relayout(win.width, win.cell_view_page());
+        assert_eq!(v.rows.len(), 3); // "one two" / "three" / "two"
+
+        assert!(win.cell_view_key(b"\x1b[1;5B", &mut v, &mut csvs)); // ctrl + down
+        assert_eq!(v.top, 1); // last full page
+        assert!(win.cell_view_key(b"\x1b[1;5A", &mut v, &mut csvs)); // ctrl + up
+        assert_eq!(v.top, 0);
+
+        assert!(win.run_cell_view_cmd(&mut v, "f two", &mut csvs));
+        assert_eq!(v.matches.len(), 2);
+        assert!(win.cell_view_key(b"n", &mut v, &mut csvs));
+        assert_eq!(v.current, Some(1));
+        assert_eq!(v.top, 1); // scrolled to the second match
+
+        assert!(win.run_cell_view_cmd(&mut v, "r TWO '2 2' -i", &mut csvs));
+        assert_eq!(v.msg, "Replaced 2 matches");
+        assert_eq!(csvs.get_cells().w_cell().raw_content(), "one 2 2\nthree 2 2");
+        assert!(csvs.get_cells().written);
+
+        assert!(win.run_cell_view_cmd(&mut v, "r \\n ' '", &mut csvs));
+        assert_eq!(csvs.get_cells().w_cell().raw_content(), "one 2 2 three 2 2");
+
+        assert!(crate::history::undo(&mut csvs, &mut win));
+        assert!(crate::history::undo(&mut csvs, &mut win));
+        assert_eq!(csvs.get_cells().w_cell().raw_content(), "one two\nthree two");
+
+        assert!(!win.run_cell_view_cmd(&mut v, "q", &mut csvs));
+        assert!(!win.cell_view_key(b"x", &mut v, &mut csvs)); // other keys close
     }
 
     fn goto(csvs: &mut Csvs, win: &mut WinInfo, target: &str) {

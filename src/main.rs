@@ -1,8 +1,10 @@
 use std::{
     env,
     io::{self, Write},
+    mem,
 };
 
+mod cell_view;
 mod cells;
 mod cmd_err;
 mod csv_io;
@@ -95,14 +97,20 @@ fn main() {
             Ok(PollEvent::Data(0)) => continue,
             Ok(PollEvent::Data(n)) => {
                 pending.extend_from_slice(&buffer[..n]);
-                let (keys, rest) = split_keys(&pending);
-                for key in keys {
-                    match process_input(key, &mut w_info, &mut csvs) {
+                loop {
+                    let (keys, _) = split_keys(&pending);
+                    let Some(len) = keys.first().map(|k| k.len()) else { break };
+                    let key: Vec<u8> = pending.drain(..len).collect();
+                    // the keys after this one go with it, so a view it opens
+                    // (like 'o') reads them, and hands back what it didn't use
+                    w_info.unread = mem::take(&mut pending);
+                    let flag = process_input(&key, &mut w_info, &mut csvs);
+                    pending = mem::take(&mut w_info.unread);
+                    match flag {
                         SigFlag::Quit => break 'main,
                         _ => w_info.show_workspace(&mut csvs),
                     }
                 }
-                pending.drain(..pending.len() - rest);
             }
             Ok(PollEvent::Sig) => {
                 match check_flags() {
