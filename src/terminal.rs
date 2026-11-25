@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     mem,
     io::Write,
     path::{Path, PathBuf},
@@ -2087,6 +2087,9 @@ impl WinInfo {
                 }
             }
             "u"  | "unique"  => self.show_unique_column_values(csvs),
+            "fd" | "find-dups" => {
+                self.find_dups_in_col(csvs, &tokens[2..])
+            }
             "s"  | "sort"    => {
                 let mut s_dir = Sort::AscAlph;
                 match tokens.get(2) {
@@ -2984,6 +2987,143 @@ impl WinInfo {
                         e
                     );
                     self.flush();
+                }
+            }
+        }
+
+        self.draw_focused_content();
+        self.flush();
+    }
+
+    // rows of every non-blank value that shows up more than once,
+    // in display order and ordered by each value's first row
+    fn duplicate_groups(col: &Column) -> Vec<Vec<usize>> {
+        let mut groups = Vec::<Vec<usize>>::new();
+        let mut group_of = HashMap::<&str, usize>::new();
+        for row in 0..col.visible_len() {
+            let content = col.view_cell(row);
+            if content.is_empty() {
+                continue;
+            }
+            match group_of.get(content) {
+                Some(&g) => groups[g].push(row),
+                None => {
+                    group_of.insert(content, groups.len());
+                    groups.push(vec![row]);
+                }
+            }
+        }
+        groups.retain(|rows| rows.len() > 1);
+        groups
+    }
+
+    // the other rows, in the row ids' hex; a long list is cut short
+    // so the value still fits on the status line
+    fn dups_message(rows: &[usize]) -> String {
+        const SHOWN: usize = 8;
+        let others = &rows[1..];
+        let ids = others
+            .iter()
+            .take(SHOWN)
+            .map(|row| format!("{:04X}", row))
+            .collect::<Vec<String>>()
+            .join(", ");
+        if others.len() > SHOWN {
+            format!("dups at {} (+{} more)", ids, others.len() - SHOWN)
+        } else {
+            format!("dups at {}", ids)
+        }
+    }
+
+    // keeps only the rows in groups, and renumbers the groups' rows
+    // to where they land
+    fn filter_to_groups(col: &mut Column, groups: &mut [Vec<usize>]) {
+        let mut rows = groups.concat();
+        rows.sort_unstable();
+        Self::apply_column_filter(col, &rows);
+        for row in groups.iter_mut().flatten() {
+            *row = rows.binary_search(row).unwrap();
+        }
+    }
+
+    fn find_dups_in_col(&mut self, csvs: &mut Csvs, options: &[&str]) {
+        let mut filter = false;
+        for opt in options {
+            match *opt {
+                "-f" | "--filter" => filter = true,
+                _ => {
+                    cmd_err::print(
+                        CmdErr::InvalidOption(opt),
+                        self.height
+                    );
+                    return;
+                }
+            }
+        }
+
+        let cells = csvs.get_cells();
+        let mut groups = Self::duplicate_groups(&cells.columns[self.w_pointer]);
+        if groups.is_empty() {
+            print_bottom!(
+                self,
+                "No duplicate values in '{}'",
+                cells.header[self.w_pointer].content
+            );
+            self.flush();
+            return;
+        }
+
+        if filter {
+            Self::filter_to_groups(&mut cells.columns[self.w_pointer], &mut groups);
+            // the sheet shrinks if this was its longest column
+            self.num_rows = cells.visible_rows();
+
+            cells.set_w_cell(self.w_pointer, 0);
+            cells.written = true;
+            self.draw_screen(cells);
+        }
+
+        let firsts = groups.iter().map(|rows| rows[0]).collect::<Vec<usize>>();
+        let messages = groups
+            .iter()
+            .map(|rows| Self::dups_message(rows))
+            .collect::<Vec<String>>();
+
+        // start with the first value on or below the focus
+        let mut idx = firsts
+            .iter()
+            .position(|&row| row >= self.h_pointer)
+            .unwrap_or(0);
+
+        self.push_str_to_frame("\x1b[?25l");
+        self.draw_col_find(csvs, idx, &firsts, &messages[idx]);
+
+        let mut buf = [0u8; 1];
+        loop {
+            match poll_stdin(&mut buf) {
+                Ok(PollEvent::Sig) => {
+                    match check_flags() {
+                        SigFlag::Winch => {
+                            self.set_w_h(csvs);
+                            self.draw_col_find(csvs, idx, &firsts, &messages[idx]);
+                        }
+                        SigFlag::Int | SigFlag::Quit => continue, // will never catch
+                        SigFlag::Non => break, // must've been quit/int
+                    }
+                }
+                Ok(PollEvent::Data(0)) => continue,
+                Ok(PollEvent::Data(n)) => {
+                    match &buf[..n] {
+                        [b'n'] => idx = (idx + 1) % firsts.len(),
+                        [b'b'] => idx = (idx + firsts.len() - 1) % firsts.len(),
+                        _ => break,
+                    }
+                    self.draw_col_find(csvs, idx, &firsts, &messages[idx]);
+                    buf[0] = 0u8;
+                }
+                _ => {
+                    cmd_err::print(CmdErr::StdinErr("col find-dups"), self.height);
+                    break;
                 }
             }
         }
@@ -5922,6 +6062,57 @@ mod tests {
         }
         assert_eq!(column_values(&cells, 0), vec!["a0", "a1", "a2", "a3", "a4"]);
         assert_eq!(column_values(&cells, 1), vec!["b0", "b1", "b2", "b3", "b4"]);
+    }
+
+    #[test]
+    fn duplicate_groups_follow_display_order_and_skip_blanks() {
+        let mut cells = cells_with_rows(
+            "dup_column.csv",
+            vec!["A"],
+            vec![
+                vec!["b"], vec!["a"], vec![""], vec!["b"],
+                vec!["c"], vec!["a"], vec![""], vec!["b"],
+            ],
+        );
+        assert_eq!(
+            WinInfo::duplicate_groups(&cells.columns[0]),
+            vec![vec![0, 3, 7], vec![1, 5]]
+        );
+        assert_eq!(WinInfo::dups_message(&[0, 3, 26]), "dups at 0003, 001A");
+        assert_eq!(
+            WinInfo::dups_message(&(0..12).collect::<Vec<usize>>()),
+            "dups at 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008 (+3 more)"
+        );
+
+        WinInfo::sort_indices(&mut cells.columns[0], Sort::AscAlph);
+        let groups = WinInfo::duplicate_groups(&cells.columns[0]);
+        let col = &cells.columns[0];
+        assert_eq!(groups.len(), 2);
+        for rows in &groups {
+            assert!(rows.windows(2).all(|w| w[0] < w[1]));
+            assert!(rows.iter().all(|&r| col.view_cell(r) == col.view_cell(rows[0])));
+        }
+    }
+
+    #[test]
+    fn duplicate_filter_keeps_dup_rows_and_renumbers_groups() {
+        let mut cells = cells_with_rows(
+            "dup_filter_column.csv",
+            vec!["A"],
+            vec![vec!["b"], vec!["x"], vec!["a"], vec!["b"], vec![""], vec!["a"]],
+        );
+        let col = &mut cells.columns[0];
+        let mut groups = WinInfo::duplicate_groups(col);
+
+        WinInfo::filter_to_groups(col, &mut groups);
+
+        assert_eq!(groups, vec![vec![0, 2], vec![1, 3]]);
+        assert_eq!(
+            (0..4).map(|r| col.view_cell(r).to_string()).collect::<Vec<String>>(),
+            vec!["b", "a", "b", "a"]
+        );
+        col.revert();
+        assert_eq!(column_values(&cells, 0), vec!["b", "x", "a", "b", "", "a"]);
     }
 
     #[test]

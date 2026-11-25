@@ -122,6 +122,11 @@ csview also has a command mode, accessed through ':' :
             - 'n': next
             - 'b': back
             - any other key returns to normal scrolling
+    - `col fd {-f}` | `col find-dups {-f}`
+        - steps through the values in the focused column that occur more than once, skipping blank cells
+        - each stop is the value's first row, and the status line lists the row ids of its other occurrences
+        - 'n' moves to the next duplicated value, 'b' to the previous one, and any other key returns to normal scrolling
+        - optional flag `-f`/`--filter` filters the focused column to the rows whose values are duplicated
     - `col n '{name}'` | `col new '{name}'`
         - creates a new column with the provided column name at the focused location
     - `col rm '{name}'` | `col remove '{name}'`
