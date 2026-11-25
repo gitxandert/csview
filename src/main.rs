@@ -55,6 +55,29 @@ fn main() {
         }
     }
 
+    // piped input (like `fdfind | csview`): a list of existing files opens
+    // each file, anything else is a sheet of its own. Keys then come from
+    // the terminal instead of the pipe
+    let mut piped = None;
+    if !io::stdin().is_terminal() {
+        let mut bytes = Vec::new();
+        if let Err(e) = io::stdin().read_to_end(&mut bytes) {
+            println!("Error reading stdin: {e}");
+            return;
+        }
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.is_empty()).collect();
+        if !lines.is_empty() && lines.iter().all(|l| std::path::Path::new(l).is_file()) {
+            filenames.extend(lines.iter().map(|l| l.to_string()));
+        } else if !lines.is_empty() {
+            piped = Some(text);
+        }
+        if let Err(e) = platform::reattach_stdin() {
+            println!("Error opening the terminal for input: {e}");
+            return;
+        }
+    }
+
     let mut contexts = Vec::<Context>::new();
     let mut id = 0usize;
     for f in filenames {
@@ -64,33 +87,18 @@ fn main() {
                 id += 1;
             }
             Err(e) => {
-                println!("Error loading csv: {e}");
+                println!("Error loading csv {f}: {e}");
                 return;
             }
         };
     }
-
-    // piped input (like `fdfind | csview`) is a sheet of its own; keys then
-    // come from the terminal instead of the pipe
-    if !io::stdin().is_terminal() {
-        let mut bytes = Vec::new();
-        if let Err(e) = io::stdin().read_to_end(&mut bytes) {
-            println!("Error reading stdin: {e}");
-            return;
-        }
-        let text = String::from_utf8_lossy(&bytes).into_owned();
-        if !text.trim().is_empty() {
-            match load_csv_text("stdin.csv".to_string(), text, delimiter) {
-                Ok(csv) => contexts.push(Context::new(id, csv)),
-                Err(e) => {
-                    println!("Error loading stdin: {e}");
-                    return;
-                }
+    if let Some(text) = piped {
+        match load_csv_text("stdin.csv".to_string(), text, delimiter) {
+            Ok(csv) => contexts.push(Context::new(id, csv)),
+            Err(e) => {
+                println!("Error loading stdin: {e}");
+                return;
             }
-        }
-        if let Err(e) = platform::reattach_stdin() {
-            println!("Error opening the terminal for input: {e}");
-            return;
         }
     }
 

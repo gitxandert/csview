@@ -29,9 +29,9 @@ To run csview:
 
 Run it with no file to start on an empty sheet named Untitled.csv: one "Unnamed" column with enough rows to fill the screen. Nothing is written to disk unless you save it.
 
-You can also pipe text in, and it opens as a sheet named stdin.csv (keys are then read from the terminal):
+You can also pipe input in (keys are then read from the terminal). If every line names an existing file, each file opens as a sheet; anything else opens as one sheet named stdin.csv:
 
-    fdfind -e py | csview
+    fdfind -e csv | csview
     some_command | csview -d t
 
 There is an argument -d/--delimiter that is default set to ',', but can take any other single char as an argument ('t' = tab): 
