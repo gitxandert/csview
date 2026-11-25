@@ -187,7 +187,12 @@ fn parse_csv_into_cells(filename: String, csv: String, delim: char) -> Result<Ce
 }
 
 pub fn load_csv(filename: String, delim: char) -> Result<Cells, io::Error> {
-    let mut file = fs::read_to_string(filename.clone())?;
+    let file = fs::read_to_string(filename.clone())?;
+    load_csv_text(filename, file, delim)
+}
+
+// a sheet from text that didn't come from a file, like piped stdin
+pub fn load_csv_text(filename: String, mut file: String, delim: char) -> Result<Cells, io::Error> {
     let crlf = file.contains("\r\n");
     // CRLF line endings become plain newlines; a stray carriage return would
     // move the cursor when drawn, so it becomes a space

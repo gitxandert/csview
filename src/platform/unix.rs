@@ -87,6 +87,16 @@ pub fn poll_stdin(buf: &mut [u8]) -> Result<PollEvent, io::Error> {
     Ok(PollEvent::Data(0))
 }
 
+// point stdin at the controlling terminal, so keys can be read after piped
+// input has been used up
+pub fn reattach_stdin() -> Result<(), io::Error> {
+    let tty = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty")?;
+    if unsafe { libc::dup2(std::os::fd::AsRawFd::as_raw_fd(&tty), STDIN_FILENO) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 // plain blocking read, for line editing
 pub fn read_stdin(buf: &mut [u8]) -> Result<usize, io::Error> {
     io::stdin().read(buf)

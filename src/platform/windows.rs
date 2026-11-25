@@ -11,11 +11,15 @@ use std::{
     sync::{atomic::Ordering, Mutex},
 };
 use windows_sys::Win32::{
-    Foundation::{GlobalFree, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT},
+    Foundation::{
+        GlobalFree, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
+        WAIT_TIMEOUT,
+    },
+    Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING},
     System::{
         Console::{
             GetConsoleMode, GetConsoleScreenBufferInfo, GetStdHandle, ReadConsoleInputW,
-            SetConsoleMode, CONSOLE_SCREEN_BUFFER_INFO, DISABLE_NEWLINE_AUTO_RETURN,
+            SetConsoleMode, SetStdHandle, CONSOLE_SCREEN_BUFFER_INFO, DISABLE_NEWLINE_AUTO_RETURN,
             ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
             ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_INPUT,
             ENABLE_VIRTUAL_TERMINAL_PROCESSING, ENABLE_WINDOW_INPUT, INPUT_RECORD, KEY_EVENT,
@@ -58,6 +62,27 @@ static INPUT: Mutex<InputState> = Mutex::new(InputState {
 
 fn stdin_handle() -> HANDLE {
     unsafe { GetStdHandle(STD_INPUT_HANDLE) }
+}
+
+// point stdin at the console, so keys can be read after piped input has
+// been used up
+pub fn reattach_stdin() -> Result<(), io::Error> {
+    let name: Vec<u16> = "CONIN$\0".encode_utf16().collect();
+    let handle = unsafe {
+        CreateFileW(
+            name.as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            ptr::null(),
+            OPEN_EXISTING,
+            0,
+            ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE || unsafe { SetStdHandle(STD_INPUT_HANDLE, handle) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 fn stdout_handle() -> HANDLE {

@@ -29,6 +29,11 @@ To run csview:
 
 Run it with no file to start on an empty sheet named Untitled.csv: one "Unnamed" column with enough rows to fill the screen. Nothing is written to disk unless you save it.
 
+You can also pipe text in, and it opens as a sheet named stdin.csv (keys are then read from the terminal):
+
+    fdfind -e py | csview
+    some_command | csview -d t
+
 There is an argument -d/--delimiter that is default set to ',', but can take any other single char as an argument ('t' = tab): 
     
     csview -d : some_colon_separated_file

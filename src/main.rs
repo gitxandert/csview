@@ -1,6 +1,6 @@
 use std::{
     env,
-    io::{self, Write},
+    io::{self, IsTerminal, Read, Write},
     mem,
 };
 
@@ -17,7 +17,7 @@ use crate::{
     cells::{Context, Csvs},
     input::{process_input, split_keys},
     terminal::{check_flags, is_delimiter, SigFlag, WinInfo},
-    csv_io::{blank_csv, cmd_history_path, load_csv, save_backup, write_to_file},
+    csv_io::{blank_csv, cmd_history_path, load_csv, load_csv_text, save_backup, write_to_file},
     platform::{poll_stdin, PollEvent, RawMode},
 };
 
@@ -68,6 +68,30 @@ fn main() {
                 return;
             }
         };
+    }
+
+    // piped input (like `fdfind | csview`) is a sheet of its own; keys then
+    // come from the terminal instead of the pipe
+    if !io::stdin().is_terminal() {
+        let mut bytes = Vec::new();
+        if let Err(e) = io::stdin().read_to_end(&mut bytes) {
+            println!("Error reading stdin: {e}");
+            return;
+        }
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        if !text.trim().is_empty() {
+            match load_csv_text("stdin.csv".to_string(), text, delimiter) {
+                Ok(csv) => contexts.push(Context::new(id, csv)),
+                Err(e) => {
+                    println!("Error loading stdin: {e}");
+                    return;
+                }
+            }
+        }
+        if let Err(e) = platform::reattach_stdin() {
+            println!("Error opening the terminal for input: {e}");
+            return;
+        }
     }
 
     let mut w_info = WinInfo::new();
